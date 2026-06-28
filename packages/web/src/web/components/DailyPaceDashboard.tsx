@@ -288,7 +288,7 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
           <button
             onClick={() => {
               const url = `${window.location.origin}/mini-pace`;
-              window.open(url, 'wrvu-mini-pace', 'width=900,height=420,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no');
+              window.open(url, 'wrvu-mini-pace', 'width=700,height=300,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no');
             }}
             title="Open compact companion display on second monitor"
             className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 text-sm font-medium hover:bg-white/10 hover:text-white transition-all flex items-center gap-1.5"
