@@ -360,7 +360,16 @@ export function Profiles({ onNavigate, initialEditId }: ProfilesProps) {
 
   if (editing && editing !== 'new') {
     const profile = profiles.find((p) => p.id === editing);
-    if (!profile) return null;
+    // Profile not found (still loading or deleted) — fall back to list
+    if (!profile) {
+      if (profiles.length === 0) {
+        // Still loading — show nothing momentarily (won't flash because profiles load fast)
+        return null;
+      }
+      // Profile ID is stale/invalid — reset to list
+      setTimeout(() => setEditing(null), 0);
+      return null;
+    }
     return (
       <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
         <div className="flex items-center gap-3">

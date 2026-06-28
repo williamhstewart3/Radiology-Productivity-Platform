@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Component } from 'react';
+import type { ReactNode } from 'react';
 import { Route, Switch } from 'wouter';
 import { useAppInitialization } from './hooks/useAppInitialization';
 import { OrgProvider } from './contexts/OrgContext';
@@ -20,6 +21,48 @@ import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
 type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles';
+
+// ── Error boundary — catches crashes in page components ───────────────────────
+class PageErrorBoundary extends Component<
+  { children: ReactNode; tab: string },
+  { error: Error | null }
+> {
+  constructor(props: { children: ReactNode; tab: string }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidUpdate(prev: { tab: string }) {
+    // Clear error when tab changes so navigating away resets the boundary
+    if (prev.tab !== this.props.tab && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="max-w-2xl mx-auto py-16 text-center space-y-4">
+          <div className="text-4xl">⚠️</div>
+          <p className="font-semibold" style={{ color: 'var(--theme-behind)' }}>
+            Something went wrong
+          </p>
+          <p className="text-sm max-w-md mx-auto" style={{ color: 'var(--theme-text-muted)' }}>
+            {this.state.error.message}
+          </p>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="px-4 py-2 rounded-lg text-sm font-medium btn-primary"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const NAV_ITEMS: { id: Tab; label: string; icon: string }[] = [
   { id: 'pace',      label: 'Daily Pace', icon: '⚡' },
@@ -173,15 +216,17 @@ function MainApp() {
         {/* ── Page content ─────────────────────────────────────────────── */}
         <main className="flex-1 overflow-auto">
           <div className="max-w-7xl mx-auto px-4 py-6">
-            {activeTab === 'pace'          && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
-            {activeTab === 'dashboard'     && <Dashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
-            {activeTab === 'log'           && <LogStudy onSaved={() => setActiveTab('pace')} />}
-            {activeTab === 'import'        && <Import onImported={() => setActiveTab('pace')} />}
-            {activeTab === 'history'       && <History />}
-            {activeTab === 'settings'      && <Settings />}
-            {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
-            {activeTab === 'watcher'       && <WatcherPage onNavigateToImport={() => setActiveTab('import')} />}
-            {activeTab === 'profiles'      && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} initialEditId={activeProfile?.id ?? null} />}
+            <PageErrorBoundary tab={activeTab}>
+              {activeTab === 'pace'          && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
+              {activeTab === 'dashboard'     && <Dashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
+              {activeTab === 'log'           && <LogStudy onSaved={() => setActiveTab('pace')} />}
+              {activeTab === 'import'        && <Import onImported={() => setActiveTab('pace')} />}
+              {activeTab === 'history'       && <History />}
+              {activeTab === 'settings'      && <Settings />}
+              {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
+              {activeTab === 'watcher'       && <WatcherPage onNavigateToImport={() => setActiveTab('import')} />}
+              {activeTab === 'profiles'      && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} initialEditId={activeProfile?.id ?? null} />}
+            </PageErrorBoundary>
           </div>
         </main>
 

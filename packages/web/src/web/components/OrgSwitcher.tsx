@@ -68,13 +68,15 @@ interface RadiologistRowProps {
   profile: RadiologistProfile;
   isActive: boolean;
   onSelect: () => void;
+  onEditProfile?: () => void; // called instead of onSelect when active
 }
 
-function RadiologistRow({ profile, isActive, onSelect }: RadiologistRowProps) {
+function RadiologistRow({ profile, isActive, onSelect, onEditProfile }: RadiologistRowProps) {
   const c = colors(profile.color);
+  const handleClick = isActive && onEditProfile ? onEditProfile : onSelect;
   return (
     <button
-      onClick={onSelect}
+      onClick={handleClick}
       style={{
         width: '100%',
         display: 'flex', alignItems: 'center', gap: 10,
@@ -111,10 +113,17 @@ function RadiologistRow({ profile, isActive, onSelect }: RadiologistRowProps) {
         </p>
       </div>
       {isActive && (
-        <div style={{
-          width: 6, height: 6, borderRadius: '50%',
-          background: c.dot, flexShrink: 0,
-        }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {onEditProfile && (
+            <span style={{ fontSize: 10, color: theme.colors.textMuted, letterSpacing: '0.02em' }}>
+              Edit
+            </span>
+          )}
+          <div style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: c.dot,
+          }} />
+        </div>
       )}
     </button>
   );
@@ -250,6 +259,7 @@ export function OrgSwitcher({ onManage, onMyProfile }: OrgSwitcherProps) {
                           await switchRadiologist(profile.id);
                           setOpen(false);
                         }}
+                        onEditProfile={onMyProfile ? () => { setOpen(false); onMyProfile(); } : undefined}
                       />
                     ))}
                   </div>
@@ -267,6 +277,7 @@ export function OrgSwitcher({ onManage, onMyProfile }: OrgSwitcherProps) {
                       await switchRadiologist(profile.id);
                       setOpen(false);
                     }}
+                    onEditProfile={onMyProfile ? () => { setOpen(false); onMyProfile(); } : undefined}
                   />
                 ))}
               </div>
@@ -275,36 +286,6 @@ export function OrgSwitcher({ onManage, onMyProfile }: OrgSwitcherProps) {
 
           {/* Footer */}
           <div style={{ borderTop: `1px solid ${theme.colors.border}`, padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {onMyProfile && (
-              <button
-                onClick={() => { setOpen(false); onMyProfile(); }}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '8px 12px', borderRadius: 8,
-                  background: 'transparent',
-                  border: 'none', cursor: 'pointer',
-                  color: theme.colors.textSecondary, fontSize: 13, fontWeight: 500,
-                  transition: 'background 0.15s ease, color 0.15s ease',
-                }}
-                onMouseEnter={(e) => {
-                  const btn = e.currentTarget as HTMLButtonElement;
-                  btn.style.background = `rgba(91,184,212,0.1)`;
-                  btn.style.color = theme.colors.accent;
-                }}
-                onMouseLeave={(e) => {
-                  const btn = e.currentTarget as HTMLButtonElement;
-                  btn.style.background = 'transparent';
-                  btn.style.color = theme.colors.textSecondary;
-                }}
-              >
-                <ProfileAvatar
-                  initials={activeProfile.initials}
-                  color={activeProfile.color}
-                  size="xs"
-                />
-                My Profile
-              </button>
-            )}
             <button
               onClick={() => { setOpen(false); onManage(); }}
               style={{
