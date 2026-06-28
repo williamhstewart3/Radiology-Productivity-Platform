@@ -190,6 +190,12 @@ export interface UserSettings {
   // PowerScribe Watcher settings
   watchFolderPath: string | null;
   autoDeleteProcessed: boolean;
+  // Camera capture / PHI protection
+  /**
+   * When true (the default), the crop step is mandatory before OCR runs on
+   * camera-captured images. Disabling this triggers a PHI warning modal.
+   */
+  requireCropBeforeOcr: boolean;
 }
 
 /** Color accent for a radiologist profile, practice, or org. */

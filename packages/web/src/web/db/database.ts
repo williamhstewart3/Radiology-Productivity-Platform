@@ -136,6 +136,25 @@ export class RvuDatabase extends Dexie {
         }
       });
     });
+
+    // v8: adds requireCropBeforeOcr to userSettings (default true — PHI protection).
+    //     Same stores, no index changes needed.
+    this.version(8).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, aliasText, cptCode, canonicalExamName',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      return trans.table('userSettings').toCollection().modify((settings) => {
+        if (!('requireCropBeforeOcr' in settings)) {
+          settings.requireCropBeforeOcr = true; // default ON — protect PHI
+        }
+      });
+    });
   }
 }
 
@@ -165,6 +184,7 @@ export async function ensureUserSettings(): Promise<UserSettings> {
     breakMinutes: 0,
     watchFolderPath: null,
     autoDeleteProcessed: false,
+    requireCropBeforeOcr: true,
   };
   await db.userSettings.put(defaults);
   return defaults;

@@ -605,6 +605,90 @@ export function Settings() {
         </div>
       )}
 
+      {/* Camera Capture / PHI Protection */}
+      <div className="card space-y-4">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Camera Capture</h2>
+          <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+            style={{ background: 'rgba(91,184,212,0.15)', color: theme.colors.accent, border: `1px solid rgba(91,184,212,0.25)` }}>
+            PHI Protection
+          </span>
+        </div>
+        <p className="text-xs text-slate-400 leading-relaxed">
+          When photographing the PowerScribe list from a phone, mandatory cropping
+          ensures patient identifiers (name, MRN, DOB, room) are excluded before
+          OCR runs. This setting should remain <strong className="text-white">ON</strong> in
+          all clinical environments.
+        </p>
+
+        {/* Require crop toggle */}
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-white font-medium">Require crop before OCR</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {settings?.requireCropBeforeOcr !== false
+                ? 'ON — mandatory crop step protects patient identifiers'
+                : '⚠ OFF — full photos sent to OCR without PHI removal'}
+            </p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              className="sr-only"
+              checked={settings?.requireCropBeforeOcr !== false}
+              onChange={async () => {
+                const s = settings;
+                if (!s) return;
+                const newVal = s.requireCropBeforeOcr === false ? true : false;
+                if (!newVal) {
+                  // Confirm before disabling
+                  const ok = window.confirm(
+                    '⚠ PHI Warning\n\n' +
+                    'Disabling crop before OCR may expose patient identifiers.\n\n' +
+                    'Full PowerScribe screenshots contain: patient name, MRN, DOB, room number, and account number.\n\n' +
+                    'Only disable this in fully de-identified demo/testing scenarios.\n\n' +
+                    'Continue?',
+                  );
+                  if (!ok) return;
+                }
+                await db.userSettings.put({ ...s, requireCropBeforeOcr: newVal, updatedAt: new Date().toISOString() });
+              }}
+            />
+            <div
+              className="w-11 h-6 rounded-full transition-colors duration-200"
+              style={{
+                background: settings?.requireCropBeforeOcr !== false ? theme.colors.primary : theme.colors.bgDeep,
+                border: `1px solid ${settings?.requireCropBeforeOcr !== false ? theme.colors.primary : theme.colors.border}`,
+              }}
+            >
+              <span
+                className="inline-block h-4 w-4 rounded-full bg-white shadow transition-transform mt-0.5"
+                style={{ transform: settings?.requireCropBeforeOcr !== false ? 'translateX(22px)' : 'translateX(2px)' }}
+              />
+            </div>
+          </label>
+        </div>
+
+        {settings?.requireCropBeforeOcr === false && (
+          <div className="px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/25">
+            <p className="text-red-400 text-xs font-medium">
+              ⚠ Crop requirement is disabled. Enable it before using Camera Capture in a clinical setting.
+            </p>
+          </div>
+        )}
+
+        {/* Privacy summary */}
+        <div className="px-3 py-2.5 rounded-xl bg-emerald-500/8 border border-emerald-500/20">
+          <p className="text-emerald-400 text-xs font-medium mb-1">Privacy guarantees (always enforced)</p>
+          <ul className="text-emerald-300/60 text-xs space-y-0.5">
+            <li>• Original photo deleted immediately after crop is confirmed</li>
+            <li>• Cropped image cleared from memory after OCR completes</li>
+            <li>• No image saved to camera roll, disk, or cloud</li>
+            <li>• All OCR runs locally — no external API calls</li>
+          </ul>
+        </div>
+      </div>
+
       {/* Danger zone */}
       <div className="card space-y-3 border-red-500/20">
         <h2 className="text-sm font-semibold text-red-400 uppercase tracking-wider">Danger Zone</h2>

@@ -16,11 +16,12 @@ import { Settings } from './pages/Settings';
 import { Organizations } from './pages/Organizations';
 import { Locations } from './pages/Locations';
 import { WatcherPage } from './pages/WatcherPage';
+import { CameraUploadPage } from './pages/CameraUploadPage';
 import { Profiles } from './pages/Profiles';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
-type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles';
+type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles' | 'camera';
 
 // ── Error boundary — catches crashes in page components ───────────────────────
 class PageErrorBoundary extends Component<
@@ -70,6 +71,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: string }[] = [
   { id: 'log',       label: 'Log Study',  icon: '✏️' },
   { id: 'import',    label: 'Import',     icon: '📥' },
   { id: 'watcher',   label: 'Watcher',    icon: '👁' },
+  { id: 'camera',    label: 'Camera',     icon: '📷' },
   { id: 'history',   label: 'History',    icon: '📋' },
   { id: 'settings',  label: 'Settings',   icon: '⚙️' },
 ];
@@ -225,6 +227,7 @@ function MainApp() {
               {activeTab === 'settings'      && <Settings />}
               {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
               {activeTab === 'watcher'       && <WatcherPage onNavigateToImport={() => setActiveTab('import')} />}
+              {activeTab === 'camera'        && <CameraUploadPage onImported={() => setActiveTab('pace')} />}
               {activeTab === 'profiles'      && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} initialEditId={activeProfile?.id ?? null} />}
             </PageErrorBoundary>
           </div>
