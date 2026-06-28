@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "releases": [
+    {
+      "version": "0.1.0",
+      "revision": "71c93619d51dff2f08b1ae84d4b4ee645b1a2626",
+      "released_at": "2026-05-31T00:05:47+05:30",
+      "policy": "required"
+    }
+  ]
+}
