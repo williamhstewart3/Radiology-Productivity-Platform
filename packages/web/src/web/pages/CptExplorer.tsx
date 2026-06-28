@@ -1,14 +1,13 @@
 /**
- * CptExplorer.tsx
+ * CptExplorer.tsx — Premium redesign
  *
- * Interactive CPT code explorer with anatomical body map, modality / contrast
- * filters, CPT list, and direct study logging.
+ * Radiology workstation aesthetic: dark glass panels, cyan/blue glow,
+ * smooth anatomical silhouette with region overlays, Bloomberg-style data.
  *
- * Layout (desktop): [CPT List 280px] | [Body Map 400px] | [Log Panel 320px]
- * Layout (mobile):  stacked, body map first
+ * Layout (desktop): [CPT List 300px] | [Body Map flex] | [Log Panel 300px]
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { buildFingerprint } from '../utils/duplicateDetection';
@@ -30,64 +29,49 @@ type BodyRegion =
 
 interface RegionMeta {
   label: string;
+  shortLabel: string;
   ranges: [number, number][];
 }
 
 const REGION_META: Record<BodyRegion, RegionMeta> = {
   HEAD_NECK: {
     label: 'Head & Neck',
-    ranges: [
-      [70450, 70498],
-      [70540, 70559],
-      [70010, 70110],
-    ],
+    shortLabel: 'Head/Neck',
+    ranges: [[70450, 70498], [70540, 70559], [70010, 70110]],
   },
   CHEST: {
     label: 'Chest',
-    ranges: [
-      [71250, 71275],
-      [71550, 71555],
-      [71045, 71048],
-    ],
+    shortLabel: 'Chest',
+    ranges: [[71250, 71275], [71550, 71555], [71045, 71048]],
   },
   ABDOMEN: {
     label: 'Abdomen',
-    ranges: [
-      [74150, 74178],
-      [74181, 74183],
-      [76700, 76776],
-    ],
+    shortLabel: 'Abdomen',
+    ranges: [[74150, 74178], [74181, 74183], [76700, 76776]],
   },
   PELVIS: {
     label: 'Pelvis',
-    ranges: [
-      [72191, 72194],
-      [72195, 72198],
-    ],
+    shortLabel: 'Pelvis',
+    ranges: [[72191, 72194], [72195, 72198]],
   },
   SPINE: {
     label: 'Spine',
-    ranges: [
-      [72125, 72133],
-      [72141, 72159],
-    ],
+    shortLabel: 'Spine',
+    ranges: [[72125, 72133], [72141, 72159]],
   },
   UPPER_EXT: {
     label: 'Upper Extremity',
-    ranges: [
-      [73200, 73225],
-      [73218, 73225],
-    ],
+    shortLabel: 'Upper Ext',
+    ranges: [[73200, 73225], [73218, 73225]],
   },
   LOWER_EXT: {
     label: 'Lower Extremity',
-    ranges: [
-      [73700, 73725],
-      [73718, 73725],
-    ],
+    shortLabel: 'Lower Ext',
+    ranges: [[73700, 73725], [73718, 73725]],
   },
   BREAST: {
     label: 'Breast',
+    shortLabel: 'Breast',
     ranges: [[77046, 77067]],
   },
 };
@@ -100,7 +84,7 @@ function codeInRegion(cptCode: string, region: BodyRegion): boolean {
   return REGION_META[region].ranges.some(([lo, hi]) => num >= lo && num <= hi);
 }
 
-// ─── Contrast detection from description ─────────────────────────────────────
+// ─── Contrast detection ───────────────────────────────────────────────────────
 
 type ContrastType = 'all' | 'without' | 'with' | 'both';
 
@@ -114,13 +98,8 @@ function detectContrast(description: string): 'without' | 'with' | 'both' | 'unk
   return 'unknown';
 }
 
-// ─── Professional row preference ─────────────────────────────────────────────
+// ─── Professional row picker ──────────────────────────────────────────────────
 
-/**
- * Given all rows for a CPT code, return the single "best professional" row.
- * Prefer modifier='26', fall back to global if no '26' row.
- * Filter out technical-only rows.
- */
 function pickProfessionalRow(rows: CptRvuRow[]): CptRvuRow | null {
   const nonTech = rows.filter((r) => r.pcTcIndicator !== 'technical');
   if (nonTech.length === 0) return null;
@@ -128,192 +107,483 @@ function pickProfessionalRow(rows: CptRvuRow[]): CptRvuRow | null {
   return mod26 ?? nonTech[0];
 }
 
-// ─── SVG Body Map ─────────────────────────────────────────────────────────────
+// ─── Premium Anatomical Body Map ──────────────────────────────────────────────
 
 interface BodyMapProps {
   selectedRegion: BodyRegion | null;
+  hoveredRegion: BodyRegion | null;
   onSelect: (region: BodyRegion) => void;
+  onHover: (region: BodyRegion | null) => void;
   regionCounts: Record<BodyRegion, number>;
 }
 
-// Each region gets a clickable overlay path/rect
-function BodyMap({ selectedRegion, onSelect, regionCounts }: BodyMapProps) {
+function PremiumBodyMap({ selectedRegion, hoveredRegion, onSelect, onHover, regionCounts }: BodyMapProps) {
+  const isActive = (r: BodyRegion) => selectedRegion === r;
+  const isHovered = (r: BodyRegion) => hoveredRegion === r && selectedRegion !== r;
   const hasData = (r: BodyRegion) => regionCounts[r] > 0;
-  const isSelected = (r: BodyRegion) => selectedRegion === r;
 
-  const regionFill = (r: BodyRegion) => {
-    if (isSelected(r)) return 'rgba(37,99,168,0.55)';
-    if (hasData(r)) return 'rgba(91,184,212,0.15)';
-    return 'rgba(91,184,212,0.04)';
+  const getRegionOpacity = (r: BodyRegion) => {
+    if (isActive(r)) return 1;
+    if (isHovered(r)) return 0.75;
+    if (hasData(r)) return 0.35;
+    return 0.12;
   };
 
-  const regionStroke = (r: BodyRegion) => {
-    if (isSelected(r)) return '#2563A8';
-    if (hasData(r)) return 'rgba(91,184,212,0.5)';
-    return 'rgba(91,184,212,0.15)';
+  const getRegionGlow = (r: BodyRegion) => {
+    if (isActive(r)) return 'drop-shadow(0 0 8px rgba(91,184,212,0.85))';
+    if (isHovered(r)) return 'drop-shadow(0 0 5px rgba(91,184,212,0.5))';
+    return 'none';
+  };
+
+  // Region overlay definitions — smooth anatomical paths
+  // ViewBox: 0 0 240 560
+  const regionDefs: Record<BodyRegion, React.ReactNode> = {
+    HEAD_NECK: (
+      <g>
+        {/* Head */}
+        <ellipse cx="120" cy="44" rx="32" ry="38" />
+        {/* Neck */}
+        <path d="M108,80 Q107,100 108,108 L132,108 Q133,100 132,80 Z" />
+      </g>
+    ),
+    CHEST: (
+      <path d="M80,110 Q72,118 70,140 L70,182 Q85,188 120,190 Q155,188 170,182 L170,140 Q168,118 160,110 Q145,108 120,108 Q95,108 80,110 Z" />
+    ),
+    ABDOMEN: (
+      <path d="M72,184 Q70,196 70,220 L70,258 Q85,264 120,266 Q155,264 170,258 L170,220 Q170,196 168,184 Q155,186 120,188 Q85,186 72,184 Z" />
+    ),
+    PELVIS: (
+      <path d="M73,260 Q68,272 68,292 Q72,310 86,316 Q100,320 120,320 Q140,320 154,316 Q168,310 172,292 Q172,272 167,260 Q155,262 120,264 Q85,262 73,260 Z" />
+    ),
+    SPINE: (
+      <path d="M113,112 Q111,115 111,118 L111,316 Q114,318 120,318 Q126,318 129,316 L129,118 Q129,115 127,112 Q124,110 120,110 Q116,110 113,112 Z" />
+    ),
+    UPPER_EXT: (
+      <g>
+        {/* Left arm */}
+        <path d="M70,114 Q54,120 46,148 Q40,168 42,196 Q46,210 54,212 Q62,210 66,196 Q68,172 70,154 Q72,136 74,118 Z" />
+        {/* Right arm */}
+        <path d="M170,114 Q186,120 194,148 Q200,168 198,196 Q194,210 186,212 Q178,210 174,196 Q172,172 170,154 Q168,136 166,118 Z" />
+      </g>
+    ),
+    LOWER_EXT: (
+      <g>
+        {/* Left leg */}
+        <path d="M84,320 Q76,352 74,392 Q72,428 74,460 Q76,476 86,480 Q96,482 100,468 Q104,452 104,420 Q104,382 104,346 Q100,330 92,322 Z" />
+        {/* Right leg */}
+        <path d="M156,320 Q164,352 166,392 Q168,428 166,460 Q164,476 154,480 Q144,482 140,468 Q136,452 136,420 Q136,382 136,346 Q140,330 148,322 Z" />
+      </g>
+    ),
+    BREAST: (
+      <g>
+        <ellipse cx="103" cy="152" rx="16" ry="14" />
+        <ellipse cx="137" cy="152" rx="16" ry="14" />
+      </g>
+    ),
+  };
+
+  // Label positions for each region
+  const regionLabels: Record<BodyRegion, { x: number; y: number; dx?: number }> = {
+    HEAD_NECK: { x: 166, y: 44 },
+    CHEST: { x: 190, y: 148 },
+    ABDOMEN: { x: 192, y: 224 },
+    PELVIS: { x: 192, y: 290 },
+    SPINE: { x: 30, y: 212 },
+    UPPER_EXT: { x: 200, y: 164 },
+    LOWER_EXT: { x: 192, y: 400 },
+    BREAST: { x: 30, y: 148 },
   };
 
   return (
     <svg
-      viewBox="0 0 200 480"
-      width="200"
-      height="480"
-      style={{ display: 'block', margin: '0 auto' }}
+      viewBox="0 0 240 510"
+      width="220"
+      height="467"
+      style={{ display: 'block', margin: '0 auto', overflow: 'visible' }}
     >
-      {/* ── Silhouette body outline ── */}
-      {/* Head */}
-      <ellipse cx="100" cy="34" rx="22" ry="26" fill="rgba(91,184,212,0.07)" stroke="rgba(91,184,212,0.25)" strokeWidth="1.2" />
-      {/* Neck */}
-      <rect x="91" y="58" width="18" height="14" rx="4" fill="rgba(91,184,212,0.07)" stroke="rgba(91,184,212,0.2)" strokeWidth="1" />
-      {/* Torso */}
-      <path d="M62,72 Q58,90 56,130 L56,240 Q58,250 100,252 Q142,250 144,240 L144,130 Q142,90 138,72 Z"
-        fill="rgba(91,184,212,0.07)" stroke="rgba(91,184,212,0.2)" strokeWidth="1.2" />
-      {/* Left arm */}
-      <path d="M62,78 Q44,100 40,150 Q38,170 42,185 Q46,195 54,188 Q58,175 60,155 Q62,130 64,108 Z"
-        fill="rgba(91,184,212,0.07)" stroke="rgba(91,184,212,0.2)" strokeWidth="1" />
-      {/* Right arm */}
-      <path d="M138,78 Q156,100 160,150 Q162,170 158,185 Q154,195 146,188 Q142,175 140,155 Q138,130 136,108 Z"
-        fill="rgba(91,184,212,0.07)" stroke="rgba(91,184,212,0.2)" strokeWidth="1" />
-      {/* Left leg */}
-      <path d="M72,250 Q68,290 66,340 Q64,370 66,400 Q68,415 76,415 Q84,415 86,400 Q88,370 88,340 Q88,290 88,250 Z"
-        fill="rgba(91,184,212,0.07)" stroke="rgba(91,184,212,0.2)" strokeWidth="1" />
-      {/* Right leg */}
-      <path d="M128,250 Q132,290 134,340 Q136,370 134,400 Q132,415 124,415 Q116,415 114,400 Q112,370 112,340 Q112,290 112,250 Z"
-        fill="rgba(91,184,212,0.07)" stroke="rgba(91,184,212,0.2)" strokeWidth="1" />
+      <defs>
+        {/* Base silhouette gradient */}
+        <linearGradient id="silhouetteGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#1e4a7a" stopOpacity="0.6" />
+          <stop offset="100%" stopColor="#0d2744" stopOpacity="0.4" />
+        </linearGradient>
+        {/* Active glow filter */}
+        <filter id="activeGlow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+        {/* Subtle inner glow */}
+        <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="2" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+        {/* Clip to body shape */}
+        <clipPath id="bodyClip">
+          <path d="
+            M120,8
+            Q152,8 152,44 Q152,72 140,82
+            L162,108 Q180,120 186,148 Q194,180 194,210
+            Q194,228 186,236 Q178,240 170,238
+            L168,300 Q172,315 166,332
+            Q162,348 160,380 Q158,416 160,454 Q162,472 154,482 Q144,490 134,484
+            Q128,478 126,462 L122,380 L118,462
+            Q116,478 110,484 Q100,490 86,482
+            Q78,472 80,454 Q82,416 80,380
+            Q78,348 74,332 Q68,315 72,300
+            L70,238 Q62,240 54,236 Q46,228 46,210
+            Q46,180 54,148 Q60,120 78,108
+            L100,82 Q88,72 88,44 Q88,8 120,8 Z
+          " />
+        </clipPath>
+
+        {/* Scan-line pattern for background texture */}
+        <pattern id="scanlines" x="0" y="0" width="4" height="4" patternUnits="userSpaceOnUse">
+          <line x1="0" y1="0" x2="4" y2="0" stroke="rgba(91,184,212,0.04)" strokeWidth="0.5" />
+        </pattern>
+      </defs>
+
+      {/* ── Background silhouette ── */}
+      {/* Outer glow ring */}
+      <path
+        d="
+          M120,8
+          Q152,8 152,44 Q152,72 140,82
+          L162,108 Q180,120 186,148 Q194,180 194,210
+          Q194,228 186,236 Q178,240 170,238
+          L168,300 Q172,315 166,332
+          Q162,348 160,380 Q158,416 160,454 Q162,472 154,482 Q144,490 134,484
+          Q128,478 126,462 L122,380 L118,462
+          Q116,478 110,484 Q100,490 86,482
+          Q78,472 80,454 Q82,416 80,380
+          Q78,348 74,332 Q68,315 72,300
+          L70,238 Q62,240 54,236 Q46,228 46,210
+          Q46,180 54,148 Q60,120 78,108
+          L100,82 Q88,72 88,44 Q88,8 120,8 Z
+        "
+        fill="none"
+        stroke="rgba(91,184,212,0.08)"
+        strokeWidth="12"
+      />
+      {/* Filled silhouette */}
+      <path
+        d="
+          M120,8
+          Q152,8 152,44 Q152,72 140,82
+          L162,108 Q180,120 186,148 Q194,180 194,210
+          Q194,228 186,236 Q178,240 170,238
+          L168,300 Q172,315 166,332
+          Q162,348 160,380 Q158,416 160,454 Q162,472 154,482 Q144,490 134,484
+          Q128,478 126,462 L122,380 L118,462
+          Q116,478 110,484 Q100,490 86,482
+          Q78,472 80,454 Q82,416 80,380
+          Q78,348 74,332 Q68,315 72,300
+          L70,238 Q62,240 54,236 Q46,228 46,210
+          Q46,180 54,148 Q60,120 78,108
+          L100,82 Q88,72 88,44 Q88,8 120,8 Z
+        "
+        fill="url(#silhouetteGrad)"
+        stroke="rgba(91,184,212,0.22)"
+        strokeWidth="1.2"
+      />
+      {/* Scanline texture overlay */}
+      <path
+        d="
+          M120,8
+          Q152,8 152,44 Q152,72 140,82
+          L162,108 Q180,120 186,148 Q194,180 194,210
+          Q194,228 186,236 Q178,240 170,238
+          L168,300 Q172,315 166,332
+          Q162,348 160,380 Q158,416 160,454 Q162,472 154,482 Q144,490 134,484
+          Q128,478 126,462 L122,380 L118,462
+          Q116,478 110,484 Q100,490 86,482
+          Q78,472 80,454 Q82,416 80,380
+          Q78,348 74,332 Q68,315 72,300
+          L70,238 Q62,240 54,236 Q46,228 46,210
+          Q46,180 54,148 Q60,120 78,108
+          L100,82 Q88,72 88,44 Q88,8 120,8 Z
+        "
+        fill="url(#scanlines)"
+      />
+
+      {/* ── Subtle body structure lines (ribs, etc.) ── */}
+      {/* Clavicles */}
+      <path d="M96,110 Q108,106 120,106 Q132,106 144,110" fill="none" stroke="rgba(91,184,212,0.1)" strokeWidth="0.8" />
+      {/* Rib hints */}
+      <path d="M80,130 Q100,126 120,126 Q140,126 160,130" fill="none" stroke="rgba(91,184,212,0.06)" strokeWidth="0.6" />
+      <path d="M76,148 Q98,144 120,144 Q142,144 164,148" fill="none" stroke="rgba(91,184,212,0.06)" strokeWidth="0.6" />
+      <path d="M74,166 Q97,162 120,162 Q143,162 166,166" fill="none" stroke="rgba(91,184,212,0.06)" strokeWidth="0.6" />
+      {/* Pelvis arc */}
+      <path d="M85,286 Q102,280 120,280 Q138,280 155,286 Q162,296 160,306 Q142,312 120,312 Q98,312 80,306 Q78,296 85,286 Z"
+        fill="none" stroke="rgba(91,184,212,0.08)" strokeWidth="0.8" />
+      {/* Spine center line */}
+      <line x1="120" y1="106" x2="120" y2="314" stroke="rgba(91,184,212,0.07)" strokeWidth="0.7" strokeDasharray="3,4" />
+      {/* Knee indicators */}
+      <circle cx="88" cy="398" r="6" fill="none" stroke="rgba(91,184,212,0.08)" strokeWidth="0.8" />
+      <circle cx="152" cy="398" r="6" fill="none" stroke="rgba(91,184,212,0.08)" strokeWidth="0.8" />
 
       {/* ── Clickable region overlays ── */}
+      {(ALL_REGIONS as BodyRegion[]).filter(r => r !== 'BREAST').map((region) => (
+        <g
+          key={region}
+          onClick={() => onSelect(region)}
+          onMouseEnter={() => onHover(region)}
+          onMouseLeave={() => onHover(null)}
+          style={{ cursor: 'pointer' }}
+          opacity={getRegionOpacity(region)}
+          filter={isActive(region) || isHovered(region) ? 'url(#activeGlow)' : undefined}
+        >
+          <g
+            fill={isActive(region) ? 'rgba(91,184,212,0.45)' : isHovered(region) ? 'rgba(91,184,212,0.3)' : hasData(region) ? 'rgba(91,184,212,0.15)' : 'rgba(91,184,212,0.06)'}
+            stroke={isActive(region) ? '#5BB8D4' : isHovered(region) ? 'rgba(91,184,212,0.7)' : 'rgba(91,184,212,0.3)'}
+            strokeWidth={isActive(region) ? 1.5 : 0.8}
+          >
+            {regionDefs[region]}
+          </g>
+        </g>
+      ))}
 
-      {/* HEAD_NECK */}
-      <g onClick={() => onSelect('HEAD_NECK')} style={{ cursor: 'pointer' }}>
-        <ellipse cx="100" cy="34" rx="22" ry="26"
-          fill={regionFill('HEAD_NECK')} stroke={regionStroke('HEAD_NECK')} strokeWidth={isSelected('HEAD_NECK') ? 2 : 1.2} />
-        <rect x="91" y="58" width="18" height="14" rx="4"
-          fill={regionFill('HEAD_NECK')} stroke={regionStroke('HEAD_NECK')} strokeWidth={isSelected('HEAD_NECK') ? 2 : 1} />
-        {hasData('HEAD_NECK') && (
-          <circle cx="118" cy="14" r="8" fill="var(--theme-accent)" opacity="0.9" />
-        )}
-        {hasData('HEAD_NECK') && (
-          <text x="118" y="18" textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">
-            {regionCounts['HEAD_NECK']}
-          </text>
-        )}
+      {/* BREAST is separate so it renders on top of CHEST with distinct styling */}
+      <g
+        onClick={() => onSelect('BREAST')}
+        onMouseEnter={() => onHover('BREAST')}
+        onMouseLeave={() => onHover(null)}
+        style={{ cursor: 'pointer' }}
+        opacity={getRegionOpacity('BREAST')}
+        filter={isActive('BREAST') || isHovered('BREAST') ? 'url(#softGlow)' : undefined}
+      >
+        <g
+          fill={isActive('BREAST') ? 'rgba(168,85,247,0.35)' : isHovered('BREAST') ? 'rgba(168,85,247,0.2)' : hasData('BREAST') ? 'rgba(168,85,247,0.12)' : 'rgba(168,85,247,0.04)'}
+          stroke={isActive('BREAST') ? 'rgba(168,85,247,0.8)' : 'rgba(168,85,247,0.3)'}
+          strokeWidth={isActive('BREAST') ? 1.5 : 0.8}
+        >
+          {regionDefs['BREAST']}
+        </g>
       </g>
 
-      {/* CHEST */}
-      <g onClick={() => onSelect('CHEST')} style={{ cursor: 'pointer' }}>
-        <rect x="58" y="72" width="84" height="52" rx="4"
-          fill={regionFill('CHEST')} stroke={regionStroke('CHEST')} strokeWidth={isSelected('CHEST') ? 2 : 1} />
-        {hasData('CHEST') && (
-          <circle cx="148" cy="76" r="8" fill="var(--theme-accent)" opacity="0.9" />
-        )}
-        {hasData('CHEST') && (
-          <text x="148" y="80" textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">
-            {regionCounts['CHEST']}
-          </text>
-        )}
-      </g>
+      {/* ── Region indicator lines + labels ── */}
+      {ALL_REGIONS.map((region) => {
+        const pos = regionLabels[region];
+        const active = isActive(region);
+        const hovered = isHovered(region);
+        const dataExists = hasData(region);
+        const count = regionCounts[region];
+        const isLeft = pos.x < 120;
 
-      {/* ABDOMEN */}
-      <g onClick={() => onSelect('ABDOMEN')} style={{ cursor: 'pointer' }}>
-        <rect x="58" y="126" width="84" height="64" rx="4"
-          fill={regionFill('ABDOMEN')} stroke={regionStroke('ABDOMEN')} strokeWidth={isSelected('ABDOMEN') ? 2 : 1} />
-        {hasData('ABDOMEN') && (
-          <circle cx="148" cy="130" r="8" fill="var(--theme-accent)" opacity="0.9" />
-        )}
-        {hasData('ABDOMEN') && (
-          <text x="148" y="134" textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">
-            {regionCounts['ABDOMEN']}
-          </text>
-        )}
-      </g>
+        if (!active && !hovered && !dataExists) return null;
 
-      {/* PELVIS */}
-      <g onClick={() => onSelect('PELVIS')} style={{ cursor: 'pointer' }}>
-        <rect x="58" y="192" width="84" height="50" rx="4"
-          fill={regionFill('PELVIS')} stroke={regionStroke('PELVIS')} strokeWidth={isSelected('PELVIS') ? 2 : 1} />
-        {hasData('PELVIS') && (
-          <circle cx="148" cy="196" r="8" fill="var(--theme-accent)" opacity="0.9" />
-        )}
-        {hasData('PELVIS') && (
-          <text x="148" y="200" textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">
-            {regionCounts['PELVIS']}
-          </text>
-        )}
-      </g>
+        return (
+          <g key={`label-${region}`} style={{ pointerEvents: 'none' }} opacity={active ? 1 : hovered ? 0.8 : 0.55}>
+            {/* Connector line */}
+            <line
+              x1={isLeft ? 80 : 160}
+              y1={pos.y}
+              x2={pos.x - (isLeft ? -8 : 8)}
+              y2={pos.y}
+              stroke={active ? 'rgba(91,184,212,0.7)' : 'rgba(91,184,212,0.25)'}
+              strokeWidth="0.6"
+              strokeDasharray={active ? 'none' : '2,2'}
+            />
+            {/* Count badge */}
+            {dataExists && (
+              <g transform={`translate(${pos.x}, ${pos.y})`}>
+                <rect
+                  x={isLeft ? -28 : -8}
+                  y="-8"
+                  width="16"
+                  height="16"
+                  rx="4"
+                  fill={active ? 'rgba(91,184,212,0.25)' : 'rgba(27,58,107,0.6)'}
+                  stroke={active ? 'rgba(91,184,212,0.7)' : 'rgba(91,184,212,0.2)'}
+                  strokeWidth="0.8"
+                />
+                <text
+                  x={isLeft ? -20 : 0}
+                  y="4"
+                  textAnchor="middle"
+                  fontSize="7"
+                  fill={active ? '#5BB8D4' : 'rgba(91,184,212,0.7)'}
+                  fontWeight="600"
+                  fontFamily="monospace"
+                >
+                  {count}
+                </text>
+              </g>
+            )}
+          </g>
+        );
+      })}
 
-      {/* SPINE (behind torso — draw on left side) */}
-      <g onClick={() => onSelect('SPINE')} style={{ cursor: 'pointer' }}>
-        <rect x="38" y="80" width="18" height="170" rx="5"
-          fill={regionFill('SPINE')} stroke={regionStroke('SPINE')} strokeWidth={isSelected('SPINE') ? 2 : 1} />
-        {hasData('SPINE') && (
-          <circle cx="30" cy="84" r="8" fill="var(--theme-accent)" opacity="0.9" />
-        )}
-        {hasData('SPINE') && (
-          <text x="30" y="88" textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">
-            {regionCounts['SPINE']}
-          </text>
-        )}
-        <text x="47" y="170" textAnchor="middle" fontSize="7" fill="rgba(91,184,212,0.5)" style={{ pointerEvents: 'none' }}>
-          SP
-        </text>
-      </g>
-
-      {/* UPPER_EXT (arms) */}
-      <g onClick={() => onSelect('UPPER_EXT')} style={{ cursor: 'pointer' }}>
-        <path d="M40,90 Q38,110 38,150 Q40,170 46,180 Q52,188 56,182 Q54,165 54,145 Q52,115 50,90 Z"
-          fill={regionFill('UPPER_EXT')} stroke={regionStroke('UPPER_EXT')} strokeWidth={isSelected('UPPER_EXT') ? 2 : 1} />
-        <path d="M160,90 Q162,110 162,150 Q160,170 154,180 Q148,188 144,182 Q146,165 146,145 Q148,115 150,90 Z"
-          fill={regionFill('UPPER_EXT')} stroke={regionStroke('UPPER_EXT')} strokeWidth={isSelected('UPPER_EXT') ? 2 : 1} />
-        {hasData('UPPER_EXT') && (
-          <circle cx="170" cy="110" r="8" fill="var(--theme-accent)" opacity="0.9" />
-        )}
-        {hasData('UPPER_EXT') && (
-          <text x="170" y="114" textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">
-            {regionCounts['UPPER_EXT']}
-          </text>
-        )}
-      </g>
-
-      {/* LOWER_EXT (legs) */}
-      <g onClick={() => onSelect('LOWER_EXT')} style={{ cursor: 'pointer' }}>
-        <path d="M68,252 Q64,300 64,350 Q64,380 68,410 Q72,420 80,418 Q88,416 88,405 Q88,375 88,345 Q88,295 90,252 Z"
-          fill={regionFill('LOWER_EXT')} stroke={regionStroke('LOWER_EXT')} strokeWidth={isSelected('LOWER_EXT') ? 2 : 1} />
-        <path d="M132,252 Q136,300 136,350 Q136,380 132,410 Q128,420 120,418 Q112,416 112,405 Q112,375 112,345 Q112,295 110,252 Z"
-          fill={regionFill('LOWER_EXT')} stroke={regionStroke('LOWER_EXT')} strokeWidth={isSelected('LOWER_EXT') ? 2 : 1} />
-        {hasData('LOWER_EXT') && (
-          <circle cx="148" cy="258" r="8" fill="var(--theme-accent)" opacity="0.9" />
-        )}
-        {hasData('LOWER_EXT') && (
-          <text x="148" y="262" textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">
-            {regionCounts['LOWER_EXT']}
-          </text>
-        )}
-      </g>
-
-      {/* BREAST (small overlay on chest) */}
-      <g onClick={() => onSelect('BREAST')} style={{ cursor: 'pointer' }}>
-        <ellipse cx="86" cy="110" rx="12" ry="10"
-          fill={regionFill('BREAST')} stroke={regionStroke('BREAST')} strokeWidth={isSelected('BREAST') ? 2 : 1} />
-        <ellipse cx="114" cy="110" rx="12" ry="10"
-          fill={regionFill('BREAST')} stroke={regionStroke('BREAST')} strokeWidth={isSelected('BREAST') ? 2 : 1} />
-        {hasData('BREAST') && (
-          <circle cx="55" cy="108" r="8" fill="var(--theme-accent)" opacity="0.9" />
-        )}
-        {hasData('BREAST') && (
-          <text x="55" y="112" textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">
-            {regionCounts['BREAST']}
-          </text>
-        )}
-      </g>
-
-      {/* Region labels */}
-      <text x="100" y="34" textAnchor="middle" fontSize="6.5" fill="rgba(91,184,212,0.45)" style={{ pointerEvents: 'none' }}>Head</text>
-      <text x="100" y="103" textAnchor="middle" fontSize="6.5" fill="rgba(91,184,212,0.45)" style={{ pointerEvents: 'none' }}>Chest</text>
-      <text x="100" y="162" textAnchor="middle" fontSize="6.5" fill="rgba(91,184,212,0.45)" style={{ pointerEvents: 'none' }}>Abdomen</text>
-      <text x="100" y="220" textAnchor="middle" fontSize="6.5" fill="rgba(91,184,212,0.45)" style={{ pointerEvents: 'none' }}>Pelvis</text>
-      <text x="80" y="340" textAnchor="middle" fontSize="6.5" fill="rgba(91,184,212,0.45)" style={{ pointerEvents: 'none' }}>Leg</text>
-      <text x="120" y="340" textAnchor="middle" fontSize="6.5" fill="rgba(91,184,212,0.45)" style={{ pointerEvents: 'none' }}>Leg</text>
+      {/* ── Active region pulse ring ── */}
+      {selectedRegion && (() => {
+        const pulsePositions: Record<BodyRegion, { cx: number; cy: number; rx: number; ry: number }> = {
+          HEAD_NECK: { cx: 120, cy: 52, rx: 36, ry: 50 },
+          CHEST: { cx: 120, cy: 150, rx: 55, ry: 44 },
+          ABDOMEN: { cx: 120, cy: 224, rx: 53, ry: 44 },
+          PELVIS: { cx: 120, cy: 290, rx: 55, ry: 32 },
+          SPINE: { cx: 120, cy: 214, rx: 12, ry: 106 },
+          UPPER_EXT: { cx: 120, cy: 164, rx: 82, ry: 52 },
+          LOWER_EXT: { cx: 120, cy: 402, rx: 46, ry: 90 },
+          BREAST: { cx: 120, cy: 152, rx: 38, ry: 20 },
+        };
+        const p = pulsePositions[selectedRegion];
+        return (
+          <ellipse
+            cx={p.cx} cy={p.cy} rx={p.rx} ry={p.ry}
+            fill="none"
+            stroke="rgba(91,184,212,0.4)"
+            strokeWidth="1"
+            strokeDasharray="4,3"
+          >
+            <animate attributeName="stroke-opacity" values="0.4;0.8;0.4" dur="2s" repeatCount="indefinite" />
+          </ellipse>
+        );
+      })()}
     </svg>
+  );
+}
+
+// ─── Modality Segmented Control ───────────────────────────────────────────────
+
+const MODALITIES_FOR_FILTER: Modality[] = ['CT', 'MRI', 'US', 'XR', 'NM_PET', 'MAMMO', 'FLUORO'];
+
+function ModalityControl({ value, onChange }: { value: Modality; onChange: (m: Modality) => void }) {
+  return (
+    <div
+      className="flex gap-0.5 p-0.5 rounded-lg"
+      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
+    >
+      {MODALITIES_FOR_FILTER.map((m) => (
+        <button
+          key={m}
+          onClick={() => onChange(m)}
+          className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
+          style={{
+            background: value === m ? 'var(--theme-accent)' : 'transparent',
+            color: value === m ? 'white' : 'var(--theme-text-muted)',
+            letterSpacing: '0.02em',
+          }}
+        >
+          {m === 'NM_PET' ? 'NM/PET' : m}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Contrast Segmented Control ───────────────────────────────────────────────
+
+const CONTRAST_OPTIONS: { id: ContrastType; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'without', label: 'Non-con' },
+  { id: 'with', label: 'Contrast' },
+  { id: 'both', label: 'Multi-phase' },
+];
+
+function ContrastControl({ value, onChange }: { value: ContrastType; onChange: (c: ContrastType) => void }) {
+  return (
+    <div
+      className="flex gap-0.5 p-0.5 rounded-lg"
+      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
+    >
+      {CONTRAST_OPTIONS.map((c) => (
+        <button
+          key={c.id}
+          onClick={() => onChange(c.id)}
+          className="px-2.5 py-1.5 rounded-md text-xs font-medium transition-all"
+          style={{
+            background: value === c.id ? 'rgba(91,184,212,0.2)' : 'transparent',
+            color: value === c.id ? '#5BB8D4' : 'var(--theme-text-muted)',
+          }}
+        >
+          {c.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── CPT Row Item ─────────────────────────────────────────────────────────────
+
+function CptRow({
+  row,
+  inQueue,
+  onAdd,
+  onRemove,
+}: {
+  row: CptRvuRow;
+  inQueue: boolean;
+  onAdd: () => void;
+  onRemove: () => void;
+}) {
+  const contrast = detectContrast(row.description);
+  const [hovered, setHovered] = useState(false);
+
+  const contrastColor = contrast === 'both' ? '#a855f7' : contrast === 'with' ? '#60a5fa' : 'rgba(120,130,150,0.8)';
+  const contrastLabel = contrast === 'both' ? 'Multi' : contrast === 'with' ? 'Con+' : contrast === 'without' ? 'Non' : null;
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="flex items-center gap-3 px-4 py-3 transition-all border-b"
+      style={{
+        borderColor: 'rgba(255,255,255,0.04)',
+        background: inQueue
+          ? 'rgba(37,99,168,0.12)'
+          : hovered
+            ? 'rgba(91,184,212,0.04)'
+            : 'transparent',
+        borderLeft: inQueue ? '2px solid var(--theme-accent)' : '2px solid transparent',
+      }}
+    >
+      {/* CPT code + wRVU */}
+      <div style={{ minWidth: '86px' }}>
+        <div className="font-mono font-bold text-sm" style={{ color: 'var(--theme-accent)', letterSpacing: '0.04em' }}>
+          {row.cptCode}
+          {row.modifier && (
+            <span style={{ color: 'rgba(91,184,212,0.45)', fontSize: '11px' }}> -{row.modifier}</span>
+          )}
+        </div>
+        <div className="text-xs font-semibold mt-0.5" style={{ color: 'rgba(180,210,230,0.9)' }}>
+          {row.workRvu != null ? row.workRvu.toFixed(2) : '—'}
+          <span className="font-normal ml-0.5" style={{ color: 'var(--theme-text-disabled)', fontSize: '10px' }}>wRVU</span>
+        </div>
+      </div>
+
+      {/* Description */}
+      <div className="flex-1 min-w-0">
+        <p className="text-xs leading-tight" style={{ color: 'var(--theme-text-muted)' }}>
+          {row.description}
+        </p>
+        {contrastLabel && (
+          <span
+            className="inline-block mt-1 text-[9px] font-semibold px-1.5 py-0.5 rounded"
+            style={{ background: `${contrastColor}14`, color: contrastColor, letterSpacing: '0.06em' }}
+          >
+            {contrastLabel}
+          </span>
+        )}
+      </div>
+
+      {/* Add/remove button */}
+      <button
+        onClick={inQueue ? onRemove : onAdd}
+        className="w-7 h-7 rounded-lg flex items-center justify-center text-sm shrink-0 transition-all font-bold"
+        style={{
+          background: inQueue ? 'rgba(37,99,168,0.3)' : hovered ? 'rgba(91,184,212,0.12)' : 'rgba(91,184,212,0.06)',
+          color: inQueue ? '#5BB8D4' : 'var(--theme-text-muted)',
+          border: inQueue ? '1px solid rgba(37,99,168,0.4)' : '1px solid rgba(91,184,212,0.12)',
+        }}
+      >
+        {inQueue ? '✓' : '+'}
+      </button>
+    </div>
   );
 }
 
@@ -341,110 +611,138 @@ function LogPanel({ selectedRows, onRemove, onLog, logging }: LogPanelProps) {
   };
 
   return (
-    <div className="flex flex-col h-full gap-3">
+    <div className="flex flex-col h-full" style={{ gap: '16px' }}>
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--theme-text-muted)' }}>
-          Log Queue
-        </p>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'rgba(91,184,212,0.6)', letterSpacing: '0.12em' }}>
+            Log Queue
+          </p>
+        </div>
         {selectedRows.length > 0 && (
-          <span className="text-xs font-bold px-2 py-0.5 rounded-full"
-            style={{ background: 'rgba(37,99,168,0.2)', color: 'var(--theme-accent)' }}>
-            {selectedRows.length} study{selectedRows.length > 1 ? 'ies' : ''}
-          </span>
+          <div
+            className="text-xs font-bold px-2 py-0.5 rounded-full"
+            style={{ background: 'rgba(37,99,168,0.25)', color: '#5BB8D4', border: '1px solid rgba(91,184,212,0.2)' }}
+          >
+            {selectedRows.length}
+          </div>
         )}
       </div>
 
       {/* Queue list */}
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-2" style={{ maxHeight: '280px' }}>
+      <div className="flex-1 min-h-0 overflow-y-auto" style={{ maxHeight: '260px' }}>
         {selectedRows.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 gap-2">
-            <div className="text-3xl opacity-30">📋</div>
-            <p className="text-xs text-center" style={{ color: 'var(--theme-text-disabled)' }}>
-              Click + next to a CPT code<br />to add it here
+          <div
+            className="flex flex-col items-center justify-center rounded-xl"
+            style={{
+              padding: '32px 16px',
+              background: 'rgba(255,255,255,0.02)',
+              border: '1px dashed rgba(91,184,212,0.12)',
+              minHeight: '120px',
+            }}
+          >
+            <div style={{ fontSize: '20px', opacity: 0.3, marginBottom: '8px' }}>⊕</div>
+            <p className="text-xs text-center" style={{ color: 'var(--theme-text-disabled)', lineHeight: 1.5 }}>
+              Click + on any code<br />to add to queue
             </p>
           </div>
         ) : (
-          selectedRows.map((row) => (
-            <div
-              key={row.id}
-              className="flex items-start gap-2 p-2 rounded-lg"
-              style={{ background: 'var(--theme-bg-card)', border: '1px solid var(--theme-border)' }}
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-mono font-bold" style={{ color: 'var(--theme-accent)' }}>
-                    {row.cptCode}{row.modifier ? `-${row.modifier}` : ''}
-                  </span>
-                  <span className="text-xs font-semibold" style={{ color: 'var(--theme-normal)' }}>
-                    {row.workRvu?.toFixed(2) ?? '—'} wRVU
-                  </span>
-                </div>
-                <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--theme-text-muted)' }}>
-                  {row.description}
-                </p>
-              </div>
-              <button
-                onClick={() => onRemove(row.id)}
-                className="text-xs px-1.5 py-0.5 rounded transition-colors shrink-0"
-                style={{ color: 'var(--theme-text-disabled)', background: 'transparent' }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--theme-behind)'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--theme-text-disabled)'; }}
+          <div className="space-y-1.5">
+            {selectedRows.map((row) => (
+              <div
+                key={row.id}
+                className="flex items-start gap-2.5 p-2.5 rounded-lg"
+                style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(91,184,212,0.1)',
+                }}
               >
-                ✕
-              </button>
-            </div>
-          ))
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-mono font-bold text-xs" style={{ color: '#5BB8D4' }}>
+                      {row.cptCode}
+                    </span>
+                    <span className="text-xs font-semibold" style={{ color: 'rgba(180,210,230,0.85)' }}>
+                      {row.workRvu?.toFixed(2)} <span style={{ color: 'var(--theme-text-disabled)', fontWeight: 400 }}>wRVU</span>
+                    </span>
+                  </div>
+                  <p className="text-[10px] mt-0.5 truncate" style={{ color: 'var(--theme-text-disabled)' }}>
+                    {row.description}
+                  </p>
+                </div>
+                <button
+                  onClick={() => onRemove(row.id)}
+                  className="text-xs w-5 h-5 flex items-center justify-center rounded transition-colors shrink-0 mt-0.5"
+                  style={{ color: 'rgba(255,80,80,0.4)', background: 'transparent' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,80,80,0.8)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,80,80,0.4)'; }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
-      {/* Total */}
+      {/* Total wRVU */}
       {selectedRows.length > 0 && (
-        <div className="flex items-center justify-between px-2 py-1.5 rounded-lg"
-          style={{ background: 'rgba(37,99,168,0.12)', border: '1px solid rgba(37,99,168,0.2)' }}>
-          <span className="text-xs font-semibold" style={{ color: 'var(--theme-text-muted)' }}>
-            Total wRVU
-          </span>
-          <span className="text-sm font-bold" style={{ color: 'var(--theme-normal)' }}>
-            {totalRvu.toFixed(2)}
-          </span>
+        <div
+          className="flex items-center justify-between px-3 py-2 rounded-lg"
+          style={{
+            background: 'rgba(37,99,168,0.1)',
+            border: '1px solid rgba(37,99,168,0.2)',
+          }}
+        >
+          <span className="text-xs" style={{ color: 'var(--theme-text-muted)' }}>Total</span>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-base font-bold" style={{ color: 'rgba(180,210,230,1)', fontVariantNumeric: 'tabular-nums' }}>
+              {totalRvu.toFixed(2)}
+            </span>
+            <span className="text-xs" style={{ color: 'var(--theme-text-disabled)' }}>wRVU</span>
+          </div>
         </div>
       )}
 
-      {/* Date + notes */}
-      <div className="space-y-2">
-        <div>
-          <label className="text-xs font-medium block mb-1" style={{ color: 'var(--theme-text-muted)' }}>
-            Study Date
-          </label>
-          <input
-            type="date"
-            value={logDate}
-            onChange={(e) => setLogDate(e.target.value)}
-            className="w-full text-sm px-2.5 py-1.5 rounded-lg outline-none"
-            style={{
-              background: 'var(--theme-bg-input)',
-              border: '1px solid var(--theme-border)',
-              color: 'var(--theme-text-primary)',
-            }}
-          />
-        </div>
-        <div>
-          <label className="text-xs font-medium block mb-1" style={{ color: 'var(--theme-text-muted)' }}>
-            Notes <span style={{ color: 'var(--theme-text-disabled)' }}>(optional)</span>
-          </label>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={2}
-            placeholder="e.g. Accession 12345"
-            className="w-full text-sm px-2.5 py-1.5 rounded-lg outline-none resize-none"
-            style={{
-              background: 'var(--theme-bg-input)',
-              border: '1px solid var(--theme-border)',
-              color: 'var(--theme-text-primary)',
-            }}
-          />
-        </div>
+      {/* Divider */}
+      <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)' }} />
+
+      {/* Date input */}
+      <div>
+        <label className="text-[10px] font-semibold uppercase tracking-wider block mb-1.5" style={{ color: 'rgba(91,184,212,0.5)' }}>
+          Study Date
+        </label>
+        <input
+          type="date"
+          value={logDate}
+          onChange={(e) => setLogDate(e.target.value)}
+          className="w-full text-sm px-3 py-2 rounded-lg outline-none"
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            color: 'var(--theme-text-primary)',
+            colorScheme: 'dark',
+          }}
+        />
+      </div>
+
+      {/* Notes */}
+      <div>
+        <label className="text-[10px] font-semibold uppercase tracking-wider block mb-1.5" style={{ color: 'rgba(91,184,212,0.5)' }}>
+          Notes <span style={{ color: 'var(--theme-text-disabled)', textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
+        </label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          placeholder="Accession #, patient ref…"
+          className="w-full text-sm px-3 py-2 rounded-lg outline-none resize-none"
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            color: 'var(--theme-text-primary)',
+          }}
+        />
       </div>
 
       {/* Log button */}
@@ -454,34 +752,27 @@ function LogPanel({ selectedRows, onRemove, onLog, logging }: LogPanelProps) {
         className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all"
         style={{
           background: success
-            ? 'var(--theme-normal)'
+            ? 'rgba(16,185,129,0.8)'
             : selectedRows.length > 0
               ? 'var(--theme-accent)'
-              : 'var(--theme-bg-card)',
+              : 'rgba(255,255,255,0.04)',
           color: selectedRows.length > 0 ? 'white' : 'var(--theme-text-disabled)',
-          border: 'none',
+          border: selectedRows.length > 0 ? 'none' : '1px solid rgba(255,255,255,0.06)',
           opacity: logging ? 0.6 : 1,
+          letterSpacing: '0.02em',
         }}
       >
-        {logging ? 'Logging…' : success ? '✓ Logged!' : `Log ${selectedRows.length > 0 ? selectedRows.length : ''} Stud${selectedRows.length === 1 ? 'y' : 'ies'}`}
+        {logging ? 'Logging…' : success ? '✓ Studies Logged' : `Log ${selectedRows.length > 0 ? `${selectedRows.length} ` : ''}Stud${selectedRows.length === 1 ? 'y' : 'ies'}`}
       </button>
     </div>
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
 
 interface CptExplorerProps {
   onNavigate?: (tab: string) => void;
 }
-
-const MODALITIES_FOR_FILTER: Modality[] = ['CT', 'MRI', 'US', 'XR', 'NM_PET', 'MAMMO', 'FLUORO'];
-const CONTRAST_OPTIONS: { id: ContrastType; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'without', label: 'w/o' },
-  { id: 'with', label: 'w/' },
-  { id: 'both', label: 'w/ & w/o' },
-];
 
 export function CptExplorer({ onNavigate }: CptExplorerProps) {
   const { activeProfile } = useProfile();
@@ -489,10 +780,12 @@ export function CptExplorer({ onNavigate }: CptExplorerProps) {
   const [selectedModality, setSelectedModality] = useState<Modality>('CT');
   const [contrastFilter, setContrastFilter] = useState<ContrastType>('all');
   const [selectedRegion, setSelectedRegion] = useState<BodyRegion | null>(null);
+  const [hoveredRegion, setHoveredRegion] = useState<BodyRegion | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [queuedRows, setQueuedRows] = useState<CptRvuRow[]>([]);
   const [logging, setLogging] = useState(false);
 
-  // Live query — all rows for the selected modality
+  // Live query
   const rawRows = useLiveQuery(
     () =>
       db.cptRvuTable
@@ -504,7 +797,7 @@ export function CptExplorer({ onNavigate }: CptExplorerProps) {
     [],
   );
 
-  // Deduplicate: keep one professional row per CPT code
+  // Deduplicate
   const dedupedRows = useMemo(() => {
     const byCode = new Map<string, CptRvuRow[]>();
     for (const row of rawRows) {
@@ -520,7 +813,7 @@ export function CptExplorer({ onNavigate }: CptExplorerProps) {
     return result.sort((a, b) => (b.workRvu ?? 0) - (a.workRvu ?? 0));
   }, [rawRows]);
 
-  // Apply contrast filter
+  // Contrast filter
   const contrastFiltered = useMemo(() => {
     if (contrastFilter === 'all') return dedupedRows;
     return dedupedRows.filter((r) => {
@@ -529,13 +822,24 @@ export function CptExplorer({ onNavigate }: CptExplorerProps) {
     });
   }, [dedupedRows, contrastFilter]);
 
-  // Apply region filter
+  // Region filter
   const regionFiltered = useMemo(() => {
     if (!selectedRegion) return contrastFiltered;
     return contrastFiltered.filter((r) => codeInRegion(r.cptCode, selectedRegion));
   }, [contrastFiltered, selectedRegion]);
 
-  // Count per region (for badge display on body map)
+  // Search filter
+  const displayRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return regionFiltered;
+    return regionFiltered.filter(
+      (r) =>
+        r.cptCode.includes(q) ||
+        r.description.toLowerCase().includes(q),
+    );
+  }, [regionFiltered, searchQuery]);
+
+  // Region counts
   const regionCounts = useMemo(() => {
     const counts = {} as Record<BodyRegion, number>;
     for (const region of ALL_REGIONS) {
@@ -562,18 +866,11 @@ export function CptExplorer({ onNavigate }: CptExplorerProps) {
       try {
         const sessionId = crypto.randomUUID();
         const now = new Date().toISOString();
-
         for (const row of queuedRows) {
           const examNameRaw = row.description;
           const fp = buildFingerprint(examNameRaw, row.cptCode, logDate, null, null, row.modality);
-
-          // Dupe check
-          const existing = await db.studyLogs
-            .where('studyFingerprint')
-            .equals(fp)
-            .first();
-          if (existing) continue; // skip exact dupe
-
+          const existing = await db.studyLogs.where('studyFingerprint').equals(fp).first();
+          if (existing) continue;
           const logRow: StudyLog = {
             id: crypto.randomUUID(),
             profileId: activeProfile?.id ?? null,
@@ -598,10 +895,8 @@ export function CptExplorer({ onNavigate }: CptExplorerProps) {
             createdAt: now,
             updatedAt: now,
           };
-
           await db.studyLogs.add(logRow);
         }
-
         setQueuedRows([]);
       } finally {
         setLogging(false);
@@ -613,148 +908,141 @@ export function CptExplorer({ onNavigate }: CptExplorerProps) {
   const totalInDb = dedupedRows.length;
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-5" style={{ height: '100%' }}>
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-xl font-bold" style={{ color: 'var(--theme-text-primary)' }}>
+          <h1
+            className="text-xl font-bold tracking-tight"
+            style={{ color: 'var(--theme-text-primary)', letterSpacing: '-0.02em' }}
+          >
             CPT Explorer
           </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--theme-text-muted)' }}>
-            Browse codes by body region, filter by modality & contrast, log studies directly.
+          <p className="text-sm mt-0.5" style={{ color: 'var(--theme-text-disabled)' }}>
+            Browse by anatomy · filter by modality & contrast · log directly
           </p>
         </div>
         {totalInDb === 0 && (
           <div
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
             style={{
-              background: 'rgba(245,158,11,0.08)',
-              border: '1px solid rgba(245,158,11,0.25)',
+              background: 'rgba(245,158,11,0.06)',
+              border: '1px solid rgba(245,158,11,0.18)',
               color: 'var(--theme-caution)',
             }}
           >
             <span>⚠</span>
             <span>
-              No {MODALITY_LABELS[selectedModality]} codes found.{' '}
-              <button
-                className="underline font-medium"
-                onClick={() => onNavigate?.('import')}
-              >
+              No {MODALITY_LABELS[selectedModality]} codes.{' '}
+              <button className="underline font-medium" onClick={() => onNavigate?.('import')}>
                 Import CMS RVU file
-              </button>{' '}
-              in Settings to populate.
+              </button>
             </span>
           </div>
         )}
       </div>
 
       {/* ── Filter bar ── */}
-      <div className="flex flex-wrap gap-3 items-center">
-        {/* Modality pills */}
-        <div className="flex flex-wrap gap-1.5">
-          {MODALITIES_FOR_FILTER.map((m) => (
-            <button
-              key={m}
-              onClick={() => setSelectedModality(m)}
-              className="px-3 py-1 rounded-full text-xs font-medium transition-all"
-              style={{
-                background: selectedModality === m ? 'var(--theme-accent)' : 'var(--theme-bg-card)',
-                color: selectedModality === m ? 'white' : 'var(--theme-text-muted)',
-                border: selectedModality === m
-                  ? '1px solid var(--theme-accent)'
-                  : '1px solid var(--theme-border)',
-              }}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ width: '1px', height: '20px', background: 'var(--theme-border)' }} />
-
-        {/* Contrast pills */}
-        <div className="flex gap-1.5">
-          {CONTRAST_OPTIONS.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setContrastFilter(c.id)}
-              className="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
-              style={{
-                background: contrastFilter === c.id ? 'rgba(91,184,212,0.18)' : 'var(--theme-bg-card)',
-                color: contrastFilter === c.id ? 'var(--theme-accent)' : 'var(--theme-text-muted)',
-                border: contrastFilter === c.id
-                  ? '1px solid rgba(91,184,212,0.4)'
-                  : '1px solid var(--theme-border)',
-              }}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-
-        <span className="text-xs ml-auto" style={{ color: 'var(--theme-text-disabled)' }}>
-          {regionFiltered.length} code{regionFiltered.length !== 1 ? 's' : ''}
-          {selectedRegion ? ` in ${REGION_META[selectedRegion].label}` : ''}
+      <div
+        className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl"
+        style={{
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px solid rgba(255,255,255,0.05)',
+        }}
+      >
+        <ModalityControl value={selectedModality} onChange={setSelectedModality} />
+        <div style={{ width: '1px', height: '24px', background: 'rgba(255,255,255,0.07)' }} />
+        <ContrastControl value={contrastFilter} onChange={setContrastFilter} />
+        <div className="flex-1" />
+        <span className="text-xs tabular-nums" style={{ color: 'var(--theme-text-disabled)' }}>
+          {displayRows.length} code{displayRows.length !== 1 ? 's' : ''}
+          {selectedRegion ? ` · ${REGION_META[selectedRegion].shortLabel}` : ''}
         </span>
       </div>
 
       {/* ── Three-column layout ── */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(260px,280px) 1fr minmax(280px,320px)' }}>
+      <div
+        className="flex gap-4 flex-1 min-h-0"
+        style={{ display: 'grid', gridTemplateColumns: '300px 1fr 300px', alignItems: 'stretch' }}
+      >
 
-        {/* ── LEFT: CPT list ── */}
+        {/* ── LEFT: CPT code list ── */}
         <div
-          className="rounded-xl overflow-hidden"
+          className="rounded-xl flex flex-col overflow-hidden"
           style={{
-            background: 'var(--theme-bg-card)',
-            border: '1px solid var(--theme-border)',
+            background: 'rgba(255,255,255,0.02)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            backdropFilter: 'blur(12px)',
           }}
         >
-          {/* Region quick-jump */}
-          <div className="px-3 pt-3 pb-2 border-b" style={{ borderColor: 'var(--theme-border)' }}>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--theme-text-muted)' }}>
-                {selectedRegion ? REGION_META[selectedRegion].label : 'All Regions'}
-              </p>
-              {selectedRegion && (
-                <button
-                  onClick={() => setSelectedRegion(null)}
-                  className="text-xs"
-                  style={{ color: 'var(--theme-text-disabled)' }}
-                >
-                  Clear
-                </button>
-              )}
+          {/* Search */}
+          <div className="px-3 pt-3 pb-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <div className="relative">
+              <div
+                className="absolute inset-y-0 left-2.5 flex items-center"
+                style={{ pointerEvents: 'none', color: 'rgba(91,184,212,0.35)' }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.35-4.35" />
+                </svg>
+              </div>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search CPT, exam name…"
+                className="w-full text-xs pl-7 pr-3 py-2 rounded-lg outline-none"
+                style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.07)',
+                  color: 'var(--theme-text-primary)',
+                }}
+              />
             </div>
-            <div className="flex flex-wrap gap-1">
+
+            {/* Region chips */}
+            <div className="flex flex-wrap gap-1 mt-2">
+              <button
+                onClick={() => setSelectedRegion(null)}
+                className="text-[9px] px-2 py-0.5 rounded-md font-semibold transition-all uppercase tracking-wide"
+                style={{
+                  background: !selectedRegion ? 'rgba(37,99,168,0.4)' : 'rgba(255,255,255,0.04)',
+                  color: !selectedRegion ? '#5BB8D4' : 'var(--theme-text-disabled)',
+                  border: !selectedRegion ? '1px solid rgba(91,184,212,0.3)' : '1px solid transparent',
+                }}
+              >
+                All
+              </button>
               {ALL_REGIONS.map((r) => (
                 <button
                   key={r}
                   onClick={() => setSelectedRegion(selectedRegion === r ? null : r)}
-                  className="text-[10px] px-1.5 py-0.5 rounded-md transition-all"
+                  className="text-[9px] px-2 py-0.5 rounded-md font-semibold transition-all uppercase tracking-wide"
                   style={{
-                    background: selectedRegion === r ? 'var(--theme-accent)' : 'rgba(91,184,212,0.07)',
-                    color: selectedRegion === r ? 'white' : regionCounts[r] > 0 ? 'var(--theme-text-muted)' : 'var(--theme-text-disabled)',
-                    border: '1px solid transparent',
+                    background: selectedRegion === r ? 'rgba(37,99,168,0.35)' : 'rgba(255,255,255,0.04)',
+                    color: selectedRegion === r ? '#5BB8D4' : regionCounts[r] > 0 ? 'var(--theme-text-muted)' : 'var(--theme-text-disabled)',
+                    border: selectedRegion === r ? '1px solid rgba(91,184,212,0.25)' : '1px solid transparent',
                   }}
                 >
-                  {REGION_META[r].label.split(' ')[0]}
+                  {REGION_META[r].shortLabel}
                   {regionCounts[r] > 0 && (
-                    <span className="ml-0.5 opacity-70">{regionCounts[r]}</span>
+                    <span className="ml-1" style={{ opacity: 0.6 }}>{regionCounts[r]}</span>
                   )}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Code list */}
-          <div className="overflow-y-auto" style={{ maxHeight: '520px' }}>
-            {regionFiltered.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-3 px-4 text-center">
-                <div className="text-3xl opacity-30">🔍</div>
-                <p className="text-sm" style={{ color: 'var(--theme-text-muted)' }}>
+          {/* Codes */}
+          <div className="flex-1 overflow-y-auto">
+            {displayRows.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-3 px-4 py-12 text-center">
+                <div style={{ fontSize: '28px', opacity: 0.2 }}>◎</div>
+                <p className="text-xs" style={{ color: 'var(--theme-text-disabled)' }}>
                   {totalInDb === 0
                     ? `No ${MODALITY_LABELS[selectedModality]} codes in database`
-                    : `No codes match current filters`}
+                    : 'No codes match current filters'}
                 </p>
                 {totalInDb === 0 && (
                   <button
@@ -767,136 +1055,143 @@ export function CptExplorer({ onNavigate }: CptExplorerProps) {
                 )}
               </div>
             ) : (
-              regionFiltered.map((row) => {
-                const inQueue = queuedRows.some((r) => r.id === row.id);
-                const contrast = detectContrast(row.description);
-                return (
-                  <div
-                    key={row.id}
-                    className="flex items-center gap-2 px-3 py-2.5 border-b transition-colors"
-                    style={{
-                      borderColor: 'var(--theme-border)',
-                      background: inQueue ? 'rgba(37,99,168,0.08)' : 'transparent',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!inQueue) (e.currentTarget as HTMLElement).style.background = 'rgba(91,184,212,0.04)';
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!inQueue) (e.currentTarget as HTMLElement).style.background = 'transparent';
-                    }}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-xs font-mono font-bold" style={{ color: 'var(--theme-accent)' }}>
-                          {row.cptCode}
-                          {row.modifier ? (
-                            <span style={{ color: 'var(--theme-text-disabled)' }}>-{row.modifier}</span>
-                          ) : null}
-                        </span>
-                        {contrast !== 'unknown' && (
-                          <span
-                            className="text-[9px] px-1 py-0.5 rounded font-medium"
-                            style={{
-                              background:
-                                contrast === 'both'
-                                  ? 'rgba(168,85,247,0.12)'
-                                  : contrast === 'with'
-                                    ? 'rgba(59,130,246,0.12)'
-                                    : 'rgba(107,114,128,0.12)',
-                              color:
-                                contrast === 'both'
-                                  ? '#a855f7'
-                                  : contrast === 'with'
-                                    ? '#60a5fa'
-                                    : 'var(--theme-text-disabled)',
-                            }}
-                          >
-                            {contrast === 'both' ? 'w/ & w/o' : contrast === 'with' ? 'w/' : 'w/o'}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] mt-0.5 leading-tight truncate" style={{ color: 'var(--theme-text-muted)' }}>
-                        {row.description}
-                      </p>
-                      <span className="text-[10px] font-semibold" style={{ color: 'var(--theme-normal)' }}>
-                        {row.workRvu?.toFixed(2) ?? '—'} wRVU
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => (inQueue ? removeFromQueue(row.id) : addToQueue(row))}
-                      title={inQueue ? 'Remove from queue' : 'Add to log queue'}
-                      className="w-7 h-7 rounded-lg flex items-center justify-center text-sm shrink-0 transition-all"
-                      style={{
-                        background: inQueue ? 'rgba(37,99,168,0.25)' : 'rgba(91,184,212,0.08)',
-                        color: inQueue ? 'var(--theme-accent)' : 'var(--theme-text-muted)',
-                        border: '1px solid transparent',
-                      }}
-                    >
-                      {inQueue ? '✓' : '+'}
-                    </button>
-                  </div>
-                );
-              })
+              displayRows.map((row) => (
+                <CptRow
+                  key={row.id}
+                  row={row}
+                  inQueue={queuedRows.some((r) => r.id === row.id)}
+                  onAdd={() => addToQueue(row)}
+                  onRemove={() => removeFromQueue(row.id)}
+                />
+              ))
             )}
           </div>
         </div>
 
         {/* ── CENTER: Body map ── */}
         <div
-          className="rounded-xl flex flex-col items-center py-4 px-2"
+          className="rounded-xl flex flex-col items-center py-5 px-4"
           style={{
-            background: 'var(--theme-bg-card)',
-            border: '1px solid var(--theme-border)',
+            background: 'rgba(10,20,40,0.6)',
+            border: '1px solid rgba(91,184,212,0.1)',
+            backdropFilter: 'blur(20px)',
+            position: 'relative',
+            overflow: 'hidden',
           }}
         >
-          <p className="text-xs font-semibold uppercase tracking-wider mb-3 self-start ml-2"
-            style={{ color: 'var(--theme-text-muted)' }}>
-            Anatomy Map
-          </p>
-          <BodyMap
-            selectedRegion={selectedRegion}
-            onSelect={(r) => setSelectedRegion(selectedRegion === r ? null : r)}
-            regionCounts={regionCounts}
+          {/* Background radial glow */}
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'radial-gradient(ellipse 60% 50% at 50% 40%, rgba(37,99,168,0.08) 0%, transparent 70%)',
+              pointerEvents: 'none',
+            }}
           />
-          <p className="text-[10px] mt-3 text-center" style={{ color: 'var(--theme-text-disabled)' }}>
-            Click a region to filter codes
-          </p>
 
-          {/* Region legend */}
-          <div className="mt-4 w-full px-2 grid grid-cols-2 gap-1">
+          {/* Header */}
+          <div className="flex items-center justify-between w-full mb-4" style={{ position: 'relative', zIndex: 1 }}>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(91,184,212,0.5)', letterSpacing: '0.14em' }}>
+                Anatomy Map
+              </p>
+              {selectedRegion && (
+                <p className="text-sm font-semibold mt-0.5" style={{ color: '#5BB8D4' }}>
+                  {REGION_META[selectedRegion].label}
+                </p>
+              )}
+            </div>
+            {selectedRegion && (
+              <button
+                onClick={() => setSelectedRegion(null)}
+                className="text-xs px-2.5 py-1 rounded-lg transition-colors"
+                style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  color: 'var(--theme-text-disabled)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {/* Body SVG */}
+          <div style={{ position: 'relative', zIndex: 1, flex: 1, display: 'flex', alignItems: 'center' }}>
+            <PremiumBodyMap
+              selectedRegion={selectedRegion}
+              hoveredRegion={hoveredRegion}
+              onSelect={(r) => setSelectedRegion(selectedRegion === r ? null : r)}
+              onHover={setHoveredRegion}
+              regionCounts={regionCounts}
+            />
+          </div>
+
+          {/* Region legend grid */}
+          <div
+            className="w-full grid grid-cols-2 gap-1 mt-4"
+            style={{ position: 'relative', zIndex: 1, borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '12px' }}
+          >
             {ALL_REGIONS.map((r) => (
               <button
                 key={r}
                 onClick={() => setSelectedRegion(selectedRegion === r ? null : r)}
+                onMouseEnter={() => setHoveredRegion(r)}
+                onMouseLeave={() => setHoveredRegion(null)}
                 className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] transition-all text-left"
                 style={{
-                  background: selectedRegion === r ? 'rgba(37,99,168,0.15)' : 'transparent',
-                  color: selectedRegion === r ? 'var(--theme-accent)' : 'var(--theme-text-muted)',
+                  background: selectedRegion === r ? 'rgba(37,99,168,0.2)' : hoveredRegion === r ? 'rgba(91,184,212,0.05)' : 'transparent',
+                  color: selectedRegion === r ? '#5BB8D4' : regionCounts[r] > 0 ? 'var(--theme-text-muted)' : 'var(--theme-text-disabled)',
                 }}
               >
                 <span
-                  className="w-2 h-2 rounded-full shrink-0"
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
                   style={{
-                    background: regionCounts[r] > 0 ? 'var(--theme-accent)' : 'var(--theme-border)',
+                    background: selectedRegion === r
+                      ? '#5BB8D4'
+                      : regionCounts[r] > 0
+                        ? 'rgba(91,184,212,0.5)'
+                        : 'rgba(255,255,255,0.1)',
+                    boxShadow: selectedRegion === r ? '0 0 4px rgba(91,184,212,0.8)' : 'none',
                   }}
                 />
-                {REGION_META[r].label}
+                <span>{REGION_META[r].shortLabel}</span>
                 {regionCounts[r] > 0 && (
-                  <span className="ml-auto font-semibold" style={{ color: 'var(--theme-text-disabled)' }}>
+                  <span className="ml-auto font-mono" style={{ color: 'var(--theme-text-disabled)', fontSize: '9px' }}>
                     {regionCounts[r]}
                   </span>
                 )}
               </button>
             ))}
           </div>
+
+          {/* Hover tooltip */}
+          {hoveredRegion && (
+            <div
+              className="absolute bottom-4 left-1/2 text-xs px-3 py-1.5 rounded-lg font-medium"
+              style={{
+                transform: 'translateX(-50%)',
+                background: 'rgba(10,20,40,0.9)',
+                border: '1px solid rgba(91,184,212,0.2)',
+                color: '#5BB8D4',
+                pointerEvents: 'none',
+                zIndex: 10,
+                whiteSpace: 'nowrap',
+                backdropFilter: 'blur(8px)',
+              }}
+            >
+              {REGION_META[hoveredRegion].label} · {regionCounts[hoveredRegion]} code{regionCounts[hoveredRegion] !== 1 ? 's' : ''}
+            </div>
+          )}
         </div>
 
         {/* ── RIGHT: Log panel ── */}
         <div
-          className="rounded-xl p-4"
+          className="rounded-xl p-4 flex flex-col"
           style={{
-            background: 'var(--theme-bg-card)',
-            border: '1px solid var(--theme-border)',
+            background: 'rgba(255,255,255,0.02)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            backdropFilter: 'blur(12px)',
           }}
         >
           <LogPanel
