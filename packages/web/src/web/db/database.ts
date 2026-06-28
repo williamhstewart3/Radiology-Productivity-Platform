@@ -30,6 +30,17 @@ export class RvuDatabase extends Dexie {
       dailySessions: 'id, sessionDate',
       userSettings: 'id',
     });
+
+    // v2: adds studyFingerprint index for O(1) duplicate detection.
+    // Existing rows without a fingerprint are left as-is; Dexie handles
+    // sparse indexes — null/undefined values are simply not indexed.
+    this.version(2).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, aliasText, cptCode',
+      studyLogs: 'id, logDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+    });
   }
 }
 

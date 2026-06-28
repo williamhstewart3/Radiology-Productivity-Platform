@@ -105,6 +105,13 @@ export interface StudyLog {
   sessionId: string | null;
   sourceImportId: string | null;
   notes: string | null;
+  /**
+   * Deterministic identity fingerprint. Built at save time from the best
+   * available combination of: accession number, CPT code, logDate,
+   * studyDateTime, and normalized exam name. Used for duplicate detection
+   * across all import sources. Indexed in Dexie for fast lookup.
+   */
+  studyFingerprint: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -150,6 +157,8 @@ export interface MatchCandidate {
   method: MatchMethod;
 }
 
+export type DuplicateStatus = 'exact' | 'very_likely' | 'possible' | null;
+
 /** One row in the OCR review table, prior to being written to study_logs. */
 export interface OcrReviewRow {
   tempId: string;
@@ -161,4 +170,10 @@ export interface OcrReviewRow {
   selectedCandidateIndex: number | null; // null = unmatched, needs manual pick
   needsReview: boolean;
   included: boolean; // user can exclude a row (e.g. duplicate/garbage line)
+  /** Duplicate detection result. null = no duplicate found. */
+  duplicateStatus: DuplicateStatus;
+  /** ID of the existing log this row collides with, if any. */
+  duplicateExistingLogId: string | null;
+  /** Human-readable reason for the duplicate classification. */
+  duplicateReason: string | null;
 }

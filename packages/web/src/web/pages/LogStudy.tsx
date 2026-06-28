@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { db } from '../db/database';
 import { findMatchCandidates, learnAlias } from '../utils/matching';
 import { todayDateString } from '../utils/calculations';
+import { buildFingerprint, checkOneDuplicate } from '../utils/duplicateDetection';
 import type { MatchCandidate, StudyLog } from '../types';
 import { MODALITY_LABELS } from '../types';
+import type { DuplicateMatch, StudyCandidate } from '../utils/duplicateDetection';
 
 interface LogStudyProps {
   onSaved: () => void;
@@ -19,6 +21,8 @@ export function LogStudy({ onSaved }: LogStudyProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dupeWarning, setDupeWarning] = useState<DuplicateMatch | null>(null);
+  const [forceSave, setForceSave] = useState(false);
 
   const search = useCallback(async (q: string) => {
     if (!q.trim()) { setCandidates([]); return; }
@@ -41,11 +45,41 @@ export function LogStudy({ onSaved }: LogStudyProps) {
     return () => clearTimeout(timer);
   }, [examInput, search]);
 
-  async function handleSave() {
+  async function handleSave(skipDupeCheck = false) {
     if (!selected) { setError('Select a CPT code first'); return; }
     setSaving(true);
     setError(null);
+
     try {
+      const candidate: StudyCandidate = {
+        examNameRaw: examInput.trim(),
+        cptCode: selected.cptCode,
+        modifier: selected.modifier,
+        logDate,
+        studyDateTime: null,
+        accessionNumber: null,
+        modality: selected.modality,
+      };
+
+      // Duplicate check — skip if user already confirmed override
+      if (!skipDupeCheck && !forceSave) {
+        const dupeMatch = await checkOneDuplicate(candidate, undefined);
+        if (dupeMatch && (dupeMatch.confidence === 'very_likely' || dupeMatch.confidence === 'possible')) {
+          setDupeWarning(dupeMatch);
+          setSaving(false);
+          return;
+        }
+      }
+
+      const fp = buildFingerprint(
+        examInput.trim(),
+        selected.cptCode,
+        logDate,
+        null,
+        null,
+        selected.modality,
+      );
+
       const now = new Date().toISOString();
       const log: StudyLog = {
         id: crypto.randomUUID(),
@@ -63,12 +97,15 @@ export function LogStudy({ onSaved }: LogStudyProps) {
         sessionId: null,
         sourceImportId: null,
         notes: notes.trim() || null,
+        studyFingerprint: fp,
         createdAt: now,
         updatedAt: now,
       };
       await db.studyLogs.add(log);
       await learnAlias(examInput.trim(), selected.cptCode, selected.modifier, 'manual_name_match');
 
+      setDupeWarning(null);
+      setForceSave(false);
       setSaved(true);
       setTimeout(() => {
         setExamInput('');
@@ -229,12 +266,46 @@ export function LogStudy({ onSaved }: LogStudyProps) {
           </div>
         )}
 
+        {/* Duplicate warning banner */}
+        {dupeWarning && (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
+            <div className="flex items-start gap-2">
+              <span className="text-amber-400 text-base leading-none mt-0.5">⚠</span>
+              <div className="min-w-0">
+                <p className="text-amber-300 text-sm font-semibold">
+                  {dupeWarning.confidence === 'very_likely' ? 'Very likely duplicate' : 'Possible duplicate'}
+                </p>
+                <p className="text-amber-200/70 text-xs mt-0.5">{dupeWarning.reason}</p>
+                <p className="text-slate-400 text-xs mt-1">
+                  Existing: <span className="text-slate-300">{dupeWarning.existingLog.examNameRaw}</span>
+                  {' · '}{dupeWarning.existingLog.logDate}
+                  {dupeWarning.existingLog.workRvu != null && ` · ${dupeWarning.existingLog.workRvu.toFixed(2)} wRVU`}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => { setForceSave(true); handleSave(true); }}
+                className="flex-1 py-2 rounded-lg text-xs font-semibold bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:bg-amber-500/30 transition-colors"
+              >
+                Log anyway
+              </button>
+              <button
+                onClick={() => setDupeWarning(null)}
+                className="flex-1 py-2 rounded-lg text-xs font-semibold bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {error && (
           <p className="text-red-400 text-sm">{error}</p>
         )}
 
         <button
-          onClick={handleSave}
+          onClick={() => handleSave(false)}
           disabled={!selected || saving || saved}
           className={`w-full py-3 rounded-xl font-semibold text-sm transition-all duration-200 ${
             saved
