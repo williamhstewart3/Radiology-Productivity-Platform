@@ -50,10 +50,10 @@ interface GaugeProps {
 
 function CircularGauge({ current, goal, glowColor, status }: GaugeProps) {
   const pct = Math.min(1, current / Math.max(1, goal));
-  const radius = 88;
-  const stroke = 9;
-  const cx = 110;
-  const cy = 110;
+  const radius = 90;
+  const stroke = 10;
+  const cx = 112;
+  const cy = 112;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference * (1 - pct);
   const color = statusColor(status);
@@ -61,24 +61,30 @@ function CircularGauge({ current, goal, glowColor, status }: GaugeProps) {
   return (
     <div className="relative flex items-center justify-center">
       <svg
-        width={220}
-        height={220}
-        className="drop-shadow-xl"
-        style={{ filter: `drop-shadow(0 0 20px ${color}44)` }}
+        width={224}
+        height={224}
+        style={{ filter: `drop-shadow(0 0 28px ${color}33)` }}
       >
+        {/* Outer glow ring */}
+        <circle
+          cx={cx} cy={cy} r={radius + stroke}
+          fill="none"
+          stroke={`${color}08`}
+          strokeWidth={1}
+        />
         {/* Track */}
         <circle
           cx={cx} cy={cy} r={radius}
           fill="none"
-          stroke="rgba(91,184,212,0.07)"
+          stroke="rgba(91,184,212,0.08)"
           strokeWidth={stroke}
         />
-        {/* Subtle inner track glow */}
+        {/* Track inner shade */}
         <circle
-          cx={cx} cy={cy} r={radius - stroke - 2}
+          cx={cx} cy={cy} r={radius}
           fill="none"
-          stroke="rgba(91,184,212,0.03)"
-          strokeWidth={1}
+          stroke="rgba(0,0,0,0.15)"
+          strokeWidth={stroke - 2}
         />
         {/* Progress arc */}
         <circle
@@ -91,23 +97,40 @@ function CircularGauge({ current, goal, glowColor, status }: GaugeProps) {
           strokeDashoffset={dashOffset}
           transform={`rotate(-90 ${cx} ${cy})`}
           style={{
-            transition: 'stroke-dashoffset 0.8s cubic-bezier(0.4,0,0.2,1), stroke 0.5s ease',
+            transition: 'stroke-dashoffset 0.9s cubic-bezier(0.34,1.56,0.64,1), stroke 0.5s ease',
+            filter: `drop-shadow(0 0 6px ${color}88)`,
           }}
         />
+        {/* Goal tick mark */}
+        {pct < 0.98 && (
+          <line
+            x1={cx} y1={cy - radius + stroke / 2 - 4}
+            x2={cx} y2={cy - radius - stroke / 2 + 2}
+            stroke={`${color}50`}
+            strokeWidth={2}
+            strokeLinecap="round"
+            transform={`rotate(0 ${cx} ${cy})`}
+          />
+        )}
       </svg>
 
       {/* Center text */}
-      <div className="absolute flex flex-col items-center justify-center select-none">
+      <div className="absolute flex flex-col items-center justify-center select-none gap-0.5">
         <span
-          className="font-black tabular-nums leading-none"
-          style={{ fontSize: '2.5rem', color, textShadow: `0 0 32px ${color}66` }}
+          className="tabular-nums leading-none"
+          style={{ fontSize: '2.75rem', fontWeight: 900, color, textShadow: `0 0 40px ${color}55`, letterSpacing: '-0.02em' }}
         >
           {current.toFixed(1)}
         </span>
-        <span className="text-sm font-medium mt-1" style={{ color: 'var(--theme-text-muted)' }}>
-          / {goal} wRVU
-        </span>
-        <span className="text-xs mt-0.5" style={{ color: 'var(--theme-text-disabled)' }}>
+        <div className="flex items-center gap-1 mt-0.5">
+          <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--theme-text-muted)' }}>
+            / {goal}
+          </span>
+          <span style={{ fontSize: '0.6875rem', color: 'var(--theme-text-disabled)', fontWeight: 500 }}>
+            wRVU
+          </span>
+        </div>
+        <span style={{ fontSize: '0.625rem', color: 'var(--theme-text-disabled)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600 }}>
           today
         </span>
       </div>
@@ -131,45 +154,59 @@ function DualProgressBars({ expectedPct, actualPct, progressStatus }: DualBarsPr
     neutral:  theme.colors.textDisabled,
   };
   const barColor = actualColor[progressStatus] ?? theme.colors.primary;
+  const delta = actualPct - expectedPct;
 
   return (
-    <div className="space-y-4">
-      {/* Expected */}
-      <div className="space-y-2">
-        <div className="flex justify-between text-xs" style={{ color: 'var(--theme-text-muted)' }}>
-          <span className="font-medium">Expected by Now</span>
-          <span className="font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
+    <div className="space-y-3">
+      {/* Stacked overlay bars for intuitive comparison */}
+      <div className="space-y-1.5">
+        <div className="flex justify-between items-baseline">
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--theme-text-disabled)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Expected
+          </span>
+          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--theme-text-muted)' }}>
             {expectedPct.toFixed(0)}%
           </span>
         </div>
-        <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(91,184,212,0.08)' }}>
+        <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(91,184,212,0.07)' }}>
           <div
             className="h-2 rounded-full"
             style={{
               width: `${Math.min(100, expectedPct)}%`,
-              background: 'rgba(91,184,212,0.3)',
+              background: 'linear-gradient(90deg, rgba(91,184,212,0.2), rgba(91,184,212,0.35))',
               transition: 'width 0.7s cubic-bezier(0.4,0,0.2,1)',
             }}
           />
         </div>
       </div>
 
-      {/* Actual */}
-      <div className="space-y-2">
-        <div className="flex justify-between text-xs" style={{ color: 'var(--theme-text-muted)' }}>
-          <span className="font-medium">Actual Progress</span>
-          <span className="font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
-            {actualPct.toFixed(0)}%
+      <div className="space-y-1.5">
+        <div className="flex justify-between items-baseline">
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--theme-text-disabled)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Actual
           </span>
+          <div className="flex items-baseline gap-2">
+            {Math.abs(delta) > 1 && (
+              <span style={{
+                fontSize: '11px', fontWeight: 700,
+                color: delta >= 0 ? theme.colors.ahead : theme.colors.behind,
+              }}>
+                {delta >= 0 ? '+' : ''}{delta.toFixed(0)}%
+              </span>
+            )}
+            <span style={{ fontSize: '13px', fontWeight: 700, color: barColor }}>
+              {actualPct.toFixed(0)}%
+            </span>
+          </div>
         </div>
-        <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(91,184,212,0.08)' }}>
+        <div className="h-2.5 rounded-full overflow-hidden" style={{ background: 'rgba(91,184,212,0.07)' }}>
           <div
-            className="h-2 rounded-full"
+            className="h-2.5 rounded-full"
             style={{
               width: `${Math.min(100, actualPct)}%`,
-              background: barColor,
-              boxShadow: `0 0 8px ${barColor}66`,
-              transition: 'width 0.7s cubic-bezier(0.4,0,0.2,1)',
+              background: `linear-gradient(90deg, ${barColor}cc, ${barColor})`,
+              boxShadow: `0 0 10px ${barColor}44`,
+              transition: 'width 0.8s cubic-bezier(0.34,1.2,0.64,1)',
             }}
           />
         </div>
@@ -191,30 +228,30 @@ interface StatCardProps {
 function StatCard({ label, value, sub, valueColor, highlight }: StatCardProps) {
   return (
     <div
-      className="rounded-xl p-4 flex flex-col gap-1 transition-all duration-200"
+      className="rounded-xl flex flex-col gap-1 transition-all duration-200"
       style={{
         background: highlight
-          ? `linear-gradient(135deg, rgba(37,99,168,0.15), rgba(91,184,212,0.08))`
-          : 'var(--theme-bg-card)',
+          ? `linear-gradient(145deg, rgba(37,99,168,0.18), rgba(91,184,212,0.06))`
+          : `linear-gradient(145deg, rgba(22,32,50,0.9), rgba(15,24,36,0.7))`,
         border: highlight
-          ? '1px solid rgba(91,184,212,0.2)'
-          : '1px solid var(--theme-border)',
+          ? '1px solid rgba(91,184,212,0.22)'
+          : '1px solid rgba(91,184,212,0.09)',
+        padding: '14px 16px',
+        boxShadow: highlight ? '0 4px 16px rgba(37,99,168,0.12)' : '0 2px 8px rgba(0,0,0,0.2)',
       }}
     >
       <span
-        className="text-[11px] font-semibold uppercase tracking-wider"
-        style={{ color: 'var(--theme-text-disabled)' }}
+        style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--theme-text-disabled)' }}
       >
         {label}
       </span>
       <span
-        className="text-xl font-bold tabular-nums leading-tight"
-        style={{ color: valueColor ?? 'var(--theme-text-primary)' }}
+        style={{ fontSize: '1.375rem', fontWeight: 800, lineHeight: 1.1, letterSpacing: '-0.02em', color: valueColor ?? 'var(--theme-text-primary)', fontVariantNumeric: 'tabular-nums' }}
       >
         {value}
       </span>
       {sub && (
-        <span className="text-[11px]" style={{ color: 'var(--theme-text-disabled)' }}>
+        <span style={{ fontSize: '10px', color: 'var(--theme-text-disabled)', lineHeight: 1.3 }}>
           {sub}
         </span>
       )}
@@ -377,52 +414,54 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
       </div>
 
       {/* ── Gauge + Status ───────────────────────────────────────────── */}
-      <div className="card flex flex-col items-center gap-5 py-8">
+      <div
+        className="flex flex-col items-center gap-4 py-7 px-6 rounded-2xl transition-all"
+        style={{
+          background: `linear-gradient(160deg, rgba(22,32,50,0.95) 0%, rgba(15,22,34,0.98) 100%)`,
+          border: `1px solid ${color}22`,
+          boxShadow: `0 4px 30px rgba(0,0,0,0.4), 0 0 60px ${color}0a, inset 0 1px 0 rgba(255,255,255,0.04)`,
+        }}
+      >
         <CircularGauge
           current={metrics.currentRvu}
           goal={metrics.dailyGoal}
           glowColor={color}
           status={metrics.status}
         />
-        <div className="text-center">
-          <p className="text-2xl font-bold" style={{ color }}>
+        <div className="text-center space-y-1">
+          <p style={{ fontSize: '1.375rem', fontWeight: 800, color, letterSpacing: '-0.01em' }}>
             {sd.emoji} {sd.label}
           </p>
           {metrics.status !== 'before_work' && metrics.status !== 'goal_achieved' && (
-            <p className="text-sm mt-1" style={{ color: 'var(--theme-text-muted)' }}>
-              {formatMinutes(metrics.elapsedWorkMinutes)} elapsed ·{' '}
+            <p style={{ fontSize: '0.8125rem', color: 'var(--theme-text-muted)' }}>
+              {formatMinutes(metrics.elapsedWorkMinutes)} elapsed
+              <span style={{ color: 'var(--theme-text-disabled)', margin: '0 6px' }}>·</span>
               {formatMinutes(metrics.remainingWorkMinutes)} remaining
             </p>
           )}
           {metrics.status === 'goal_achieved' && (
-            <p className="text-sm mt-1 font-medium" style={{ color: theme.colors.goalGold + 'cc' }}>
+            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: theme.colors.goalGold + 'dd' }}>
               Daily goal complete 🎉
             </p>
           )}
           {metrics.status === 'before_work' && (
-            <p className="text-sm mt-1" style={{ color: 'var(--theme-text-muted)' }}>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--theme-text-muted)' }}>
               Shift starts at {fmt12(paceSettings.workdayStart)}
             </p>
           )}
         </div>
-      </div>
 
-      {/* ── Progress Bars ────────────────────────────────────────────── */}
-      {metrics.status !== 'before_work' && (
-        <div className="card space-y-3">
-          <p
-            className="text-xs font-semibold uppercase tracking-wider"
-            style={{ color: 'var(--theme-text-muted)' }}
-          >
-            Progress vs Pace
-          </p>
-          <DualProgressBars
-            expectedPct={metrics.expectedPercent}
-            actualPct={metrics.actualPercent}
-            progressStatus={sd.progressStatus}
-          />
-        </div>
-      )}
+        {/* Progress bars inline in the gauge card */}
+        {metrics.status !== 'before_work' && (
+          <div className="w-full pt-3 mt-1" style={{ borderTop: '1px solid rgba(91,184,212,0.08)' }}>
+            <DualProgressBars
+              expectedPct={metrics.expectedPercent}
+              actualPct={metrics.actualPercent}
+              progressStatus={sd.progressStatus}
+            />
+          </div>
+        )}
+      </div>
 
       {/* ── Stat Cards ───────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

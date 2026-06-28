@@ -263,11 +263,13 @@ function ProfileForm({ initial, onSave, onCancel, saving, isNew }: ProfileFormPr
 
 interface ProfilesProps {
   onNavigate: (tab: string) => void;
+  /** If set, open the edit form for this profile ID immediately */
+  initialEditId?: string | null;
 }
 
-export function Profiles({ onNavigate }: ProfilesProps) {
+export function Profiles({ onNavigate, initialEditId }: ProfilesProps) {
   const { profiles, activeProfile, switchProfile, createProfile, updateProfile, deleteProfile } = useProfile();
-  const [editing, setEditing] = useState<string | null>(null); // profile id or 'new'
+  const [editing, setEditing] = useState<string | null>(initialEditId ?? null); // profile id or 'new'
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -3,6 +3,7 @@ import { Route, Switch } from 'wouter';
 import { useAppInitialization } from './hooks/useAppInitialization';
 import { OrgProvider } from './contexts/OrgContext';
 import { OrgSwitcher } from './components/OrgSwitcher';
+import { useOrg } from './hooks/useOrg';
 import { DailyPaceDashboard } from './components/DailyPaceDashboard';
 import { MiniPaceWindow } from './components/MiniPaceWindow';
 import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
@@ -14,10 +15,11 @@ import { Settings } from './pages/Settings';
 import { Organizations } from './pages/Organizations';
 import { Locations } from './pages/Locations';
 import { WatcherPage } from './pages/WatcherPage';
+import { Profiles } from './pages/Profiles';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
-type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher';
+type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles';
 
 const NAV_ITEMS: { id: Tab; label: string; icon: string }[] = [
   { id: 'pace',      label: 'Daily Pace', icon: '⚡' },
@@ -33,6 +35,7 @@ function MainApp() {
   const { isReady, error } = useAppInitialization();
   const [activeTab, setActiveTab] = useState<Tab>('pace');
   const [isDark, setIsDark] = useState(true);
+  const { activeProfile } = useOrg();
 
   // Inject theme tokens into CSS variables on mount
   useEffect(() => {
@@ -104,15 +107,16 @@ function MainApp() {
         <header
           className="sticky top-0 z-40 backdrop-blur-md"
           style={{
-            background: 'rgba(15,24,36,0.88)',
-            borderBottom: '1px solid var(--theme-border)',
+            background: 'rgba(11,18,25,0.92)',
+            borderBottom: '1px solid rgba(91,184,212,0.1)',
+            boxShadow: '0 1px 0 rgba(0,0,0,0.4), 0 4px 20px rgba(0,0,0,0.3)',
           }}
         >
-          <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
+          <div className="max-w-7xl mx-auto px-4 h-13 flex items-center justify-between gap-3" style={{ height: '52px' }}>
             {/* Logo lockup */}
-            <BaptistLogoLockup size="sm" className="hidden sm:flex" />
+            <BaptistLogoLockup size="sm" className="hidden sm:flex shrink-0" />
             {/* Mobile: icon only */}
-            <BaptistLogoMark size={28} className="sm:hidden" />
+            <BaptistLogoMark size={26} className="sm:hidden shrink-0" />
 
             {/* Desktop tabs */}
             <nav className="hidden md:flex items-center gap-0.5 flex-1 justify-center">
@@ -120,7 +124,7 @@ function MainApp() {
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
-                  className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  className={`px-3 py-1.5 rounded-lg text-[13px] font-medium transition-all duration-150 ${
                     activeTab === item.id
                       ? item.id === 'pace'
                         ? 'nav-tab-pace-active'
@@ -128,30 +132,35 @@ function MainApp() {
                       : 'nav-tab-inactive'
                   }`}
                 >
-                  <span className="mr-1.5 text-[13px]">{item.icon}</span>
+                  <span className="mr-1 text-[12px]">{item.icon}</span>
                   {item.label}
                 </button>
               ))}
             </nav>
 
             {/* Right: OrgSwitcher + theme toggle */}
-            <div className="flex items-center gap-2 shrink-0">
-              <OrgSwitcher onManage={() => setActiveTab('locations')} />
+            <div className="flex items-center gap-1.5 shrink-0">
+              <OrgSwitcher
+                onManage={() => setActiveTab('locations')}
+                onMyProfile={() => setActiveTab('profiles')}
+              />
               <button
                 onClick={() => setIsDark(!isDark)}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-all"
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-xs transition-all"
                 style={{
-                  background: 'rgba(91,184,212,0.07)',
-                  border: '1px solid var(--theme-border)',
-                  color: 'var(--theme-text-muted)',
+                  background: 'transparent',
+                  border: '1px solid rgba(91,184,212,0.12)',
+                  color: 'var(--theme-text-disabled)',
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-primary)';
-                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(91,184,212,0.12)';
+                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-muted)';
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(91,184,212,0.25)';
+                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(91,184,212,0.06)';
                 }}
                 onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-muted)';
-                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(91,184,212,0.07)';
+                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-disabled)';
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(91,184,212,0.12)';
+                  (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
                 }}
                 title="Toggle theme"
               >
@@ -172,6 +181,7 @@ function MainApp() {
             {activeTab === 'settings'      && <Settings />}
             {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
             {activeTab === 'watcher'       && <WatcherPage onNavigateToImport={() => setActiveTab('import')} />}
+            {activeTab === 'profiles'      && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} initialEditId={activeProfile?.id ?? null} />}
           </div>
         </main>
 

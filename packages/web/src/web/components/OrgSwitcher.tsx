@@ -124,9 +124,10 @@ function RadiologistRow({ profile, isActive, onSelect }: RadiologistRowProps) {
 
 interface OrgSwitcherProps {
   onManage: () => void;
+  onMyProfile?: () => void;
 }
 
-export function OrgSwitcher({ onManage }: OrgSwitcherProps) {
+export function OrgSwitcher({ onManage, onMyProfile }: OrgSwitcherProps) {
   const {
     practices, radiologists,
     activeProfile, activePractice,
@@ -273,7 +274,37 @@ export function OrgSwitcher({ onManage }: OrgSwitcherProps) {
           </div>
 
           {/* Footer */}
-          <div style={{ borderTop: `1px solid ${theme.colors.border}`, padding: 6 }}>
+          <div style={{ borderTop: `1px solid ${theme.colors.border}`, padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {onMyProfile && (
+              <button
+                onClick={() => { setOpen(false); onMyProfile(); }}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 12px', borderRadius: 8,
+                  background: 'transparent',
+                  border: 'none', cursor: 'pointer',
+                  color: theme.colors.textSecondary, fontSize: 13, fontWeight: 500,
+                  transition: 'background 0.15s ease, color 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  const btn = e.currentTarget as HTMLButtonElement;
+                  btn.style.background = `rgba(91,184,212,0.1)`;
+                  btn.style.color = theme.colors.accent;
+                }}
+                onMouseLeave={(e) => {
+                  const btn = e.currentTarget as HTMLButtonElement;
+                  btn.style.background = 'transparent';
+                  btn.style.color = theme.colors.textSecondary;
+                }}
+              >
+                <ProfileAvatar
+                  initials={activeProfile.initials}
+                  color={activeProfile.color}
+                  size="xs"
+                />
+                My Profile
+              </button>
+            )}
             <button
               onClick={() => { setOpen(false); onManage(); }}
               style={{

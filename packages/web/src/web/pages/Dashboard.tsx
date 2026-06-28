@@ -313,8 +313,10 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Annual Dashboard</h1>
-          <p className="text-slate-400 text-sm mt-0.5">
+          <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--theme-text-primary)' }}>
+            Annual Dashboard
+          </h1>
+          <p className="text-sm mt-0.5" style={{ color: 'var(--theme-text-muted)' }}>
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
           </p>
         </div>
@@ -363,72 +365,129 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       )}
 
       {/* Top metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card col-span-1">
-          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">
-            {mode === 'my' ? 'Today' : 'Today (All)'}
-          </p>
-          <p className="text-3xl font-bold text-white mt-1">{fmt(todayStats?.totalWorkRvu ?? 0)}</p>
-          <p className="text-slate-400 text-xs mt-1">
-            {todayStats?.studyCount ?? 0} studies
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Today */}
+        <div
+          className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
+          style={{
+            background: 'linear-gradient(145deg, rgba(37,99,168,0.14), rgba(22,32,50,0.95))',
+            border: '1px solid rgba(91,184,212,0.18)',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.28), 0 0 40px rgba(37,99,168,0.06)',
+          }}
+        >
+          <p className="metric-label">{mode === 'my' ? 'Today' : 'Today (All)'}</p>
+          <p className="metric-value">{fmt(todayStats?.totalWorkRvu ?? 0)}</p>
+          <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
+            {todayStats?.studyCount ?? 0} {todayStats?.studyCount === 1 ? 'study' : 'studies'}
           </p>
         </div>
-        <div className="card col-span-1">
-          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">YTD wRVU</p>
-          <p className="text-3xl font-bold text-white mt-1">{fmtInt(ytdStats?.ytdWorkRvu ?? 0)}</p>
-          <p className="text-slate-400 text-xs mt-1">of {fmtInt(ytdStats?.annualGoal ?? 0)}</p>
-        </div>
-        <div className="card col-span-1">
-          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">% to Goal</p>
-          <p className="text-3xl font-bold text-white mt-1">{fmt(ytdStats?.percentToGoal ?? 0, 1)}%</p>
-          <p className="text-slate-400 text-xs mt-1">{fmtInt(ytdStats?.remainingRvu ?? 0)} remaining</p>
-        </div>
-        <div className="card col-span-1">
-          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">
-            {mode === 'my' ? 'Req. Pace' : 'Combined Avg/Day'}
+
+        {/* YTD wRVU */}
+        <div
+          className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
+          style={{
+            background: 'linear-gradient(145deg, rgba(22,32,50,0.95), rgba(15,22,34,0.98))',
+            border: '1px solid rgba(91,184,212,0.1)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
+          }}
+        >
+          <p className="metric-label">YTD wRVU</p>
+          <p className="metric-value">{fmtInt(ytdStats?.ytdWorkRvu ?? 0)}</p>
+          <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
+            of {fmtInt(ytdStats?.annualGoal ?? 0)} goal
           </p>
-          <p className="text-3xl font-bold text-white mt-1">
-            {fmt(ytdStats?.requiredRvuPerWorkday ?? 0)}
+        </div>
+
+        {/* % to Goal */}
+        <div
+          className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
+          style={{
+            background: 'linear-gradient(145deg, rgba(22,32,50,0.95), rgba(15,22,34,0.98))',
+            border: '1px solid rgba(91,184,212,0.1)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
+          }}
+        >
+          <p className="metric-label">% to Goal</p>
+          <p
+            className="metric-value"
+            style={{
+              color: (ytdStats?.percentToGoal ?? 0) >= 100
+                ? 'var(--theme-ahead)'
+                : (ytdStats?.percentToGoal ?? 0) >= 85
+                ? 'var(--theme-on-track)'
+                : undefined,
+            }}
+          >
+            {fmt(ytdStats?.percentToGoal ?? 0, 1)}%
           </p>
-          <p className="text-slate-400 text-xs mt-1">wRVU/workday needed</p>
+          <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
+            {fmtInt(ytdStats?.remainingRvu ?? 0)} remaining
+          </p>
+        </div>
+
+        {/* Req. Pace */}
+        <div
+          className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
+          style={{
+            background: 'linear-gradient(145deg, rgba(22,32,50,0.95), rgba(15,22,34,0.98))',
+            border: '1px solid rgba(91,184,212,0.1)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
+          }}
+        >
+          <p className="metric-label">{mode === 'my' ? 'Req. Pace' : 'Avg / Day'}</p>
+          <p className="metric-value">{fmt(ytdStats?.requiredRvuPerWorkday ?? 0)}</p>
+          <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
+            wRVU/workday needed
+          </p>
         </div>
       </div>
 
       {/* YTD Progress bar */}
-      <div className="card space-y-3">
+      <div className="card space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-semibold text-white">
-              {mode === 'my' ? 'My Annual Goal Progress' : mode === 'practice' ? `${practiceLabel} Progress` : `${orgLabel} Progress`}
+            <p className="text-sm font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
+              {mode === 'my' ? 'Annual Goal Progress' : mode === 'practice' ? `${practiceLabel} Progress` : `${orgLabel} Progress`}
             </p>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs mt-0.5" style={{ color: 'var(--theme-text-muted)' }}>
               {fmtInt(ytdStats?.daysElapsedInYear ?? 0)} days elapsed · {fmtInt(ytdStats?.daysRemainingInYear ?? 0)} remaining
             </p>
           </div>
           <StatusBadge status={paceStatus} />
         </div>
         <ProgressBar value={ytdStats?.percentToGoal ?? 0} status={paceStatus} height="lg" animated />
-        <div className="flex justify-between text-xs text-slate-500">
+        <div className="flex justify-between text-xs" style={{ color: 'var(--theme-text-disabled)' }}>
           <span>0</span>
-          <span className="text-white font-medium">
+          <span style={{ color: 'var(--theme-text-primary)', fontWeight: 600 }}>
             {fmt(ytdStats?.ytdWorkRvu ?? 0, 0)} / {fmtInt(ytdStats?.annualGoal ?? 0)} wRVU
           </span>
           <span>Goal</span>
         </div>
-        <div className="pt-2 border-t border-white/5 flex gap-6">
+        <div className="divider" />
+        <div className="flex gap-6 flex-wrap">
           <div>
-            <p className="text-xs text-slate-400">Projected Year-End</p>
-            <p className={`text-lg font-bold mt-0.5 ${
-              (ytdStats?.projectedYearEnd ?? 0) >= (ytdStats?.annualGoal ?? 0) ? 'text-emerald-400' : 'text-red-400'
-            }`}>{fmtInt(ytdStats?.projectedYearEnd ?? 0)}</p>
+            <p className="metric-label">Projected Year-End</p>
+            <p
+              className="text-lg font-bold mt-0.5"
+              style={{
+                color: (ytdStats?.projectedYearEnd ?? 0) >= (ytdStats?.annualGoal ?? 0)
+                  ? 'var(--theme-ahead)' : 'var(--theme-behind)',
+              }}
+            >
+              {fmtInt(ytdStats?.projectedYearEnd ?? 0)}
+            </p>
           </div>
           <div>
-            <p className="text-xs text-slate-400">Daily Avg (YTD)</p>
-            <p className="text-lg font-bold text-white mt-0.5">{fmt(ytdStats?.dailyAverageYtd ?? 0)}</p>
+            <p className="metric-label">Daily Avg (YTD)</p>
+            <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--theme-text-primary)' }}>
+              {fmt(ytdStats?.dailyAverageYtd ?? 0)}
+            </p>
           </div>
           <div>
-            <p className="text-xs text-slate-400">Workdays Left</p>
-            <p className="text-lg font-bold text-white mt-0.5">{fmtInt(ytdStats?.workdaysRemainingEstimate ?? 0)}</p>
+            <p className="metric-label">Workdays Left</p>
+            <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--theme-text-primary)' }}>
+              {fmtInt(ytdStats?.workdaysRemainingEstimate ?? 0)}
+            </p>
           </div>
         </div>
       </div>
@@ -480,31 +539,56 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         {/* Today's modality breakdown */}
         <div className="card space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-white">Today by Modality</p>
-            <button onClick={() => onNavigate('log')} className="text-xs transition-colors" style={{ color: theme.colors.accent }}>
+            <p className="text-sm font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
+              Today by Modality
+            </p>
+            <button
+              onClick={() => onNavigate('log')}
+              className="text-xs font-medium transition-colors"
+              style={{ color: theme.colors.accent }}
+            >
               + Add
             </button>
           </div>
           {modalityData.length === 0 ? (
             <div className="text-center py-8">
-              <p className="text-slate-500 text-sm">No studies logged today</p>
-              <button onClick={() => onNavigate('log')} className="mt-3 px-4 py-2 rounded-lg text-sm transition-colors"
-                style={{ background: 'rgba(37,99,168,0.15)', border: '1px solid rgba(37,99,168,0.3)', color: theme.colors.accent }}>
+              <p className="text-sm" style={{ color: 'var(--theme-text-muted)' }}>No studies logged today</p>
+              <button
+                onClick={() => onNavigate('log')}
+                className="mt-3 px-4 py-2 rounded-xl text-sm font-medium transition-all"
+                style={{
+                  background: 'rgba(37,99,168,0.12)',
+                  border: '1px solid rgba(37,99,168,0.25)',
+                  color: theme.colors.accent,
+                }}
+              >
                 Log your first study
               </button>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {modalityData.map(({ modality, rvu }) => {
                 const pct = (rvu / (todayStats?.totalWorkRvu ?? 1)) * 100;
+                const color = MODALITY_COLORS[modality];
                 return (
                   <div key={modality} className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-slate-300">{MODALITY_LABELS[modality]}</span>
-                      <span className="text-white font-medium">{fmt(rvu)} wRVU</span>
+                    <div className="flex justify-between items-baseline">
+                      <span style={{ fontSize: '12px', color: 'var(--theme-text-secondary)', fontWeight: 500 }}>
+                        {MODALITY_LABELS[modality]}
+                      </span>
+                      <span style={{ fontSize: '12px', color: 'var(--theme-text-primary)', fontWeight: 600 }}>
+                        {fmt(rvu)} <span style={{ color: 'var(--theme-text-disabled)', fontWeight: 400 }}>wRVU</span>
+                      </span>
                     </div>
-                    <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: MODALITY_COLORS[modality] }} />
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${pct}%`,
+                          background: `linear-gradient(90deg, ${color}99, ${color})`,
+                          boxShadow: `0 0 6px ${color}44`,
+                        }}
+                      />
                     </div>
                   </div>
                 );
@@ -515,29 +599,42 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 
         {/* Weekly trend */}
         <div className="card space-y-3">
-          <p className="text-sm font-semibold text-white">7-Day Trend</p>
-          <div className="flex items-end gap-2 h-24">
+          <p className="text-sm font-semibold" style={{ color: 'var(--theme-text-primary)' }}>7-Day Trend</p>
+          <div className="flex items-end gap-1.5" style={{ height: '96px' }}>
             {weeklyData.map(({ date, rvu }) => {
               const pct = (rvu / weekMax) * 100;
               const isToday = date === today;
+              const hasData = rvu > 0;
               return (
-                <div key={date} className="flex-1 flex flex-col items-center gap-1">
-                  <div className="w-full flex items-end justify-center" style={{ height: '80px' }}>
+                <div key={date} className="flex-1 flex flex-col items-center gap-1" style={{ height: '96px', justifyContent: 'flex-end' }}>
+                  <div className="w-full flex items-end justify-center" style={{ height: '72px' }}>
                     <div
-                      className="w-full rounded-t transition-all duration-500"
+                      className="w-full rounded-t-lg transition-all duration-600"
                       style={{
-                        height: `${Math.max(pct, rvu > 0 ? 8 : 0)}%`,
+                        height: `${Math.max(pct, hasData ? 6 : 0)}%`,
                         background: isToday
                           ? `linear-gradient(to top, ${theme.colors.primary}, ${theme.colors.accent})`
-                          : rvu > 0 ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.05)',
+                          : hasData
+                          ? 'linear-gradient(to top, rgba(91,184,212,0.15), rgba(91,184,212,0.28))'
+                          : 'rgba(255,255,255,0.04)',
+                        boxShadow: isToday ? `0 -2px 12px rgba(91,184,212,0.3)` : 'none',
                       }}
                     />
                   </div>
-                  <span className={`text-[9px] ${isToday ? 'font-bold' : 'text-slate-500'}`}
-                    style={isToday ? { color: theme.colors.accent } : {}}>
+                  <span
+                    style={{
+                      fontSize: '9px',
+                      fontWeight: isToday ? 700 : 500,
+                      color: isToday ? theme.colors.accent : 'var(--theme-text-disabled)',
+                    }}
+                  >
                     {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
                   </span>
-                  {rvu > 0 && <span className="text-[9px] text-slate-400">{fmt(rvu, 0)}</span>}
+                  {hasData && (
+                    <span style={{ fontSize: '9px', color: 'var(--theme-text-muted)' }}>
+                      {fmt(rvu, 0)}
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -556,10 +653,16 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           <button
             key={tab}
             onClick={() => onNavigate(tab)}
-            className="card flex items-center gap-3 hover:bg-white/8 transition-colors group cursor-pointer"
+            className="card flex items-center gap-3 cursor-pointer group transition-all duration-200"
+            style={{ padding: '1rem 1.125rem' }}
           >
             <span className="text-xl">{icon}</span>
-            <span className="text-sm text-slate-300 group-hover:text-white transition-colors font-medium">{label}</span>
+            <span
+              className="text-sm font-medium transition-colors duration-150"
+              style={{ color: 'var(--theme-text-secondary)' }}
+            >
+              {label}
+            </span>
           </button>
         ))}
       </div>
