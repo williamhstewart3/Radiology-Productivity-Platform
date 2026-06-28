@@ -62,8 +62,15 @@ export interface DailyPaceMetrics {
   expectedPercent: number;
   /** actualPercent of daily goal (0-100+) */
   actualPercent: number;
-  /** Positive = ahead, negative = behind */
+  /** Positive = ahead, negative = behind (in wRVUs) */
   paceDifference: number;
+  /**
+   * Time equivalent of pace difference in minutes.
+   * Formula: paceDifference / (dailyGoal / shiftMinutes)
+   * Positive = minutes ahead of pace, negative = minutes behind.
+   * More intuitive than raw wRVU difference for real-time monitoring.
+   */
+  timeAheadBehindMinutes: number;
   /** Linear extrapolation to end of shift */
   projectedEndOfDay: number;
   /** How many wRVUs still needed to hit goal */
@@ -134,6 +141,9 @@ export function computeDailyPace(
   const remainingToGoal = Math.max(0, goal - currentRvu);
   const percentComplete = (currentRvu / goal) * 100;
 
+  // paceRate: wRVU per minute at perfect linear pace
+  const paceRate = goal / shiftMinutes;
+
   // ── Before shift ───────────────────────────────────────────────────────
   if (now < startMin) {
     return {
@@ -147,6 +157,7 @@ export function computeDailyPace(
       expectedPercent: 0,
       actualPercent: percentComplete,
       paceDifference: 0,
+      timeAheadBehindMinutes: 0,
       projectedEndOfDay: 0,
       remainingToGoal,
       requiredRvuPerHour: goal / (shiftMinutes / 60),
@@ -158,6 +169,7 @@ export function computeDailyPace(
   // ── After shift ────────────────────────────────────────────────────────
   if (now >= endMin) {
     const projectedEndOfDay = currentRvu; // shift is done; what you have is what you get
+    const pd = currentRvu - goal;
     return {
       currentRvu,
       dailyGoal: goal,
@@ -168,7 +180,8 @@ export function computeDailyPace(
       expectedRvu: goal,
       expectedPercent: 100,
       actualPercent: percentComplete,
-      paceDifference: currentRvu - goal,
+      paceDifference: pd,
+      timeAheadBehindMinutes: paceRate > 0 ? pd / paceRate : 0,
       projectedEndOfDay,
       remainingToGoal,
       requiredRvuPerHour: 0,
@@ -219,6 +232,9 @@ export function computeDailyPace(
 
   const goalJustAchieved = currentRvu >= goal && !previouslyAchieved;
 
+  // timeAheadBehindMinutes: how many minutes ahead/behind at current pace rate
+  const timeAheadBehindMinutes = paceRate > 0 ? paceDifference / paceRate : 0;
+
   return {
     currentRvu,
     dailyGoal: goal,
@@ -230,6 +246,7 @@ export function computeDailyPace(
     expectedPercent,
     actualPercent,
     paceDifference,
+    timeAheadBehindMinutes,
     projectedEndOfDay,
     remainingToGoal,
     requiredRvuPerHour,
@@ -316,4 +333,21 @@ export function formatMinutes(minutes: number): string {
   if (h === 0) return `${m}m`;
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
+}
+
+/**
+ * Format timeAheadBehindMinutes as a human-readable pace label.
+ * e.g. "34 min ahead", "18 min behind", "On pace", "Goal hit"
+ */
+export function formatTimePaceLabel(
+  timeMinutes: number,
+  status: PaceStatus,
+): string {
+  if (status === 'goal_achieved') return 'Goal hit';
+  if (status === 'before_work') return 'Not started';
+  if (status === 'after_work') return 'Shift complete';
+  const abs = Math.round(Math.abs(timeMinutes));
+  if (abs < 2) return 'On pace';
+  if (timeMinutes > 0) return `${abs} min ahead`;
+  return `${abs} min behind`;
 }
