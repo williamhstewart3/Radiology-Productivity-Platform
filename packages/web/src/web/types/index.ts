@@ -132,6 +132,11 @@ export interface UserSettings {
   activeRvuFileVersion: string;
   theme: 'light' | 'dark' | 'system';
   updatedAt: string;
+  // Daily Pace settings
+  dailyRvuGoal: number;
+  workdayStart: string;  // "HH:MM" 24-hr
+  workdayEnd: string;    // "HH:MM" 24-hr
+  breakMinutes: number;
 }
 
 /** A candidate CPT match returned by the matcher, before user confirmation. */

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAppInitialization } from './hooks/useAppInitialization';
+import { DailyPaceDashboard } from './components/DailyPaceDashboard';
 import { Dashboard } from './pages/Dashboard';
 import { LogStudy } from './pages/LogStudy';
 import { Import } from './pages/Import';
@@ -7,19 +8,20 @@ import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 
-type Tab = 'dashboard' | 'log' | 'import' | 'history' | 'settings';
+type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings';
 
 const NAV_ITEMS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-  { id: 'log', label: 'Log Study', icon: '✏️' },
-  { id: 'import', label: 'Import', icon: '📥' },
-  { id: 'history', label: 'History', icon: '📋' },
-  { id: 'settings', label: 'Settings', icon: '⚙️' },
+  { id: 'pace',      label: 'Daily Pace', icon: '⚡' },
+  { id: 'dashboard', label: 'Annual',     icon: '📊' },
+  { id: 'log',       label: 'Log Study',  icon: '✏️' },
+  { id: 'import',    label: 'Import',     icon: '📥' },
+  { id: 'history',   label: 'History',    icon: '📋' },
+  { id: 'settings',  label: 'Settings',   icon: '⚙️' },
 ];
 
 export default function App() {
   const { isReady, error } = useAppInitialization();
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [activeTab, setActiveTab] = useState<Tab>('pace');
   const [isDark, setIsDark] = useState(true);
 
   useEffect(() => {
@@ -76,7 +78,9 @@ export default function App() {
                   onClick={() => setActiveTab(item.id)}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                     activeTab === item.id
-                      ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                      ? item.id === 'pace'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
                       : 'text-slate-400 hover:text-white hover:bg-white/5'
                   }`}
                 >
@@ -99,11 +103,12 @@ export default function App() {
         {/* Page content */}
         <main className="flex-1 overflow-auto">
           <div className="max-w-7xl mx-auto px-4 py-6">
-            {activeTab === 'dashboard' && <Dashboard onNavigate={setActiveTab} />}
-            {activeTab === 'log' && <LogStudy onSaved={() => setActiveTab('dashboard')} />}
-            {activeTab === 'import' && <Import onImported={() => setActiveTab('dashboard')} />}
-            {activeTab === 'history' && <History />}
-            {activeTab === 'settings' && <Settings />}
+            {activeTab === 'pace'      && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
+            {activeTab === 'dashboard' && <Dashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
+            {activeTab === 'log'       && <LogStudy onSaved={() => setActiveTab('pace')} />}
+            {activeTab === 'import'    && <Import onImported={() => setActiveTab('pace')} />}
+            {activeTab === 'history'   && <History />}
+            {activeTab === 'settings'  && <Settings />}
           </div>
         </main>
 
@@ -114,9 +119,11 @@ export default function App() {
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all ${
+                className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all ${
                   activeTab === item.id
-                    ? 'text-indigo-400'
+                    ? item.id === 'pace'
+                      ? 'text-amber-400'
+                      : 'text-indigo-400'
                     : 'text-slate-500 hover:text-slate-300'
                 }`}
               >

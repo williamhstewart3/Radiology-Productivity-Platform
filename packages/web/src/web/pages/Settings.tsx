@@ -172,6 +172,69 @@ export function Settings() {
         </button>
       </div>
 
+      {/* Daily Pace settings */}
+      <div className="card space-y-4">
+        <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Daily Pace</h2>
+        <p className="text-xs text-slate-400">Used by the Daily Pace tab to track real-time productivity during your shift.</p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1.5">Daily wRVU Goal</label>
+            <input
+              type="number"
+              value={merged.dailyRvuGoal ?? 90}
+              onChange={(e) => update({ dailyRvuGoal: Number(e.target.value) })}
+              min={1}
+              max={500}
+              step={5}
+              className="input w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1.5">Break Minutes</label>
+            <input
+              type="number"
+              value={merged.breakMinutes ?? 0}
+              onChange={(e) => update({ breakMinutes: Number(e.target.value) })}
+              min={0}
+              max={480}
+              step={5}
+              className="input w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1.5">Workday Start</label>
+            <input
+              type="time"
+              value={merged.workdayStart ?? '08:00'}
+              onChange={(e) => update({ workdayStart: e.target.value })}
+              className="input w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1.5">Workday End</label>
+            <input
+              type="time"
+              value={merged.workdayEnd ?? '17:00'}
+              onChange={(e) => update({ workdayEnd: e.target.value })}
+              className="input w-full"
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all ${
+            saved
+              ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
+              : 'bg-gradient-to-r from-indigo-500 to-violet-600 text-white hover:opacity-90'
+          }`}
+        >
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Settings'}
+        </button>
+      </div>
+
       {/* RVU file import */}
       <div className="card space-y-4">
         <div className="flex items-center justify-between">

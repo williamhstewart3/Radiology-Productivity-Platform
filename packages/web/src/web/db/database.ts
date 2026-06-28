@@ -51,6 +51,11 @@ export async function ensureUserSettings(): Promise<UserSettings> {
     activeRvuFileVersion: 'RVU26A',
     theme: 'system',
     updatedAt: new Date().toISOString(),
+    // Daily Pace defaults
+    dailyRvuGoal: 90,
+    workdayStart: '08:00',
+    workdayEnd: '17:00',
+    breakMinutes: 0,
   };
   await db.userSettings.put(defaults);
   return defaults;
