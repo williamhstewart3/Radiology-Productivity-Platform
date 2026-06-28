@@ -1,55 +1,143 @@
 /**
+ * textMatching.ts
+ *
  * Normalizes free-text exam names for matching purposes. Expands common
  * radiology abbreviations so "CT A/P W/ CON" and "CT Abdomen Pelvis With
  * Contrast" normalize to comparable token sets.
+ *
+ * Also strips institution-specific noise tokens (e.g. "CODE", "STROKE" as
+ * a protocol designator) that appear in PowerScribe/RIS titles but carry no
+ * CPT-matching signal. This lets "CT ANGIOGRAM CODE STROKE HEAD NECK" resolve
+ * to the same normalized form as "CTA Head and Neck w/ Contrast".
  */
 
+// ─── Abbreviation expansion map ─────────────────────────────────────────────
+// Applied token-by-token (after slash-phrases are handled first).
+// Longer slash-phrases are matched before shorter ones to avoid partial hits.
+
 const ABBREVIATION_MAP: Record<string, string> = {
-  'w/o': 'without',
-  'wo': 'without',
-  'w/': 'with',
-  'w': 'with',
-  'c/': 'contrast',
-  'con': 'contrast',
-  'cont': 'contrast',
-  'abd': 'abdomen',
-  'pel': 'pelvis',
-  'a/p': 'abdomen pelvis',
-  'ap': 'abdomen pelvis',
-  'c/a/p': 'chest abdomen pelvis',
-  'cap': 'chest abdomen pelvis',
-  'chst': 'chest',
-  'hd': 'head',
-  'neg': 'neck',
-  'sp': 'spine',
-  'lspine': 'lumbar spine',
-  'l-spine': 'lumbar spine',
-  'cspine': 'cervical spine',
-  'c-spine': 'cervical spine',
-  'tspine': 'thoracic spine',
-  't-spine': 'thoracic spine',
-  'lt': 'left',
-  'rt': 'right',
-  'bilat': 'bilateral',
-  'ext': 'extremity',
-  'xr': 'xray',
-  'x-ray': 'xray',
-  'us': 'ultrasound',
-  'u/s': 'ultrasound',
-  'mr': 'mri',
-  'iv': 'intravenous',
-  '2v': 'two view',
-  '1v': 'one view',
-  '3v': 'three view',
-  'wwo': 'with and without',
-  'w-wo': 'with and without',
-  'w/wo': 'with and without',
+  // Contrast
+  'w/o':        'without',
+  'wo':         'without',
+  'w/':         'with',
+  'w':          'with',
+  'c/':         'contrast',
+  'con':        'contrast',
+  'cont':       'contrast',
+  'wcon':       'with contrast',
+  'wwocon':     'with and without contrast',
+
+  // Modality abbreviations
+  'cta':        'ct angiogram',
+  'mra':        'mr angiogram',
+  'mri':        'mri',
+  'mr':         'mri',
+  'us':         'ultrasound',
+  'u/s':        'ultrasound',
+  'xr':         'xray',
+  'x-ray':      'xray',
+  'nm':         'nuclear medicine',
+  'pet':        'positron emission tomography',
+  'fluoro':     'fluoroscopy',
+
+  // Body regions
+  'abd':        'abdomen',
+  'pel':        'pelvis',
+  'a/p':        'abdomen pelvis',
+  'ap':         'abdomen pelvis',
+  'c/a/p':      'chest abdomen pelvis',
+  'cap':        'chest abdomen pelvis',
+  'chst':       'chest',
+  'hd':         'head',
+  'nk':         'neck',
+  'sp':         'spine',
+  'lspine':     'lumbar spine',
+  'l-spine':    'lumbar spine',
+  'cspine':     'cervical spine',
+  'c-spine':    'cervical spine',
+  'tspine':     'thoracic spine',
+  't-spine':    'thoracic spine',
+  'lsp':        'lumbar spine',
+  'csp':        'cervical spine',
+  'tsp':        'thoracic spine',
+  'brnst':      'brain stem',
+  'brn':        'brain',
+
+  // Laterality
+  'lt':         'left',
+  'rt':         'right',
+  'bil':        'bilateral',
+  'bi':         'bilateral',
+
+  // Extremities
+  'ext':        'extremity',
+  'ue':         'upper extremity',
+  'le':         'lower extremity',
+  'shldr':      'shoulder',
+  'kn':         'knee',
+  'ank':        'ankle',
+  'wr':         'wrist',
+  'hp':         'hip',
+
+  // Views / technique
+  'iv':         'intravenous',
+  '2v':         'two view',
+  '1v':         'one view',
+  '3v':         'three view',
+  'wwo':        'with and without',
+  'w-wo':       'with and without',
+  'w/wo':       'with and without',
+  'wowcon':     'without and with contrast',
+
+  // Misc
+  'dx':         'diagnostic',
+  'scr':        'screening',
+  'compl':      'complete',
+  'comp':       'complete',
+  'lim':        'limited',
+  'bilat':      'bilateral',   // kept here as the primary entry
+  'incl':       'including',
+  'excl':       'excluding',
+  'cad':        'cad',
 };
+
+// ─── Noise tokens ────────────────────────────────────────────────────────────
+// These tokens appear in institution-specific RIS/PowerScribe study titles
+// but carry ZERO CPT-matching signal. Strip them before normalization so
+// "CT ANGIOGRAM CODE STROKE HEAD NECK" == "CTA Head Neck".
+//
+// "CODE" = protocol order name prefix used at many institutions
+// "STROKE" = protocol variant label (not a body part here — body part is "head/neck")
+// "PROTOCOL" = same as CODE
+// "STAT" = urgency flag, not anatomy
+// "PORTABLE" = acquisition method, not CPT-relevant
+// "W&" = sometimes appears as "W& CONTRAST" (typo variant)
+
+const NOISE_TOKENS = new Set([
+  'code',
+  'stroke',
+  'protocol',
+  'stat',
+  'portable',
+  'exam',
+  'study',
+  'scan',
+  'imaging',
+  'radiology',
+  'diagnostic',
+  'order',
+  'req',
+  'request',
+]);
+
+// ─── Core normalization ──────────────────────────────────────────────────────
 
 export function normalizeExamText(raw: string): string {
   let text = raw.toLowerCase().trim();
+
+  // Strip underscores, punctuation (except slashes — handled below)
   text = text.replace(/[_]+/g, ' ');
-  text = text.replace(/[.,;:()]/g, ' ');
+  text = text.replace(/[.,;:()\[\]{}]/g, ' ');
 
   // Expand whole-phrase slash abbreviations FIRST, while the slash is still
   // attached, before any blanket slash-splitting can break them apart.
@@ -68,13 +156,18 @@ export function normalizeExamText(raw: string): string {
     text = text.replace(re, ` ${ABBREVIATION_MAP[phrase]} `);
   }
 
-  // Any remaining slashes (not part of a known phrase) are split into
-  // separate tokens rather than left glued together.
+  // Any remaining slashes → split into separate tokens
   text = text.replace(/\//g, ' ');
   text = text.replace(/\s+/g, ' ');
 
+  // Tokenize, expand abbreviations, strip noise tokens
   const tokens = text.split(' ').filter(Boolean);
-  const expanded = tokens.map((tok) => ABBREVIATION_MAP[tok] ?? tok);
+  const expanded = tokens
+    .map((tok) => ABBREVIATION_MAP[tok] ?? tok)
+    // Re-tokenize expanded multi-word replacements (e.g. "cta" → "ct angiogram" → ["ct","angiogram"])
+    .flatMap((tok) => tok.split(' '))
+    .filter((tok) => !NOISE_TOKENS.has(tok));
+
   return expanded.join(' ').replace(/\s+/g, ' ').trim();
 }
 
@@ -82,7 +175,9 @@ export function tokenize(normalized: string): string[] {
   return normalized.split(' ').filter(Boolean);
 }
 
-/** Levenshtein edit distance, used for fuzzy string comparisons. */
+// ─── String similarity ───────────────────────────────────────────────────────
+
+/** Levenshtein edit distance. */
 export function levenshteinDistance(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
@@ -105,7 +200,7 @@ export function levenshteinDistance(a: string, b: string): number {
   return dp[m][n];
 }
 
-/** Similarity score in [0,1], 1 = identical, based on normalized edit distance. */
+/** Similarity in [0,1], 1 = identical. */
 export function stringSimilarity(a: string, b: string): number {
   if (a === b) return 1;
   const maxLen = Math.max(a.length, b.length);
@@ -115,18 +210,15 @@ export function stringSimilarity(a: string, b: string): number {
 }
 
 /**
- * Token-set overlap, measured as recall against the SHORTER token set
- * rather than Jaccard (intersection-over-union). A short user query like
- * "CT abd" matching every one of its own tokens against a longer official
- * CMS description like "CT abdomen w contrast" should score close to 1.0,
- * not be punished for the description containing additional clinically
- * relevant words the user didn't bother typing. Jaccard penalizes the
- * query for the target's length; recall-against-the-query does not.
+ * Token-set overlap measured as recall against the SHORTER token set.
+ * A short query "CT abd" matching every one of its tokens against a longer
+ * CMS description "CT abdomen w contrast" scores close to 1.0, not penalized
+ * for the description's additional tokens.
  */
 export function tokenOverlapScore(tokensA: string[], tokensB: string[]): number {
   if (tokensA.length === 0 || tokensB.length === 0) return 0;
   const shorter = tokensA.length <= tokensB.length ? tokensA : tokensB;
-  const longer = tokensA.length <= tokensB.length ? tokensB : tokensA;
+  const longer  = tokensA.length <= tokensB.length ? tokensB : tokensA;
   const longerSet = new Set(longer);
 
   let matched = 0;
@@ -137,47 +229,34 @@ export function tokenOverlapScore(tokensA: string[], tokensB: string[]): number 
 }
 
 /**
- * Penalizes a match when contrast-related tokens conflict between the two
- * normalized strings: if A says "without" and B says "with" (or vice
- * versa), that's a direct contradiction, not just a missing detail --
- * "with contrast" and "without contrast" are different CPT codes with
- * different RVUs, not stylistic variants of the same study. Plain recall
- * scoring can't tell the difference between "the query just didn't mention
- * this" and "this candidate is the wrong exam," so this is an explicit
- * penalty rather than something folded into ordinary token overlap.
- * Returns a multiplier in (0, 1].
+ * Contrast contradiction penalty.
+ * "with contrast" vs "without contrast" are different CPT codes.
+ * Plain token recall can't distinguish "query didn't mention it" from
+ * "query explicitly contradicts it" — so this is an explicit multiplier.
  */
 function contrastConsistencyPenalty(tokensA: string[], tokensB: string[]): number {
   const setA = new Set(tokensA);
   const setB = new Set(tokensB);
-  const aHasWith = setA.has('with') && !setA.has('without');
+  const aHasWith    = setA.has('with')    && !setA.has('without');
   const aHasWithout = setA.has('without');
-  const bHasWith = setB.has('with') && !setB.has('without');
+  const bHasWith    = setB.has('with')    && !setB.has('without');
   const bHasWithout = setB.has('without');
 
-  const directContradiction = (aHasWith && bHasWithout) || (aHasWithout && bHasWith);
-  if (directContradiction) return 0.3;
-
+  if ((aHasWith && bHasWithout) || (aHasWithout && bHasWith)) return 0.3;
   return 1;
 }
 
 /**
- * Combined score blending token recall and full-string similarity, with an
- * explicit penalty for contrast-status contradictions (see
- * CONTRAST_SENSITIVE_TOKENS above). Token recall is weighted much more
- * heavily (0.8) than raw string similarity (0.2): for short queries against
- * long canonical descriptions, whole-string edit distance is a poor signal
- * (it punishes the query for being shorter than the target even when every
- * token it has is correct), so it's kept only as a tie-breaker between
- * candidates with equal token recall, not as a primary signal.
+ * Combined score blending token recall (0.8) and string similarity (0.2),
+ * with an explicit contrast-contradiction penalty.
  */
 export function combinedSimilarity(rawA: string, rawB: string): number {
   const normA = normalizeExamText(rawA);
   const normB = normalizeExamText(rawB);
   const tokensA = tokenize(normA);
   const tokensB = tokenize(normB);
-  const tokenScore = tokenOverlapScore(tokensA, tokensB);
+  const tokenScore  = tokenOverlapScore(tokensA, tokensB);
   const stringScore = stringSimilarity(normA, normB);
-  const baseScore = tokenScore * 0.8 + stringScore * 0.2;
+  const baseScore   = tokenScore * 0.8 + stringScore * 0.2;
   return baseScore * contrastConsistencyPenalty(tokensA, tokensB);
 }

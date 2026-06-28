@@ -37,6 +37,9 @@ export function Import({ onImported }: ImportProps) {
       const rows: OcrReviewRow[] = [];
       for (const entry of entries) {
         const candidates = await findMatchCandidates(entry, 4);
+        const top = candidates[0];
+        // Alias exact matches auto-accept — no review needed
+        const autoAccept = top && top.method === 'alias_match' && top.confidence >= 0.95;
         rows.push({
           tempId: crypto.randomUUID(),
           rawText: entry,
@@ -45,7 +48,7 @@ export function Import({ onImported }: ImportProps) {
           accessionNumber: null,
           candidates,
           selectedCandidateIndex: candidates.length > 0 && candidates[0].confidence >= 0.75 ? 0 : null,
-          needsReview: candidates.length === 0 || candidates[0].confidence < 0.75,
+          needsReview: !autoAccept && (candidates.length === 0 || candidates[0].confidence < 0.75),
           included: true,
         });
       }
@@ -69,6 +72,8 @@ export function Import({ onImported }: ImportProps) {
       const rows: OcrReviewRow[] = [];
       for (const p of parsed) {
         const candidates = await findMatchCandidates(p.examName, 4);
+        const top = candidates[0];
+        const autoAccept = top && top.method === 'alias_match' && top.confidence >= 0.95;
         rows.push({
           tempId: crypto.randomUUID(),
           rawText: p.rawText,
@@ -77,7 +82,7 @@ export function Import({ onImported }: ImportProps) {
           accessionNumber: p.accessionNumber,
           candidates,
           selectedCandidateIndex: candidates.length > 0 && candidates[0].confidence >= 0.75 ? 0 : null,
-          needsReview: candidates.length === 0 || candidates[0].confidence < 0.75,
+          needsReview: !autoAccept && (candidates.length === 0 || candidates[0].confidence < 0.75),
           included: true,
         });
       }
@@ -224,6 +229,12 @@ export function Import({ onImported }: ImportProps) {
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {/* Auto-matched from learned alias — no action needed */}
+                  {!row.needsReview && row.included && row.candidates[0]?.method === 'alias_match' && row.candidates[0]?.confidence >= 0.95 && (
+                    <span className="text-xs bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-lg" title="Matched from a previously confirmed mapping">
+                      ✓ Learned
+                    </span>
+                  )}
                   {row.needsReview && row.included && (
                     <span className="text-xs bg-amber-500/20 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded-lg">
                       Review
@@ -262,11 +273,15 @@ export function Import({ onImported }: ImportProps) {
                         }`}
                       >
                         <span className="font-mono font-bold mr-2">{c.cptCode}</span>
-                        <span className="mr-2">{c.description.slice(0, 60)}{c.description.length > 60 ? '…' : ''}</span>
+                        {c.modifier && <span className="mr-1.5 text-slate-500">mod {c.modifier}</span>}
+                        <span className="mr-2">{c.description.slice(0, 55)}{c.description.length > 55 ? '…' : ''}</span>
                         <span className="font-medium">{c.workRvu?.toFixed(2)} wRVU</span>
                         <span className={`ml-2 ${c.confidence >= 0.85 ? 'text-emerald-400' : c.confidence >= 0.65 ? 'text-amber-400' : 'text-red-400'}`}>
                           {Math.round(c.confidence * 100)}%
                         </span>
+                        {c.method === 'alias_match' && (
+                          <span className="ml-1.5 text-emerald-500/70 text-[10px] font-semibold uppercase tracking-wide">learned</span>
+                        )}
                       </button>
                     );
                   })}
