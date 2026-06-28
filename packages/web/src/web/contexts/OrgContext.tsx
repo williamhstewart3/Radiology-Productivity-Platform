@@ -25,6 +25,7 @@ import { db, ensureOrgHierarchy } from '../db/database';
 import type {
   Organization,
   Practice,
+  Location,
   RadiologistProfile,
   ProfileColor,
 } from '../types';
@@ -34,21 +35,26 @@ import type {
 export interface OrgContextValue {
   // ── Hierarchy data (live) ──────────────────────────────────────────────────
   organizations: Organization[];
-  practices: Practice[];
+  practices: Practice[];           // internal name; use `locations` in UI code
+  locations: Location[];           // UI alias for practices
   radiologists: RadiologistProfile[];
 
   // ── Active selections ──────────────────────────────────────────────────────
   /** Active radiologist profile (fully scoped). */
   activeProfile: RadiologistProfile | null;
-  /** Practice of the active radiologist. */
+  /** Location (Practice) of the active radiologist. */
   activePractice: Practice | null;
-  /** Organization of the active practice. */
+  /** UI alias for activePractice */
+  activeLocation: Location | null;
+  /** Organization of the active practice (hidden from UI). */
   activeOrg: Organization | null;
 
-  // ── All radiologists in the active practice ────────────────────────────────
-  practiceRadiologists: RadiologistProfile[];
-  /** All radiologists in the active org (across all its practices). */
+  // ── Radiologists in the active location ───────────────────────────────────
+  practiceRadiologists: RadiologistProfile[];  // internal
+  locationRadiologists: RadiologistProfile[];  // UI alias
+  /** All radiologists across all locations. */
   orgRadiologists: RadiologistProfile[];
+  allRadiologists: RadiologistProfile[];       // UI alias for orgRadiologists
 
   // ── Radiologist actions ────────────────────────────────────────────────────
   switchRadiologist: (profileId: string) => Promise<void>;
@@ -58,19 +64,28 @@ export interface OrgContextValue {
   updateRadiologist: (id: string, patch: Partial<RadiologistProfile>) => Promise<void>;
   deleteRadiologist: (id: string) => Promise<void>;
 
-  // ── Practice actions ───────────────────────────────────────────────────────
+  // ── Location (Practice) actions ────────────────────────────────────────────
+  createLocation: (
+    data: Omit<Location, 'id' | 'createdAt' | 'updatedAt' | 'organizationId'>,
+  ) => Promise<Location>;
+  updateLocation: (id: string, patch: Partial<Location>) => Promise<void>;
+  deleteLocation: (id: string) => Promise<void>;
+  // Internal aliases (same operations)
   createPractice: (
     data: Omit<Practice, 'id' | 'createdAt' | 'updatedAt'>,
   ) => Promise<Practice>;
   updatePractice: (id: string, patch: Partial<Practice>) => Promise<void>;
   deletePractice: (id: string) => Promise<void>;
 
-  // ── Organization actions ───────────────────────────────────────────────────
+  // ── Organization actions (internal — not shown in UI) ─────────────────────
   createOrganization: (
     data: Omit<Organization, 'id' | 'createdAt' | 'updatedAt'>,
   ) => Promise<Organization>;
   updateOrganization: (id: string, patch: Partial<Organization>) => Promise<void>;
   deleteOrganization: (id: string) => Promise<void>;
+
+  // ── Default org (hidden singleton) ────────────────────────────────────────
+  defaultOrgId: string | null;
 
   // ── Ready flag ─────────────────────────────────────────────────────────────
   isReady: boolean;
@@ -220,27 +235,49 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     await db.organizations.delete(id);
   }, [deletePractice]);
 
+  // ── Location aliases (createLocation auto-injects the default org) ────────
+
+  const defaultOrgId = organizations[0]?.id ?? null;
+
+  const createLocation = useCallback(async (
+    data: Omit<Location, 'id' | 'createdAt' | 'updatedAt' | 'organizationId'>,
+  ): Promise<Location> => {
+    const orgId = (await db.organizations.limit(1).first())?.id ?? 'org-default';
+    return createPractice({ ...data, organizationId: orgId });
+  }, [createPractice]);
+
+  const updateLocation = updatePractice;
+  const deleteLocation = deletePractice;
+
   // ── Value ────────────────────────────────────────────────────────────────
 
   const value: OrgContextValue = {
     organizations,
     practices,
+    locations: practices,           // UI alias
     radiologists,
     activeProfile,
     activePractice,
+    activeLocation: activePractice, // UI alias
     activeOrg,
     practiceRadiologists,
+    locationRadiologists: practiceRadiologists, // UI alias
     orgRadiologists,
+    allRadiologists: radiologists,  // UI alias
     switchRadiologist,
     createRadiologist,
     updateRadiologist,
     deleteRadiologist,
+    createLocation,
+    updateLocation,
+    deleteLocation,
     createPractice,
     updatePractice,
     deletePractice,
     createOrganization,
     updateOrganization,
     deleteOrganization,
+    defaultOrgId,
     isReady,
     // Legacy ProfileContext compat
     profiles: radiologists,

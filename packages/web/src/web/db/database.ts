@@ -103,19 +103,23 @@ export async function ensureUserSettings(): Promise<UserSettings> {
 }
 
 /**
- * Ensures at least one Organization exists.
- * Returns the first (and typically only) organization.
+ * Ensures the single hidden default Organization exists.
+ * This org is never shown in the UI — it simply anchors all Location records.
  */
 export async function ensureDefaultOrganization(): Promise<Organization> {
-  const existing = await db.organizations.toArray();
-  if (existing.length > 0) return existing[0];
+  const existing = await db.organizations.get('org-default');
+  if (existing) return existing;
+
+  // Also check if any org exists from an older version
+  const any = await db.organizations.limit(1).first();
+  if (any) return any;
 
   const now = new Date().toISOString();
   const org: Organization = {
     id: 'org-default',
-    name: 'My Organization',
-    initials: 'MO',
-    color: 'indigo',
+    name: 'Default',
+    initials: 'DF',
+    color: 'cyan',
     createdAt: now,
     updatedAt: now,
   };
@@ -124,8 +128,10 @@ export async function ensureDefaultOrganization(): Promise<Organization> {
 }
 
 /**
- * Ensures at least one Practice exists under the given org.
- * Returns the first practice in the org.
+ * Ensures at least one Location (Practice) exists under the given org.
+ * On first launch we do NOT create a default location — the user should
+ * create their own. However if profiles already exist without a location,
+ * we create a placeholder so they're not orphaned.
  */
 export async function ensureDefaultPractice(organizationId: string): Promise<Practice> {
   const existing = await db.practices
@@ -134,13 +140,31 @@ export async function ensureDefaultPractice(organizationId: string): Promise<Pra
     .first();
   if (existing) return existing;
 
+  // Only create a placeholder if profiles already exist (migration path)
+  const profileCount = await db.radiologistProfiles.count();
+  if (profileCount > 0) {
+    const now = new Date().toISOString();
+    const practice: Practice = {
+      id: 'location-default',
+      organizationId,
+      name: 'My Location',
+      city: null,
+      color: 'cyan',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.practices.put(practice);
+    return practice;
+  }
+
+  // No profiles yet — create a minimal placeholder so the app doesn't crash
   const now = new Date().toISOString();
   const practice: Practice = {
-    id: 'practice-default',
+    id: 'location-default',
     organizationId,
-    name: 'My Practice',
+    name: 'My Location',
     city: null,
-    color: 'violet',
+    color: 'cyan',
     createdAt: now,
     updatedAt: now,
   };

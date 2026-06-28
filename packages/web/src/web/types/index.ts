@@ -162,8 +162,8 @@ export type ProfileColor =
   | 'teal';
 
 /**
- * Top-level organizational entity (e.g. "Baptist Medical Group").
- * Contains one or more practices.
+ * Top-level organizational entity — kept for future multi-org support.
+ * NOT exposed in the UI. A single hidden default org is created on startup.
  */
 export interface Organization {
   id: string;
@@ -176,20 +176,30 @@ export interface Organization {
 }
 
 /**
- * A practice / site within an organization (e.g. "Memphis", "Oxford").
- * Contains one or more radiologist profiles.
+ * A Location represents where a radiologist works or the coverage group
+ * they belong to (e.g. "Baptist Hospital North MS", "Night Coverage").
+ *
+ * Internally stored as a `Practice` row — the organizationId always points
+ * to the single hidden default org. The UI only ever says "Location".
  */
 export interface Practice {
   id: string;
-  /** Parent organization. */
+  /** Always points to the hidden default organization. */
   organizationId: string;
+  /** Full location name shown in UI, e.g. "Baptist Memorial Hospital–Memphis" */
   name: string;
-  /** Optional city / location label. */
+  /**
+   * Optional short code (≤4 chars) shown where screen space is limited.
+   * e.g. "MEM", "NIGHTS", "REMOTE". Stored in the `city` column.
+   */
   city: string | null;
   color: ProfileColor;
   createdAt: string;
   updatedAt: string;
 }
+
+/** UI alias: Location is a Practice in the data layer. */
+export type Location = Practice;
 
 /** One radiologist / user context. All study data is scoped to a profile. */
 export interface RadiologistProfile {

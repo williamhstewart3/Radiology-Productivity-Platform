@@ -12,10 +12,11 @@ import { Import } from './pages/Import';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 import { Organizations } from './pages/Organizations';
+import { Locations } from './pages/Locations';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
-type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'organizations';
+type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations';
 
 const NAV_ITEMS: { id: Tab; label: string; icon: string }[] = [
   { id: 'pace',      label: 'Daily Pace', icon: '⚡' },
@@ -133,7 +134,7 @@ function MainApp() {
 
             {/* Right: OrgSwitcher + theme toggle */}
             <div className="flex items-center gap-2 shrink-0">
-              <OrgSwitcher onManage={() => setActiveTab('organizations')} />
+              <OrgSwitcher onManage={() => setActiveTab('locations')} />
               <button
                 onClick={() => setIsDark(!isDark)}
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-all"
@@ -167,7 +168,7 @@ function MainApp() {
             {activeTab === 'import'        && <Import onImported={() => setActiveTab('pace')} />}
             {activeTab === 'history'       && <History />}
             {activeTab === 'settings'      && <Settings />}
-            {activeTab === 'organizations' && <Organizations onNavigate={(t) => setActiveTab(t as Tab)} />}
+            {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
           </div>
         </main>
 

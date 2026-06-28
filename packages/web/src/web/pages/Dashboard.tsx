@@ -41,7 +41,7 @@ function ModePills({ mode, onChange, practiceLabel, orgLabel }: ModePillsProps) 
   const pills: { id: DashMode; label: string; icon: string }[] = [
     { id: 'my',       label: 'My Production',   icon: '👤' },
     { id: 'practice', label: practiceLabel,      icon: '🏥' },
-    { id: 'org',      label: orgLabel,           icon: '🏢' },
+    { id: 'org',      label: orgLabel,           icon: '📍' },
   ];
   return (
     <div className="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/8">
@@ -271,9 +271,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     ? activePractice.name
     : 'Practice';
 
-  const orgLabel = activeOrg
-    ? activeOrg.name
-    : 'Organization';
+  const orgLabel = 'All Locations';
 
   // Radiologists to show in the breakdown panel (practice/org mode)
   const radBreakdown = mode === 'practice'
@@ -348,7 +346,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       {/* Mode context label */}
       {mode !== 'my' && (
         <div className="flex items-center gap-2 text-sm text-slate-400">
-          <span className="text-lg">{mode === 'practice' ? '🏥' : '🏢'}</span>
+          <span className="text-lg">{mode === 'practice' ? '🏥' : '📍'}</span>
           <span>
             Showing production for{' '}
             <span className="text-white font-medium">
@@ -439,7 +437,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       {mode !== 'my' && settings && radBreakdown.length > 0 && (
         <div className="card space-y-3">
           <p className="text-sm font-semibold text-white">
-            {mode === 'practice' ? 'Radiologist Breakdown' : 'By Practice'}
+            {mode === 'practice' ? 'Radiologist Breakdown' : 'By Location'}
           </p>
 
           {mode === 'practice' ? (
@@ -459,7 +457,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
               {practiceGroups.map((group) => (
                 <div key={group.practiceName} className="space-y-2">
                   <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <span>🏥</span> {group.practiceName}
+                    <span>📍</span> {group.practiceName}
                   </p>
                   {group.rads.map((r) => (
                     <RadCard

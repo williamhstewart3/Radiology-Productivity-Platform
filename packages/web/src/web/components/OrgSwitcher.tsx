@@ -128,8 +128,8 @@ interface OrgSwitcherProps {
 
 export function OrgSwitcher({ onManage }: OrgSwitcherProps) {
   const {
-    organizations, practices, radiologists,
-    activeProfile, activePractice, activeOrg,
+    practices, radiologists,
+    activeProfile, activePractice,
     switchRadiologist,
   } = useOrg();
 
@@ -148,7 +148,6 @@ export function OrgSwitcher({ onManage }: OrgSwitcherProps) {
   if (!activeProfile) return null;
 
   const c = colors(activeProfile.color);
-  const hasOrgs = organizations.length > 0;
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -168,7 +167,7 @@ export function OrgSwitcher({ onManage }: OrgSwitcherProps) {
       >
         <ProfileAvatar initials={activeProfile.initials} color={activeProfile.color} size="sm" />
 
-        {/* Breadcrumb */}
+        {/* Breadcrumb: Location › Radiologist */}
         <div style={{
           display: 'none',
           alignItems: 'center', gap: 4,
@@ -176,23 +175,15 @@ export function OrgSwitcher({ onManage }: OrgSwitcherProps) {
         }}
           className="sm:flex"
         >
-          {activeOrg && (
-            <>
-              <span style={{ color: theme.colors.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 60 }}>
-                {activeOrg.name}
-              </span>
-              <span style={{ color: theme.colors.textDisabled }}>›</span>
-            </>
-          )}
           {activePractice && (
             <>
-              <span style={{ color: theme.colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 60 }}>
+              <span style={{ color: theme.colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 72 }}>
                 {activePractice.name}
               </span>
               <span style={{ color: theme.colors.textDisabled }}>›</span>
             </>
           )}
-          <span style={{ fontWeight: 600, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 70 }}>
+          <span style={{ fontWeight: 600, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 80 }}>
             {activeProfile.name}
           </span>
         </div>
@@ -231,62 +222,40 @@ export function OrgSwitcher({ onManage }: OrgSwitcherProps) {
           `}</style>
 
           <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-            {hasOrgs ? (
-              organizations.map((org) => {
-                const orgPractices = practices.filter((p) => p.organizationId === org.id);
-                if (orgPractices.length === 0) return null;
+            {practices.length > 0 ? (
+              practices.map((location) => {
+                const locationRads = radiologists.filter((r) => r.practiceId === location.id);
+                if (locationRads.length === 0) return null;
                 return (
-                  <div key={org.id}>
-                    {/* Org header */}
+                  <div key={location.id}>
+                    {/* Location header */}
                     <div style={{ padding: '10px 12px 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: colors(org.color).dot, flexShrink: 0 }} />
+                      <span style={{ fontSize: 11 }}>📍</span>
                       <p style={{
                         fontSize: 10, fontWeight: 700, color: theme.colors.textMuted,
                         textTransform: 'uppercase', letterSpacing: '0.06em',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         margin: 0,
                       }}>
-                        {org.name}
+                        {location.name}{location.city ? ` — ${location.city}` : ''}
                       </p>
                     </div>
-
-                    {orgPractices.map((practice) => {
-                      const practiceRads = radiologists.filter((r) => r.practiceId === practice.id);
-                      if (practiceRads.length === 0) return null;
-                      return (
-                        <div key={practice.id}>
-                          {/* Practice label */}
-                          <div style={{ padding: '4px 12px 4px 20px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ width: 5, height: 5, borderRadius: '50%', background: colors(practice.color).dot, flexShrink: 0, opacity: 0.7 }} />
-                            <p style={{
-                              fontSize: 10, color: theme.colors.textDisabled, fontWeight: 500,
-                              textTransform: 'uppercase', letterSpacing: '0.04em',
-                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                              margin: 0,
-                            }}>
-                              {practice.name}{practice.city ? ` — ${practice.city}` : ''}
-                            </p>
-                          </div>
-
-                          {practiceRads.map((profile) => (
-                            <RadiologistRow
-                              key={profile.id}
-                              profile={profile}
-                              isActive={profile.id === activeProfile.id}
-                              onSelect={async () => {
-                                await switchRadiologist(profile.id);
-                                setOpen(false);
-                              }}
-                            />
-                          ))}
-                        </div>
-                      );
-                    })}
+                    {locationRads.map((profile) => (
+                      <RadiologistRow
+                        key={profile.id}
+                        profile={profile}
+                        isActive={profile.id === activeProfile.id}
+                        onSelect={async () => {
+                          await switchRadiologist(profile.id);
+                          setOpen(false);
+                        }}
+                      />
+                    ))}
                   </div>
                 );
               })
             ) : (
-              // Flat fallback
+              // Flat fallback — no locations defined yet
               <div style={{ padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {radiologists.map((profile) => (
                   <RadiologistRow
@@ -326,8 +295,8 @@ export function OrgSwitcher({ onManage }: OrgSwitcherProps) {
                 btn.style.color = theme.colors.textMuted;
               }}
             >
-              <span style={{ fontSize: 15 }}>🏥</span>
-              Manage Organizations
+              <span style={{ fontSize: 15 }}>📍</span>
+              Manage Locations
             </button>
           </div>
         </div>
