@@ -17,6 +17,7 @@ import { useState, useRef } from 'react';
 import { OCRImportProvider } from '../providers/OCRImportProvider';
 import { CSVImportProvider } from '../providers/CSVImportProvider';
 import { runImportPipeline, commitPipelineResults } from '../pipeline/importPipeline';
+import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus } from '../types';
@@ -30,6 +31,7 @@ type Mode = 'paste' | 'ocr' | 'powerscribe';
 type Step = 'input' | 'review' | 'done';
 
 export function Import({ onImported }: ImportProps) {
+  const { activeProfile } = useProfile();
   const [mode, setMode]           = useState<Mode>('paste');
   const [step, setStep]           = useState<Step>('input');
   const [pasteText, setPasteText] = useState('');
@@ -55,7 +57,7 @@ export function Import({ onImported }: ImportProps) {
     try {
       const provider = new CSVImportProvider(pasteText, logDate);
       const studies  = await provider.importStudies();
-      const result   = await runImportPipeline(studies, logDate);
+      const result   = await runImportPipeline(studies, logDate, activeProfile?.id);
       setReviewRows(result.reviewRows);
       setSkippedRows(result.skippedRows);
       setStep('review');
@@ -73,7 +75,7 @@ export function Import({ onImported }: ImportProps) {
     try {
       const provider = new OCRImportProvider(ocrFile, logDate);
       const studies  = await provider.importStudies();
-      const result   = await runImportPipeline(studies, logDate);
+      const result   = await runImportPipeline(studies, logDate, activeProfile?.id);
       setReviewRows(result.reviewRows);
       setSkippedRows(result.skippedRows);
       setStep('review');
@@ -99,7 +101,7 @@ export function Import({ onImported }: ImportProps) {
     setImporting(true);
     setError(null);
     try {
-      const result = await commitPipelineResults(reviewRows, logDate, skippedRows.length);
+      const result = await commitPipelineResults(reviewRows, logDate, skippedRows.length, activeProfile?.id);
       setImportedCount(result.importedCount);
       setSkippedCount(result.skippedCount);
       setReviewNeeded(result.reviewNeededCount);

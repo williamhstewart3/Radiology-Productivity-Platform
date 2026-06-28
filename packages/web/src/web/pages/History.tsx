@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { db } from '../db/database';
+import { useProfile } from '../hooks/useProfile';
 import { todayDateString, computePeriodTotals } from '../utils/calculations';
 import type { StudyLog, Modality } from '../types';
 import { MODALITY_LABELS } from '../types';
@@ -14,6 +15,9 @@ export function History() {
   const [showReviewOnly, setShowReviewOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  const { activeProfile } = useProfile();
+  const profileId = activeProfile?.id ?? null;
 
   const dateRange = (() => {
     const today = todayDateString();
@@ -29,13 +33,16 @@ export function History() {
   })();
 
   const logs = useLiveQuery<StudyLog[]>(
-    () =>
-      db.studyLogs
+    async () => {
+      if (!profileId) return [];
+      const all = await db.studyLogs
         .where('logDate')
         .between(dateRange.start, dateRange.end, true, true)
         .reverse()
-        .toArray(),
-    [dateRange.start, dateRange.end]
+        .toArray();
+      return all.filter((l) => l.profileId === profileId || l.profileId == null);
+    },
+    [dateRange.start, dateRange.end, profileId]
   );
 
   const filtered = (() => {

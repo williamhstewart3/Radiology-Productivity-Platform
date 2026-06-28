@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Route, Switch } from 'wouter';
 import { useAppInitialization } from './hooks/useAppInitialization';
+import { ProfileProvider } from './contexts/ProfileContext';
+import { ProfileSwitcher } from './components/ProfileSwitcher';
 import { DailyPaceDashboard } from './components/DailyPaceDashboard';
 import { MiniPaceWindow } from './components/MiniPaceWindow';
 import { Dashboard } from './pages/Dashboard';
@@ -8,9 +10,10 @@ import { LogStudy } from './pages/LogStudy';
 import { Import } from './pages/Import';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
+import { Profiles } from './pages/Profiles';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 
-type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings';
+type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'profiles';
 
 const NAV_ITEMS: { id: Tab; label: string; icon: string }[] = [
   { id: 'pace',      label: 'Daily Pace', icon: '⚡' },
@@ -64,16 +67,17 @@ function MainApp() {
 
         {/* Top Nav */}
         <header className="sticky top-0 z-40 bg-[#0d1225]/80 backdrop-blur-md border-b border-white/5">
-          <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
+            {/* Logo */}
+            <div className="flex items-center gap-3 shrink-0">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-sm font-bold">
                 R
               </div>
-              <span className="font-semibold text-white tracking-tight">wRVU Tracker</span>
+              <span className="font-semibold text-white tracking-tight hidden sm:block">wRVU Tracker</span>
             </div>
 
             {/* Desktop tabs */}
-            <nav className="hidden md:flex items-center gap-1">
+            <nav className="hidden md:flex items-center gap-1 flex-1 justify-center">
               {NAV_ITEMS.map((item) => (
                 <button
                   key={item.id}
@@ -92,13 +96,17 @@ function MainApp() {
               ))}
             </nav>
 
-            <button
-              onClick={() => setIsDark(!isDark)}
-              className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all"
-              title="Toggle theme"
-            >
-              {isDark ? '☀️' : '🌙'}
-            </button>
+            {/* Right side: Profile switcher + theme toggle */}
+            <div className="flex items-center gap-2 shrink-0">
+              <ProfileSwitcher onManageProfiles={() => setActiveTab('profiles')} />
+              <button
+                onClick={() => setIsDark(!isDark)}
+                className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all"
+                title="Toggle theme"
+              >
+                {isDark ? '☀️' : '🌙'}
+              </button>
+            </div>
           </div>
         </header>
 
@@ -111,6 +119,7 @@ function MainApp() {
             {activeTab === 'import'    && <Import onImported={() => setActiveTab('pace')} />}
             {activeTab === 'history'   && <History />}
             {activeTab === 'settings'  && <Settings />}
+            {activeTab === 'profiles'  && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} />}
           </div>
         </main>
 
@@ -142,18 +151,20 @@ function MainApp() {
 
 export default function App() {
   return (
-    <Switch>
-      {/* Standalone mini window — no nav, no init guard, loads independently */}
-      <Route path="/mini-pace">
-        <div className="min-h-screen bg-[#080c18]">
-          <MiniPaceWindow />
-        </div>
-      </Route>
+    <ProfileProvider>
+      <Switch>
+        {/* Standalone mini window — no nav, no init guard, loads independently */}
+        <Route path="/mini-pace">
+          <div className="min-h-screen bg-[#080c18]">
+            <MiniPaceWindow />
+          </div>
+        </Route>
 
-      {/* Main app */}
-      <Route>
-        <MainApp />
-      </Route>
-    </Switch>
+        {/* Main app */}
+        <Route>
+          <MainApp />
+        </Route>
+      </Switch>
+    </ProfileProvider>
   );
 }

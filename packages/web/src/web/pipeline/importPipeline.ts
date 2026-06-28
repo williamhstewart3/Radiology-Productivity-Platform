@@ -83,6 +83,8 @@ export interface PipelineResult {
   skippedRows: PipelineReviewRow[];
   /** Source identifiers used by the providers in this run (for logging). */
   sources: ImportSource[];
+  /** Profile to stamp on all committed logs. */
+  profileId: string | null;
 }
 
 // ─── Commit result ────────────────────────────────────────────────────────────
@@ -100,17 +102,19 @@ export interface CommitResult {
  *
  * Does NOT write to the DB — call commitPipelineResults() to persist.
  *
- * @param studies  Array of ImportedStudy from any provider(s).
- * @param logDate  Calendar date to log studies against (YYYY-MM-DD).
- *                 Used for duplicate detection window and as fallback when
- *                 the study itself has no date.
+ * @param studies    Array of ImportedStudy from any provider(s).
+ * @param logDate    Calendar date to log studies against (YYYY-MM-DD).
+ *                   Used for duplicate detection window and as fallback when
+ *                   the study itself has no date.
+ * @param profileId  Active radiologist profile ID to stamp on all created logs.
  */
 export async function runImportPipeline(
   studies: ImportedStudy[],
   logDate: string,
+  profileId?: string | null,
 ): Promise<PipelineResult> {
   if (studies.length === 0) {
-    return { reviewRows: [], skippedRows: [], sources: [] };
+    return { reviewRows: [], skippedRows: [], sources: [], profileId: profileId ?? null };
   }
 
   const sources = [...new Set(studies.map((s) => s.source))];
@@ -189,7 +193,7 @@ export async function runImportPipeline(
     }
   }
 
-  return { reviewRows, skippedRows, sources };
+  return { reviewRows, skippedRows, sources, profileId: profileId ?? null };
 }
 
 // ─── Commit ───────────────────────────────────────────────────────────────────
@@ -201,11 +205,13 @@ export async function runImportPipeline(
  *                    Rows with included=false or no selected candidate are skipped.
  * @param logDate     Calendar date for all studies in this batch.
  * @param skippedCount  Number of auto-skipped rows — included in the CommitResult.
+ * @param profileId   Active profile to stamp on each log.
  */
 export async function commitPipelineResults(
   reviewRows: PipelineReviewRow[],
   logDate: string,
   skippedCount: number,
+  profileId?: string | null,
 ): Promise<CommitResult> {
   const now = new Date().toISOString();
   const importId = crypto.randomUUID();
@@ -237,6 +243,7 @@ export async function commitPipelineResults(
 
     const log: StudyLog = {
       id: crypto.randomUUID(),
+      profileId: profileId ?? null,
       logDate: effectiveDate,
       studyDateTime: study.studyTime,
       examNameRaw: study.examTitle,

@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
+import { useProfile } from '../hooks/useProfile';
 import {
   computeDailyPace,
   DEFAULT_DAILY_PACE_SETTINGS,
@@ -114,24 +115,31 @@ function useCountUp(target: number, duration = 350): number {
 
 export function MiniPaceWindow() {
   const today = todayDateString();
+  const { activeProfile } = useProfile();
+  const profileId = activeProfile?.id ?? null;
 
   const todayLogs = useLiveQuery(
-    () => db.studyLogs.where('logDate').equals(today).toArray(),
-    [today],
+    async () => {
+      if (!profileId) return [];
+      const all = await db.studyLogs.where('logDate').equals(today).toArray();
+      return all.filter(
+        (l) => l.profileId === profileId || l.profileId == null,
+      );
+    },
+    [today, profileId],
     [],
   );
-  const settings = useLiveQuery(() => db.userSettings.get('default'), []);
 
   const paceSettings: DailyPaceSettings = useMemo(() => ({
-    dailyRvuGoal: settings?.dailyRvuGoal ?? DEFAULT_DAILY_PACE_SETTINGS.dailyRvuGoal,
-    workdayStart: settings?.workdayStart ?? DEFAULT_DAILY_PACE_SETTINGS.workdayStart,
-    workdayEnd:   settings?.workdayEnd   ?? DEFAULT_DAILY_PACE_SETTINGS.workdayEnd,
-    breakMinutes: settings?.breakMinutes ?? DEFAULT_DAILY_PACE_SETTINGS.breakMinutes,
+    dailyRvuGoal: activeProfile?.dailyRvuGoal ?? DEFAULT_DAILY_PACE_SETTINGS.dailyRvuGoal,
+    workdayStart: activeProfile?.workdayStart ?? DEFAULT_DAILY_PACE_SETTINGS.workdayStart,
+    workdayEnd:   activeProfile?.workdayEnd   ?? DEFAULT_DAILY_PACE_SETTINGS.workdayEnd,
+    breakMinutes: activeProfile?.breakMinutes ?? DEFAULT_DAILY_PACE_SETTINGS.breakMinutes,
   }), [
-    settings?.dailyRvuGoal,
-    settings?.workdayStart,
-    settings?.workdayEnd,
-    settings?.breakMinutes,
+    activeProfile?.dailyRvuGoal,
+    activeProfile?.workdayStart,
+    activeProfile?.workdayEnd,
+    activeProfile?.breakMinutes,
   ]);
 
   const prevAchievedRef = useRef(false);

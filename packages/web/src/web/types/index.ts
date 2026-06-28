@@ -70,6 +70,8 @@ export interface CptRvuRow {
 /** Local exam-name -> CPT alias, fully user editable. */
 export interface ExamAlias {
   id: string;
+  /** Profile this alias belongs to. null = legacy row (treated as default profile). */
+  profileId: string | null;
   aliasText: string;
   aliasTextRaw: string;
   cptCode: string;
@@ -91,6 +93,8 @@ export type MatchMethod =
 /** One completed study log — the core transactional record. */
 export interface StudyLog {
   id: string;
+  /** Profile this log belongs to. null = legacy row (treated as default profile). */
+  profileId: string | null;
   logDate: string; // YYYY-MM-DD, local calendar day
   studyDateTime: string | null;
   examNameRaw: string;
@@ -144,6 +148,47 @@ export interface UserSettings {
   workdayStart: string;  // "HH:MM" 24-hr
   workdayEnd: string;    // "HH:MM" 24-hr
   breakMinutes: number;
+}
+
+/** Color accent for a radiologist profile. */
+export type ProfileColor =
+  | 'indigo'
+  | 'violet'
+  | 'emerald'
+  | 'amber'
+  | 'rose'
+  | 'cyan'
+  | 'orange'
+  | 'teal';
+
+/** One radiologist / user context. All study data is scoped to a profile. */
+export interface RadiologistProfile {
+  id: string;
+  /** Display name shown in the UI. */
+  name: string;
+  /** Short initials (≤3 chars) shown in the avatar bubble. */
+  initials: string;
+  /** Accent color for this profile. */
+  color: ProfileColor;
+  /** Whether this is the currently active profile. Only one row has true. */
+  active: boolean;
+  /** ISO timestamp of last time this profile was the active one. */
+  lastUsed: string;
+
+  // ── Goal + schedule (per-profile) ─────────────────────────────────────────
+  dailyRvuGoal: number;
+  annualRvuGoal: number;
+  fiscalYearStartMonth: number;
+  workdayStart: string;  // "HH:MM" 24-hr
+  workdayEnd: string;    // "HH:MM" 24-hr
+  breakMinutes: number;
+
+  // ── PowerScribe (stub — unused until live integration) ────────────────────
+  powerScribeUsername: string | null;
+  powerScribeLastSync: string | null;
+
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** A candidate CPT match returned by the matcher, before user confirmation. */

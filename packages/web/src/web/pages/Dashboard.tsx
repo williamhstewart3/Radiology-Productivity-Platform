@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState, useEffect } from 'react';
 import { db } from '../db/database';
+import { useProfile } from '../hooks/useProfile';
 import { computeYtdStats, computeDailyStats, todayDateString, groupLogsByDate } from '../utils/calculations';
 import { ProgressBar } from '../components/ProgressBar';
 import { StatusBadge } from '../components/StatusBadge';
@@ -37,6 +38,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const [prevPercent, setPrevPercent] = useState<number | null>(null);
 
   const today = todayDateString();
+  const { activeProfile } = useProfile();
+  const profileId = activeProfile?.id ?? null;
 
   const settings = useLiveQuery<UserSettings | undefined>(
     () => db.userSettings.get('default'),
@@ -44,28 +47,46 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   );
 
   const allLogs = useLiveQuery<StudyLog[]>(
-    () => db.studyLogs.orderBy('logDate').toArray(),
-    []
+    async () => {
+      if (!profileId) return [];
+      const all = await db.studyLogs.orderBy('logDate').toArray();
+      return all.filter((l) => l.profileId === profileId || l.profileId == null);
+    },
+    [profileId]
   );
 
   const todayLogs = useLiveQuery<StudyLog[]>(
-    () => db.studyLogs.where('logDate').equals(today).toArray(),
-    [today]
+    async () => {
+      if (!profileId) return [];
+      const all = await db.studyLogs.where('logDate').equals(today).toArray();
+      return all.filter((l) => l.profileId === profileId || l.profileId == null);
+    },
+    [today, profileId]
   );
 
   const reviewCount = useLiveQuery<number>(
-    () => db.studyLogs.where('needsReview').equals(1 as any).count(),
-    []
+    async () => {
+      if (!profileId) return 0;
+      const all = await db.studyLogs.where('needsReview').equals(1 as any).toArray();
+      return all.filter((l) => l.profileId === profileId || l.profileId == null).length;
+    },
+    [profileId]
   );
 
   const ytdStats = (() => {
     if (!allLogs || !settings) return null;
+    // Merge: profile goal/fiscal settings override global userSettings
+    const effectiveSettings = {
+      ...settings,
+      annualRvuGoal: activeProfile?.annualRvuGoal ?? settings.annualRvuGoal,
+      fiscalYearStartMonth: activeProfile?.fiscalYearStartMonth ?? settings.fiscalYearStartMonth,
+    };
     const year = new Date().getFullYear();
-    const fiscalStart = new Date(year, (settings.fiscalYearStartMonth ?? 1) - 1, 1);
+    const fiscalStart = new Date(year, (effectiveSettings.fiscalYearStartMonth ?? 1) - 1, 1);
     const logsThisYear = allLogs.filter(
       (l) => l.logDate >= fiscalStart.toISOString().slice(0, 10)
     );
-    return computeYtdStats(logsThisYear, settings);
+    return computeYtdStats(logsThisYear, effectiveSettings);
   })();
 
   const todayStats = (() => {

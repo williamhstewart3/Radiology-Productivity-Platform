@@ -14,6 +14,7 @@ import { findMatchCandidates } from '../utils/matching';
 import { checkOneDuplicate, buildFingerprint } from '../utils/duplicateDetection';
 import { db } from '../db/database';
 import { learnAlias } from '../utils/matching';
+import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import { ManualImportProvider } from '../providers/ManualImportProvider';
 import type { MatchCandidate, StudyLog } from '../types';
@@ -25,6 +26,7 @@ interface LogStudyProps {
 }
 
 export function LogStudy({ onSaved }: LogStudyProps) {
+  const { activeProfile } = useProfile();
   const [examInput, setExamInput] = useState('');
   const [logDate, setLogDate] = useState(todayDateString());
   const [candidates, setCandidates] = useState<MatchCandidate[]>([]);
@@ -103,6 +105,7 @@ export function LogStudy({ onSaved }: LogStudyProps) {
       const now = new Date().toISOString();
       const log: StudyLog = {
         id: crypto.randomUUID(),
+        profileId: activeProfile?.id ?? null,
         logDate,
         studyDateTime: null,
         examNameRaw: examInput.trim(),

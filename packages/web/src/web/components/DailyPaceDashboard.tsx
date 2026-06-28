@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
+import { useProfile } from '../hooks/useProfile';
 import {
   computeDailyPace,
   getStatusDisplay,
@@ -193,25 +194,30 @@ interface DailyPaceDashboardProps {
 
 export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
   const today = todayDateString();
+  const { activeProfile } = useProfile();
+  const profileId = activeProfile?.id ?? null;
 
   // Live queries — auto-update whenever DB changes (new study logged, imported, etc.)
+  // Filter by profileId: include logs matching this profile OR legacy null-profileId logs
+  // when this is the default profile.
   const todayLogs = useLiveQuery(
-    () => db.studyLogs.where('logDate').equals(today).toArray(),
-    [today],
+    async () => {
+      if (!profileId) return [];
+      const all = await db.studyLogs.where('logDate').equals(today).toArray();
+      return all.filter(
+        (l) => l.profileId === profileId || l.profileId == null,
+      );
+    },
+    [today, profileId],
     [],
   );
 
-  const settings = useLiveQuery(
-    () => db.userSettings.get('default'),
-    [],
-  );
-
-  // Build DailyPaceSettings from UserSettings (merge with defaults for missing fields)
+  // Build DailyPaceSettings from active profile (merge with defaults for missing fields)
   const paceSettings: DailyPaceSettings = {
-    dailyRvuGoal: settings?.dailyRvuGoal ?? DEFAULT_DAILY_PACE_SETTINGS.dailyRvuGoal,
-    workdayStart: settings?.workdayStart ?? DEFAULT_DAILY_PACE_SETTINGS.workdayStart,
-    workdayEnd: settings?.workdayEnd ?? DEFAULT_DAILY_PACE_SETTINGS.workdayEnd,
-    breakMinutes: settings?.breakMinutes ?? DEFAULT_DAILY_PACE_SETTINGS.breakMinutes,
+    dailyRvuGoal: activeProfile?.dailyRvuGoal ?? DEFAULT_DAILY_PACE_SETTINGS.dailyRvuGoal,
+    workdayStart: activeProfile?.workdayStart ?? DEFAULT_DAILY_PACE_SETTINGS.workdayStart,
+    workdayEnd: activeProfile?.workdayEnd ?? DEFAULT_DAILY_PACE_SETTINGS.workdayEnd,
+    breakMinutes: activeProfile?.breakMinutes ?? DEFAULT_DAILY_PACE_SETTINGS.breakMinutes,
   };
 
   // Track whether goal was already achieved to suppress repeat confetti

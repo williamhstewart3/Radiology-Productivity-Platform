@@ -5,6 +5,7 @@ import type {
   StudyLog,
   DailySession,
   UserSettings,
+  RadiologistProfile,
 } from '../types';
 
 /**
@@ -19,6 +20,7 @@ export class RvuDatabase extends Dexie {
   studyLogs!: Table<StudyLog, string>;
   dailySessions!: Table<DailySession, string>;
   userSettings!: Table<UserSettings, string>;
+  radiologistProfiles!: Table<RadiologistProfile, string>;
 
   constructor() {
     super('rvu_tracker_db');
@@ -40,6 +42,19 @@ export class RvuDatabase extends Dexie {
       studyLogs: 'id, logDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
       dailySessions: 'id, sessionDate',
       userSettings: 'id',
+    });
+
+    // v3: adds radiologistProfiles table; adds profileId index to studyLogs
+    // and examAliases. No data transform needed — old rows without profileId
+    // are sparse-indexed (null/undefined not indexed), and are treated as
+    // belonging to the default profile at query time.
+    this.version(3).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, aliasText, cptCode',
+      studyLogs: 'id, profileId, logDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, active, lastUsed',
     });
   }
 }
@@ -70,4 +85,57 @@ export async function ensureUserSettings(): Promise<UserSettings> {
   };
   await db.userSettings.put(defaults);
   return defaults;
+}
+
+/**
+ * Ensures at least one RadiologistProfile exists.
+ * If none exist, creates a "Default" profile and marks it active.
+ * Also migrates goal/schedule fields from userSettings → default profile
+ * so first-time users don't lose their existing config.
+ * Returns the currently active profile.
+ */
+export async function ensureDefaultProfile(): Promise<RadiologistProfile> {
+  const count = await db.radiologistProfiles.count();
+
+  if (count > 0) {
+    // Return whichever profile is marked active (or most recently used)
+    const active = await db.radiologistProfiles
+      .where('active')
+      .equals(1 as any)
+      .first();
+    if (active) return active;
+
+    // Fallback: most recently used
+    const all = await db.radiologistProfiles.orderBy('lastUsed').reverse().first();
+    if (all) {
+      await db.radiologistProfiles.update(all.id, { active: true });
+      return { ...all, active: true };
+    }
+  }
+
+  // No profiles yet — create default, inheriting any existing userSettings
+  const existingSettings = await db.userSettings.get('default');
+  const now = new Date().toISOString();
+
+  const profile: RadiologistProfile = {
+    id: 'profile-default',
+    name: 'My Profile',
+    initials: 'ME',
+    color: 'indigo',
+    active: true,
+    lastUsed: now,
+    dailyRvuGoal: existingSettings?.dailyRvuGoal ?? 90,
+    annualRvuGoal: existingSettings?.annualRvuGoal ?? 15000,
+    fiscalYearStartMonth: existingSettings?.fiscalYearStartMonth ?? 1,
+    workdayStart: existingSettings?.workdayStart ?? '08:00',
+    workdayEnd: existingSettings?.workdayEnd ?? '17:00',
+    breakMinutes: existingSettings?.breakMinutes ?? 0,
+    powerScribeUsername: null,
+    powerScribeLastSync: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await db.radiologistProfiles.put(profile);
+  return profile;
 }

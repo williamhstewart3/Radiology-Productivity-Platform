@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { db, ensureUserSettings } from '../db/database';
+import { db, ensureUserSettings, ensureDefaultProfile } from '../db/database';
 import { buildSeedCptRows } from '../data/seedCptData';
 
 /**
@@ -17,6 +17,7 @@ export function useAppInitialization() {
     async function init() {
       try {
         await ensureUserSettings();
+        await ensureDefaultProfile();
 
         const existingCount = await db.cptRvuTable.count();
         if (existingCount === 0) {
