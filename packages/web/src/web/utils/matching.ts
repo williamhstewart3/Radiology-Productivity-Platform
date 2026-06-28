@@ -34,6 +34,8 @@
 import { db } from '../db/database';
 import type { CptRvuRow, ExamAlias, MatchCandidate } from '../types';
 import { combinedSimilarity, normalizeExamText } from './textMatching';
+import { normalizeForRadiology } from './examNormalizer';
+import { scoreRadiologyMatch, CONFIDENCE_THRESHOLD } from './examLibrary';
 
 const CPT_CODE_PATTERN = /^[0-9]{4,5}[A-Z]?$/i;
 
@@ -86,11 +88,17 @@ export async function findMatchCandidates(
   }
 
   const normalizedInput = normalizeExamText(trimmed);
+  // Also compute radiology-specific normalized title for alias key fallback
+  const radiologyNorm = normalizeForRadiology(trimmed);
+  const radiologyNormalizedKey = normalizeExamText(radiologyNorm.normalizedTitle);
 
   // ── 2. Alias table — exact normalized match ───────────────────────────────
   // High-confidence auto-match: user confirmed this exact mapping before.
+  // Try both the standard key and the radiology-expanded key.
   const allAliases = await db.examAliases.toArray();
-  const exactAlias = allAliases.find((a) => a.aliasText === normalizedInput);
+  const exactAlias =
+    allAliases.find((a) => a.aliasText === normalizedInput) ??
+    allAliases.find((a) => a.aliasText === radiologyNormalizedKey);
   if (exactAlias) {
     const rows = await db.cptRvuTable
       .where('cptCode')
@@ -122,7 +130,7 @@ export async function findMatchCandidates(
     }
   }
 
-  // ── 4. CMS description fuzzy — professional rows only ────────────────────
+  // ── 4. CMS description — radiology-aware scorer — professional rows only ──
   if (candidates.length < maxResults) {
     const allCpt = await db.cptRvuTable
       .where('statusCategory')
@@ -133,7 +141,10 @@ export async function findMatchCandidates(
     const professionalCpt = allCpt.filter(isProfessionalRow);
 
     const descScored = professionalCpt
-      .map((row) => ({ row, score: combinedSimilarity(trimmed, row.description) }))
+      .map((row) => ({
+        row,
+        score: scoreRadiologyMatch(radiologyNorm, row.description),
+      }))
       .filter((x) => x.score >= 0.35)
       .sort((a, b) => b.score - a.score)
       .slice(0, maxResults * 2); // extra headroom before dedup
@@ -142,12 +153,18 @@ export async function findMatchCandidates(
       if (candidates.some((c) => c.cptCode === row.cptCode && c.modifier === row.modifier)) {
         continue;
       }
-      candidates.push(rowToCandidate(row, score, 'manual_name_match'));
+      candidates.push(rowToCandidate(row, score, 'radiology_match'));
       if (candidates.length >= maxResults) break;
     }
   }
 
   candidates.sort((a, b) => b.confidence - a.confidence);
+
+  // ── Confidence gate — below threshold → return [] so UI shows search CTA ─
+  if (candidates.length > 0 && candidates[0].confidence < CONFIDENCE_THRESHOLD) {
+    return [];
+  }
+
   return candidates.slice(0, maxResults);
 }
 
@@ -213,6 +230,54 @@ function rowToCandidate(
     confidence: Math.min(1, Math.max(0, confidence)),
     method,
   };
+}
+
+// ─── Manual exam library search ──────────────────────────────────────────────
+
+/**
+ * Unthrottled full-table search for the "Can't find it?" flow.
+ *
+ * Unlike findMatchCandidates(), this:
+ *   • Bypasses the confidence gate (always returns results)
+ *   • Uses a lower floor (0.20) so obscure procedures still show
+ *   • Returns up to maxResults (default 8) sorted by radiology score
+ *
+ * Called from ExamSearchPanel when the user triggers manual search.
+ */
+export async function searchExamLibrary(
+  query: string,
+  maxResults = 8,
+): Promise<MatchCandidate[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const radiologyNorm = normalizeForRadiology(trimmed);
+
+  const allCpt = await db.cptRvuTable
+    .where('statusCategory')
+    .anyOf(['active', 'restricted'])
+    .toArray();
+
+  const professionalCpt = allCpt.filter(isProfessionalRow);
+
+  // Score with radiology scorer; fall back to combinedSimilarity for very short
+  // queries where the structured scorer has little signal.
+  const scored = professionalCpt.map((row) => {
+    const radioScore = scoreRadiologyMatch(radiologyNorm, row.description);
+    const textScore  = combinedSimilarity(trimmed, row.description);
+    // Blend: if query is long (> 3 tokens), prefer radio; short → blend equally
+    const tokenCount = trimmed.split(/\s+/).length;
+    const score = tokenCount > 3
+      ? radioScore * 0.80 + textScore * 0.20
+      : radioScore * 0.50 + textScore * 0.50;
+    return { row, score };
+  });
+
+  return scored
+    .filter((x) => x.score >= 0.20)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxResults)
+    .map(({ row, score }) => rowToCandidate(row, score, 'radiology_match'));
 }
 
 // ─── Alias learning ──────────────────────────────────────────────────────────

@@ -88,6 +88,7 @@ export type MatchMethod =
   | 'manual_name_match'
   | 'alias_match'
   | 'ocr_match'
+  | 'radiology_match'
   | 'unmatched';
 
 /** One completed study log — the core transactional record. */

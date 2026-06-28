@@ -13,16 +13,114 @@
  *   powerscribe → PowerScribeImportProvider (disabled, "Coming Soon")
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { theme } from '../lib/theme';
 import { OCRImportProvider } from '../providers/OCRImportProvider';
 import { CSVImportProvider } from '../providers/CSVImportProvider';
 import { runImportPipeline, commitPipelineResults } from '../pipeline/importPipeline';
+import { searchExamLibrary, learnAlias } from '../utils/matching';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
-import type { DuplicateStatus } from '../types';
+import type { DuplicateStatus, MatchCandidate } from '../types';
 import { MODALITY_LABELS } from '../types';
+
+// ─── ExamSearchPanel ─────────────────────────────────────────────────────────
+
+interface ExamSearchPanelProps {
+  /** Raw OCR / paste text to pre-populate the search */
+  initialQuery: string;
+  onSelect: (candidate: MatchCandidate) => void;
+  onClose: () => void;
+}
+
+function ExamSearchPanel({ initialQuery, onSelect, onClose }: ExamSearchPanelProps) {
+  const [query, setQuery] = useState(initialQuery);
+  const [results, setResults] = useState<MatchCandidate[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  // Auto-search on mount and whenever query changes (debounced)
+  useEffect(() => {
+    if (!query.trim()) { setResults([]); return; }
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const hits = await searchExamLibrary(query, 8);
+        setResults(hits);
+      } finally {
+        setSearching(false);
+      }
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  return (
+    <div className="mt-2 rounded-xl border border-sky-500/30 bg-slate-900/95 shadow-2xl overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/8">
+        <span className="text-sky-400 text-xs font-semibold uppercase tracking-wider">Search Exam Library</span>
+        <button
+          onClick={onClose}
+          className="ml-auto text-slate-500 hover:text-slate-300 text-xs px-1.5 py-0.5 rounded transition-colors"
+        >
+          ✕ Close
+        </button>
+      </div>
+
+      {/* Search input */}
+      <div className="px-3 py-2 border-b border-white/6">
+        <input
+          autoFocus
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name, CPT code, modality…"
+          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500/50"
+        />
+      </div>
+
+      {/* Results */}
+      <div className="max-h-64 overflow-y-auto divide-y divide-white/5">
+        {searching && (
+          <div className="px-4 py-3 text-xs text-slate-400 italic">Searching…</div>
+        )}
+        {!searching && results.length === 0 && query.trim() && (
+          <div className="px-4 py-3 text-xs text-slate-400 italic">No results — try different terms or CPT code</div>
+        )}
+        {results.map((c, ci) => (
+          <button
+            key={`${c.cptCode}-${c.modifier ?? ''}-${ci}`}
+            onClick={() => onSelect(c)}
+            className="w-full text-left px-3 py-2.5 text-xs hover:bg-white/5 transition-colors"
+          >
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono font-bold text-white">{c.cptCode}</span>
+              {c.modifier && (
+                <span className="text-slate-500">mod {c.modifier}</span>
+              )}
+              <span
+                className={`ml-auto shrink-0 font-medium ${
+                  c.confidence >= 0.70 ? 'text-emerald-400' :
+                  c.confidence >= 0.50 ? 'text-amber-400' : 'text-slate-400'
+                }`}
+              >
+                {Math.round(c.confidence * 100)}%
+              </span>
+            </div>
+            <div className="text-slate-300 mt-0.5 leading-snug">
+              {c.description.slice(0, 90)}{c.description.length > 90 ? '…' : ''}
+            </div>
+            {c.workRvu != null && (
+              <div className="text-slate-500 mt-0.5">{c.workRvu.toFixed(2)} wRVU</div>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── ImportProps ──────────────────────────────────────────────────────────────
 
 interface ImportProps {
   onImported: () => void;
@@ -47,6 +145,7 @@ export function Import({ onImported }: ImportProps) {
   const [reviewNeeded, setReviewNeeded]     = useState(0);
   const [error, setError]         = useState<string | null>(null);
   const [showSkipped, setShowSkipped]       = useState(false);
+  const [searchPanelTempId, setSearchPanelTempId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Process helpers ───────────────────────────────────────────────────────
@@ -118,6 +217,26 @@ export function Import({ onImported }: ImportProps) {
     setReviewRows((rows) =>
       rows.map((r) => (r.tempId === tempId ? { ...r, ...patch } : r)),
     );
+  }
+
+  async function handleManualSelect(tempId: string, candidate: MatchCandidate) {
+    const row = reviewRows.find((r) => r.tempId === tempId);
+    if (!row) return;
+
+    // Inject the manually chosen candidate at position 0 (auto-selected)
+    const updatedCandidates = [candidate, ...row.candidates.filter(
+      (c) => !(c.cptCode === candidate.cptCode && c.modifier === candidate.modifier),
+    )];
+    updateRow(tempId, {
+      candidates: updatedCandidates,
+      selectedCandidateIndex: 0,
+      needsReview: false,
+    });
+
+    // Learn the alias immediately — next import benefits right away
+    await learnAlias(row.source.examTitle, candidate.cptCode, candidate.modifier ?? null, 'user');
+
+    setSearchPanelTempId(null);
   }
 
   const includedCount = reviewRows.filter((r) => r.included).length;
@@ -330,8 +449,30 @@ export function Import({ onImported }: ImportProps) {
                   </div>
                 )}
 
+                {/* ── Candidate list or no-match state ─────────────── */}
                 {row.candidates.length === 0 ? (
-                  <p className="text-xs text-red-400 italic">No match found — will be excluded</p>
+                  <div className="space-y-2">
+                    <p className="text-xs text-red-400 italic">
+                      No confident match found — search the exam library to assign manually.
+                    </p>
+                    <button
+                      onClick={() =>
+                        setSearchPanelTempId(
+                          searchPanelTempId === row.tempId ? null : row.tempId,
+                        )
+                      }
+                      className="text-xs px-3 py-1.5 rounded-lg border border-sky-500/35 text-sky-400 hover:border-sky-400/60 hover:bg-sky-500/8 transition-all font-medium"
+                    >
+                      {searchPanelTempId === row.tempId ? '↑ Close search' : '🔍 Search exam library'}
+                    </button>
+                    {searchPanelTempId === row.tempId && (
+                      <ExamSearchPanel
+                        initialQuery={row.source.examTitle}
+                        onSelect={(c) => handleManualSelect(row.tempId, c)}
+                        onClose={() => setSearchPanelTempId(null)}
+                      />
+                    )}
+                  </div>
                 ) : (
                   <div className="space-y-1">
                     {row.candidates.map((c, ci) => {
@@ -380,9 +521,34 @@ export function Import({ onImported }: ImportProps) {
                               learned
                             </span>
                           )}
+                          {c.method === 'radiology_match' && c.confidence < 0.75 && (
+                            <span className="ml-1.5 text-amber-500/70 text-[10px] font-semibold uppercase tracking-wide">
+                              low conf
+                            </span>
+                          )}
                         </button>
                       );
                     })}
+                    {/* "Can't find it?" — always available, surfaces search panel */}
+                    <div className="flex items-center justify-end pt-0.5">
+                      <button
+                        onClick={() =>
+                          setSearchPanelTempId(
+                            searchPanelTempId === row.tempId ? null : row.tempId,
+                          )
+                        }
+                        className="text-[11px] text-slate-500 hover:text-sky-400 transition-colors"
+                      >
+                        {searchPanelTempId === row.tempId ? '↑ Close search' : "Can't find it? Search library →"}
+                      </button>
+                    </div>
+                    {searchPanelTempId === row.tempId && (
+                      <ExamSearchPanel
+                        initialQuery={row.source.examTitle}
+                        onSelect={(c) => handleManualSelect(row.tempId, c)}
+                        onClose={() => setSearchPanelTempId(null)}
+                      />
+                    )}
                   </div>
                 )}
               </div>
