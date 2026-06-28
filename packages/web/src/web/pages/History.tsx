@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
+import { theme } from '../lib/theme';
 import { db } from '../db/database';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString, computePeriodTotals } from '../utils/calculations';
@@ -115,9 +116,14 @@ export function History() {
               onClick={() => setRange(r.value)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                 range === r.value
-                  ? 'bg-indigo-500/20 border border-indigo-500/40 text-indigo-300'
+                  ? 'border'
                   : 'bg-white/5 text-slate-400 hover:text-white border border-transparent'
               }`}
+              style={range === r.value ? {
+                background: 'rgba(37,99,168,0.2)',
+                borderColor: 'rgba(37,99,168,0.4)',
+                color: theme.colors.accent,
+              } : {}}
             >
               {r.label}
             </button>

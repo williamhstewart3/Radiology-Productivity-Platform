@@ -7,6 +7,7 @@
  */
 
 import { useState } from 'react';
+import { theme } from '../lib/theme';
 import { useProfile } from '../hooks/useProfile';
 import { ProfileAvatar } from '../components/ProfileSwitcher';
 import type { RadiologistProfile, ProfileColor } from '../types';
@@ -14,8 +15,8 @@ import type { RadiologistProfile, ProfileColor } from '../types';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PROFILE_COLORS: { value: ProfileColor; label: string; dot: string }[] = [
-  { value: 'indigo',  label: 'Indigo',  dot: '#6366f1' },
-  { value: 'violet',  label: 'Violet',  dot: '#8b5cf6' },
+  { value: 'indigo',  label: 'Blue',    dot: '#2563A8' },
+  { value: 'violet',  label: 'Sky',     dot: '#5BB8D4' },
   { value: 'emerald', label: 'Emerald', dot: '#10b981' },
   { value: 'amber',   label: 'Amber',   dot: '#f59e0b' },
   { value: 'rose',    label: 'Rose',    dot: '#f43f5e' },
@@ -46,7 +47,7 @@ interface ProfileFormData {
 const DEFAULT_FORM: ProfileFormData = {
   name: '',
   initials: '',
-  color: 'indigo',
+  color: 'cyan',
   dailyRvuGoal: 90,
   annualRvuGoal: 15000,
   fiscalYearStartMonth: 1,
@@ -248,7 +249,8 @@ function ProfileForm({ initial, onSave, onCancel, saving, isNew }: ProfileFormPr
         <button
           onClick={() => onSave(form)}
           disabled={saving || !form.name.trim()}
-          className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
         >
           {saving ? 'Saving…' : isNew ? 'Create Profile' : 'Save Changes'}
         </button>
@@ -392,7 +394,8 @@ export function Profiles({ onNavigate }: ProfilesProps) {
         </div>
         <button
           onClick={() => setEditing('new')}
-          className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-indigo-500/25"
+          className="px-4 py-2 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg"
+          style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})`, boxShadow: `0 4px 14px rgba(37,99,168,0.35)` }}
         >
           + New Profile
         </button>
@@ -412,9 +415,8 @@ export function Profiles({ onNavigate }: ProfilesProps) {
           return (
             <div
               key={profile.id}
-              className={`card transition-all duration-200 ${
-                isActive ? 'border-indigo-500/30 bg-indigo-500/5' : ''
-              }`}
+              className="card transition-all duration-200"
+              style={isActive ? { borderColor: 'rgba(37,99,168,0.35)', background: 'rgba(37,99,168,0.06)' } : {}}
             >
               <div className="flex items-start gap-4">
                 <ProfileAvatar initials={profile.initials} color={profile.color} />
@@ -423,7 +425,8 @@ export function Profiles({ onNavigate }: ProfilesProps) {
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-semibold text-white">{profile.name}</h3>
                     {isActive && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 font-medium uppercase tracking-wide">
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium uppercase tracking-wide"
+                        style={{ background: 'rgba(91,184,212,0.2)', borderColor: 'rgba(37,99,168,0.3)', color: theme.colors.accent, border: '1px solid rgba(37,99,168,0.3)' }}>
                         Active
                       </span>
                     )}

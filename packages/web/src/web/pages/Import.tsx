@@ -14,6 +14,7 @@
  */
 
 import { useState, useRef } from 'react';
+import { theme } from '../lib/theme';
 import { OCRImportProvider } from '../providers/OCRImportProvider';
 import { CSVImportProvider } from '../providers/CSVImportProvider';
 import { runImportPipeline, commitPipelineResults } from '../pipeline/importPipeline';
@@ -168,7 +169,8 @@ export function Import({ onImported }: ImportProps) {
           </button>
           <button
             onClick={onImported}
-            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+            className="px-6 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
           >
             View Dashboard
           </button>
@@ -345,9 +347,13 @@ export function Import({ onImported }: ImportProps) {
                           }
                           className={`w-full text-left rounded-lg border px-3 py-2 text-xs transition-all ${
                             isSelected
-                              ? 'bg-indigo-500/15 border-indigo-500/40 text-white'
+                              ? 'text-white'
                               : 'bg-white/3 border-white/8 text-slate-400 hover:border-white/20'
                           }`}
+                          style={isSelected ? {
+                            background: 'rgba(37,99,168,0.15)',
+                            borderColor: 'rgba(37,99,168,0.4)',
+                          } : {}}
                         >
                           <span className="font-mono font-bold mr-2">{c.cptCode}</span>
                           {c.modifier && (
@@ -410,7 +416,8 @@ export function Import({ onImported }: ImportProps) {
               (matchedCount === 0 && reviewRows.length > 0) ||
               (reviewRows.length === 0 && skippedRows.length > 0 && matchedCount === 0)
             }
-            className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
           >
             {importing
               ? 'Saving…'
@@ -500,7 +507,8 @@ export function Import({ onImported }: ImportProps) {
           <button
             onClick={handlePasteProcess}
             disabled={!pasteText.trim() || processing}
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
           >
             {processing ? 'Processing…' : 'Match & Review'}
           </button>
@@ -516,10 +524,12 @@ export function Import({ onImported }: ImportProps) {
             <div
               onClick={() => fileRef.current?.click()}
               className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${
-                ocrFile
-                  ? 'border-indigo-500/40 bg-indigo-500/5'
-                  : 'border-white/15 hover:border-white/30 hover:bg-white/3'
+                ocrFile ? '' : 'border-white/15 hover:border-white/30 hover:bg-white/3'
               }`}
+              style={ocrFile ? {
+                borderColor: 'rgba(37,99,168,0.4)',
+                background: 'rgba(37,99,168,0.06)',
+              } : {}}
             >
               <input
                 ref={fileRef}
@@ -530,7 +540,7 @@ export function Import({ onImported }: ImportProps) {
               />
               {ocrFile ? (
                 <div>
-                  <p className="text-indigo-400 font-medium">{ocrFile.name}</p>
+                  <p className="font-medium" style={{ color: theme.colors.accent }}>{ocrFile.name}</p>
                   <p className="text-slate-400 text-xs mt-1">
                     {(ocrFile.size / 1024).toFixed(0)} KB · Click to change
                   </p>
@@ -566,7 +576,8 @@ export function Import({ onImported }: ImportProps) {
           <button
             onClick={handleOcrProcess}
             disabled={!ocrFile || processing}
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
           >
             {processing ? 'Running OCR…' : 'Extract & Match'}
           </button>

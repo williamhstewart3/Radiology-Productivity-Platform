@@ -1,5 +1,6 @@
 /**
  * LogStudy.tsx
+
  *
  * Single-study manual entry form. Uses ManualImportProvider to produce an
  * ImportedStudy and feeds it through the shared importPipeline — exactly the
@@ -10,6 +11,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { theme } from '../lib/theme';
 import { findMatchCandidates } from '../utils/matching';
 import { checkOneDuplicate, buildFingerprint } from '../utils/duplicateDetection';
 import { db } from '../db/database';
@@ -196,7 +198,7 @@ export function LogStudy({ onSaved }: LogStudyProps) {
             />
             {searching && (
               <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                <div className="w-4 h-4 border border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                <div className="w-4 h-4 border border-t-transparent rounded-full animate-spin" style={{ borderColor: `${theme.colors.primary} transparent transparent transparent` }} />
               </div>
             )}
           </div>
@@ -227,7 +229,7 @@ export function LogStudy({ onSaved }: LogStudyProps) {
                             {MODALITY_LABELS[c.modality]}
                           </span>
                           {isSelected && (
-                            <span className="text-xs text-indigo-400">✓ Selected</span>
+                            <span className="text-xs" style={{ color: theme.colors.accent }}>✓ Selected</span>
                           )}
                         </div>
                         <p className="text-slate-300 text-xs mt-0.5 line-clamp-2">{c.description}</p>
@@ -273,10 +275,10 @@ export function LogStudy({ onSaved }: LogStudyProps) {
 
         {/* Selected summary */}
         {selected && (
-          <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30">
+          <div className="p-3 rounded-xl" style={{ background: 'rgba(37,99,168,0.12)', border: '1px solid rgba(37,99,168,0.3)' }}>
             <div className="flex justify-between items-center">
               <div>
-                <p className="text-xs text-indigo-300 font-medium">Ready to log</p>
+                <p className="text-xs font-medium" style={{ color: theme.colors.accent }}>Ready to log</p>
                 <p className="text-white font-semibold text-sm mt-0.5">
                   {selected.cptCode} — {selected.workRvu?.toFixed(2)} wRVU
                 </p>
@@ -335,9 +337,13 @@ export function LogStudy({ onSaved }: LogStudyProps) {
             saved
               ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
               : selected
-              ? 'bg-gradient-to-r from-indigo-500 to-violet-600 text-white hover:opacity-90 shadow-lg shadow-indigo-500/25'
+              ? 'text-white hover:opacity-90 shadow-lg'
               : 'bg-white/5 text-slate-500 cursor-not-allowed'
           }`}
+          style={!saved && selected ? {
+            background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})`,
+            boxShadow: `0 4px 14px rgba(37,99,168,0.35)`,
+          } : {}}
         >
           {saving ? 'Saving…' : saved ? '✓ Saved!' : 'Log Study'}
         </button>

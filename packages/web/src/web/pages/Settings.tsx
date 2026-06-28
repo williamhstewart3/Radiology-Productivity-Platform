@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState, useRef } from 'react';
+import { theme } from '../lib/theme';
 import { db, ensureUserSettings } from '../db/database';
 import { importRvuFile } from '../utils/rvuFileImporter';
 import { buildSeedCptRows } from '../data/seedCptData';
@@ -165,8 +166,9 @@ export function Settings() {
           className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all ${
             saved
               ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
-              : 'bg-gradient-to-r from-indigo-500 to-violet-600 text-white hover:opacity-90'
+              : 'text-white hover:opacity-90'
           }`}
+          style={!saved ? { background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` } : {}}
         >
           {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Settings'}
         </button>
@@ -228,8 +230,9 @@ export function Settings() {
           className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all ${
             saved
               ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
-              : 'bg-gradient-to-r from-indigo-500 to-violet-600 text-white hover:opacity-90'
+              : 'text-white hover:opacity-90'
           }`}
+          style={!saved ? { background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` } : {}}
         >
           {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Settings'}
         </button>
@@ -267,7 +270,7 @@ export function Settings() {
           >
             {importing ? (
               <span className="flex items-center justify-center gap-2">
-                <span className="w-4 h-4 border border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                <span className="w-4 h-4 border border-t-transparent rounded-full animate-spin" style={{ borderColor: `${theme.colors.accent} transparent transparent transparent` }} />
                 Importing…
               </span>
             ) : (

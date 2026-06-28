@@ -41,6 +41,34 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* ── Baptist Medical Group Theme Tokens ─────────────────────────────── */
+/* These are injected at runtime by injectTheme() in theme.ts.          */
+/* Fallbacks here ensure SSR / before-JS render looks correct.          */
+:root {
+  --theme-bg-base:        #0f1824;
+  --theme-bg-card:        #162032;
+  --theme-bg-deep:        #0b1219;
+  --theme-primary:        #2563A8;
+  --theme-primary-light:  #3B82CC;
+  --theme-accent:         #5BB8D4;
+  --theme-border:         rgba(91,184,212,0.12);
+  --theme-border-active:  rgba(91,184,212,0.32);
+  --theme-ahead:          #22c55e;
+  --theme-on-track:       #3b82f6;
+  --theme-caution:        #f59e0b;
+  --theme-behind:         #ef4444;
+  --theme-goal-gold:      #fbbf24;
+  --theme-text-primary:   #f0f6ff;
+  --theme-text-secondary: #94a3b8;
+  --theme-text-muted:     #64748b;
+  --theme-text-disabled:  #374151;
+  --theme-radius-sm:      6px;
+  --theme-radius-md:      10px;
+  --theme-radius-lg:      14px;
+  --theme-radius-xl:      18px;
+}
+
+/* ── Tailwind base theme ─────────────────────────────────────────────── */
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);
@@ -95,14 +123,14 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-1: oklch(0.52 0.2 240);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary: oklch(0.52 0.2 240);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
@@ -110,24 +138,177 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* ── Base layer ──────────────────────────────────────────────────────── */
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-[#0a0e1a] text-white;
+    background: var(--theme-bg-base);
+    color: var(--theme-text-primary);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
+/* ── Component layer ─────────────────────────────────────────────────── */
 @layer components {
+
+  /* Card — primary surface */
   .card {
-    @apply bg-white/[0.04] border border-white/[0.08] rounded-2xl p-4;
+    background: var(--theme-bg-card);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--theme-radius-xl);
+    padding: 1rem;
+    transition: border-color 0.2s ease;
   }
+  .card:hover {
+    border-color: var(--theme-border-active);
+  }
+
+  /* Input / select */
   .input {
-    @apply bg-white/[0.06] border border-white/[0.12] rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/40 transition-all;
+    background: rgba(91, 184, 212, 0.06);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--theme-radius-md);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--theme-text-primary);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    outline: none;
+  }
+  .input::placeholder {
+    color: var(--theme-text-disabled);
+  }
+  .input:focus {
+    border-color: var(--theme-accent);
+    box-shadow: 0 0 0 3px rgba(91, 184, 212, 0.12);
   }
   select.input {
-    @apply cursor-pointer;
+    cursor: pointer;
   }
+
+  /* Primary button */
+  .btn-primary {
+    background: linear-gradient(135deg, var(--theme-primary), var(--theme-primary-light));
+    color: #fff;
+    border: none;
+    border-radius: var(--theme-radius-md);
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+    box-shadow: 0 2px 8px rgba(37, 99, 168, 0.3);
+  }
+  .btn-primary:hover {
+    opacity: 0.92;
+    box-shadow: 0 4px 16px rgba(37, 99, 168, 0.4);
+    transform: translateY(-1px);
+  }
+  .btn-primary:active {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  /* Ghost button */
+  .btn-ghost {
+    background: transparent;
+    color: var(--theme-text-secondary);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--theme-radius-md);
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .btn-ghost:hover {
+    background: rgba(91, 184, 212, 0.08);
+    color: var(--theme-text-primary);
+    border-color: var(--theme-border-active);
+  }
+
+  /* Nav tab — active */
+  .nav-tab-active {
+    background: rgba(37, 99, 168, 0.2);
+    color: var(--theme-accent);
+    border: 1px solid rgba(91, 184, 212, 0.25);
+    border-radius: var(--theme-radius-md);
+  }
+
+  /* Nav tab — inactive */
+  .nav-tab-inactive {
+    color: var(--theme-text-muted);
+    border-radius: var(--theme-radius-md);
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .nav-tab-inactive:hover {
+    color: var(--theme-text-primary);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  /* Pace tab — special amber highlight */
+  .nav-tab-pace-active {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: var(--theme-radius-md);
+  }
+
+  /* Status text utilities */
+  .text-status-ahead   { color: var(--theme-ahead); }
+  .text-status-track   { color: var(--theme-on-track); }
+  .text-status-caution { color: var(--theme-caution); }
+  .text-status-behind  { color: var(--theme-behind); }
+  .text-status-gold    { color: var(--theme-goal-gold); }
+}
+
+/* ── Baptist logo mark SVG ───────────────────────────────────────────── */
+/* The arch/chapel icon used in header */
+.bmg-logo-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--theme-primary) 0%, #1B3A6B 100%);
+  border-radius: var(--theme-radius-md);
+  border: 1px solid rgba(91, 184, 212, 0.25);
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(91, 184, 212, 0.15);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(91, 184, 212, 0.3);
+}
+
+/* ── Animations ──────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
+}
+
+@keyframes float-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-float-up {
+  animation: float-up 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }

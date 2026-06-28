@@ -2,13 +2,11 @@
  * DailyPaceDashboard.tsx
  *
  * Primary workday screen — shows real-time wRVU pace against daily goal.
+ * Design: Apple Health / Bloomberg Terminal aesthetic, Baptist Medical Group branding.
  *
  * DATA SOURCE: studyLogs table only.
  * All study ingestion paths (manual, CSV, OCR, PowerScribe API) write to
  * studyLogs. This component never needs to change when new sources are added.
- *
- * FUTURE NOTE: When PowerScribe ingestion is built, it should populate
- * studyLogs and this dashboard will reflect it automatically.
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -25,6 +23,21 @@ import {
 } from '../utils/dailyPaceCalculations';
 import { todayDateString } from '../utils/calculations';
 import { ConfettiCanvas } from './ConfettiCanvas';
+import { theme } from '../lib/theme';
+
+// ─── Status → color token ────────────────────────────────────────────────────
+
+function statusColor(status: DailyPaceMetrics['status']): string {
+  switch (status) {
+    case 'goal_achieved': return theme.colors.goalGold;
+    case 'ahead':         return theme.colors.ahead;
+    case 'on_track':      return theme.colors.onTrack;
+    case 'slightly_behind': return theme.colors.caution;
+    case 'behind':        return theme.colors.behind;
+    case 'after_work':    return theme.colors.accent;
+    default:              return theme.colors.textMuted; // before_work
+  }
+}
 
 // ─── Circular Gauge ──────────────────────────────────────────────────────────
 
@@ -38,23 +51,12 @@ interface GaugeProps {
 function CircularGauge({ current, goal, glowColor, status }: GaugeProps) {
   const pct = Math.min(1, current / Math.max(1, goal));
   const radius = 88;
-  const stroke = 10;
+  const stroke = 9;
   const cx = 110;
   const cy = 110;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference * (1 - pct);
-
-  // Color map for ring
-  const ringColor: Record<string, string> = {
-    before_work: '#64748b',
-    goal_achieved: '#fbbf24',
-    ahead: '#34d399',
-    on_track: '#60a5fa',
-    slightly_behind: '#fb923c',
-    behind: '#f87171',
-    after_work: '#a78bfa',
-  };
-  const color = ringColor[status] ?? '#6366f1';
+  const color = statusColor(status);
 
   return (
     <div className="relative flex items-center justify-center">
@@ -62,22 +64,25 @@ function CircularGauge({ current, goal, glowColor, status }: GaugeProps) {
         width={220}
         height={220}
         className="drop-shadow-xl"
-        style={{ filter: `drop-shadow(0 0 18px ${glowColor})` }}
+        style={{ filter: `drop-shadow(0 0 20px ${color}44)` }}
       >
         {/* Track */}
         <circle
-          cx={cx}
-          cy={cy}
-          r={radius}
+          cx={cx} cy={cy} r={radius}
           fill="none"
-          stroke="rgba(255,255,255,0.06)"
+          stroke="rgba(91,184,212,0.07)"
           strokeWidth={stroke}
+        />
+        {/* Subtle inner track glow */}
+        <circle
+          cx={cx} cy={cy} r={radius - stroke - 2}
+          fill="none"
+          stroke="rgba(91,184,212,0.03)"
+          strokeWidth={1}
         />
         {/* Progress arc */}
         <circle
-          cx={cx}
-          cy={cy}
-          r={radius}
+          cx={cx} cy={cy} r={radius}
           fill="none"
           stroke={color}
           strokeWidth={stroke}
@@ -85,21 +90,26 @@ function CircularGauge({ current, goal, glowColor, status }: GaugeProps) {
           strokeDasharray={circumference}
           strokeDashoffset={dashOffset}
           transform={`rotate(-90 ${cx} ${cy})`}
-          style={{ transition: 'stroke-dashoffset 0.7s cubic-bezier(0.4,0,0.2,1), stroke 0.5s ease' }}
+          style={{
+            transition: 'stroke-dashoffset 0.8s cubic-bezier(0.4,0,0.2,1), stroke 0.5s ease',
+          }}
         />
       </svg>
+
       {/* Center text */}
       <div className="absolute flex flex-col items-center justify-center select-none">
         <span
           className="font-black tabular-nums leading-none"
-          style={{ fontSize: '2.4rem', color }}
+          style={{ fontSize: '2.5rem', color, textShadow: `0 0 32px ${color}66` }}
         >
           {current.toFixed(1)}
         </span>
-        <span className="text-slate-400 text-sm font-medium mt-1">
+        <span className="text-sm font-medium mt-1" style={{ color: 'var(--theme-text-muted)' }}>
           / {goal} wRVU
         </span>
-        <span className="text-xs text-slate-500 mt-0.5">today</span>
+        <span className="text-xs mt-0.5" style={{ color: 'var(--theme-text-disabled)' }}>
+          today
+        </span>
       </div>
     </div>
   );
@@ -114,28 +124,30 @@ interface DualBarsProps {
 }
 
 function DualProgressBars({ expectedPct, actualPct, progressStatus }: DualBarsProps) {
-  const actualColors: Record<string, string> = {
-    ahead: 'from-emerald-500 to-teal-400',
-    on_track: 'from-blue-500 to-indigo-400',
-    behind: 'from-red-500 to-orange-400',
-    neutral: 'from-slate-600 to-slate-500',
+  const actualColor: Record<string, string> = {
+    ahead:    theme.colors.ahead,
+    on_track: theme.colors.onTrack,
+    behind:   theme.colors.behind,
+    neutral:  theme.colors.textDisabled,
   };
-
-  const actualGradient = actualColors[progressStatus] ?? 'from-indigo-500 to-violet-400';
+  const barColor = actualColor[progressStatus] ?? theme.colors.primary;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {/* Expected */}
-      <div className="space-y-1.5">
-        <div className="flex justify-between text-xs text-slate-400">
+      <div className="space-y-2">
+        <div className="flex justify-between text-xs" style={{ color: 'var(--theme-text-muted)' }}>
           <span className="font-medium">Expected by Now</span>
-          <span className="text-white font-semibold">{expectedPct.toFixed(0)}%</span>
+          <span className="font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
+            {expectedPct.toFixed(0)}%
+          </span>
         </div>
-        <div className="h-2.5 bg-white/5 rounded-full overflow-hidden">
+        <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(91,184,212,0.08)' }}>
           <div
-            className="h-2.5 bg-gradient-to-r from-slate-500 to-slate-400 rounded-full"
+            className="h-2 rounded-full"
             style={{
               width: `${Math.min(100, expectedPct)}%`,
+              background: 'rgba(91,184,212,0.3)',
               transition: 'width 0.7s cubic-bezier(0.4,0,0.2,1)',
             }}
           />
@@ -143,16 +155,20 @@ function DualProgressBars({ expectedPct, actualPct, progressStatus }: DualBarsPr
       </div>
 
       {/* Actual */}
-      <div className="space-y-1.5">
-        <div className="flex justify-between text-xs text-slate-400">
+      <div className="space-y-2">
+        <div className="flex justify-between text-xs" style={{ color: 'var(--theme-text-muted)' }}>
           <span className="font-medium">Actual Progress</span>
-          <span className="text-white font-semibold">{actualPct.toFixed(0)}%</span>
+          <span className="font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
+            {actualPct.toFixed(0)}%
+          </span>
         </div>
-        <div className="h-2.5 bg-white/5 rounded-full overflow-hidden">
+        <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(91,184,212,0.08)' }}>
           <div
-            className={`h-2.5 bg-gradient-to-r ${actualGradient} rounded-full`}
+            className="h-2 rounded-full"
             style={{
               width: `${Math.min(100, actualPct)}%`,
+              background: barColor,
+              boxShadow: `0 0 8px ${barColor}66`,
               transition: 'width 0.7s cubic-bezier(0.4,0,0.2,1)',
             }}
           />
@@ -168,20 +184,40 @@ interface StatCardProps {
   label: string;
   value: string;
   sub?: string;
-  accent?: string; // tailwind text color
-  glow?: boolean;
+  valueColor?: string;
+  highlight?: boolean;
 }
 
-function StatCard({ label, value, sub, accent = 'text-white', glow }: StatCardProps) {
+function StatCard({ label, value, sub, valueColor, highlight }: StatCardProps) {
   return (
     <div
-      className={`rounded-2xl bg-white/[0.04] border border-white/8 p-4 flex flex-col gap-1 ${
-        glow ? 'shadow-[0_0_18px_rgba(99,102,241,0.15)]' : ''
-      }`}
+      className="rounded-xl p-4 flex flex-col gap-1 transition-all duration-200"
+      style={{
+        background: highlight
+          ? `linear-gradient(135deg, rgba(37,99,168,0.15), rgba(91,184,212,0.08))`
+          : 'var(--theme-bg-card)',
+        border: highlight
+          ? '1px solid rgba(91,184,212,0.2)'
+          : '1px solid var(--theme-border)',
+      }}
     >
-      <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">{label}</span>
-      <span className={`text-xl font-bold tabular-nums ${accent} leading-tight`}>{value}</span>
-      {sub && <span className="text-[11px] text-slate-500">{sub}</span>}
+      <span
+        className="text-[11px] font-semibold uppercase tracking-wider"
+        style={{ color: 'var(--theme-text-disabled)' }}
+      >
+        {label}
+      </span>
+      <span
+        className="text-xl font-bold tabular-nums leading-tight"
+        style={{ color: valueColor ?? 'var(--theme-text-primary)' }}
+      >
+        {value}
+      </span>
+      {sub && (
+        <span className="text-[11px]" style={{ color: 'var(--theme-text-disabled)' }}>
+          {sub}
+        </span>
+      )}
     </div>
   );
 }
@@ -197,30 +233,23 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
   const { activeProfile } = useProfile();
   const profileId = activeProfile?.id ?? null;
 
-  // Live queries — auto-update whenever DB changes (new study logged, imported, etc.)
-  // Filter by profileId: include logs matching this profile OR legacy null-profileId logs
-  // when this is the default profile.
   const todayLogs = useLiveQuery(
     async () => {
       if (!profileId) return [];
       const all = await db.studyLogs.where('logDate').equals(today).toArray();
-      return all.filter(
-        (l) => l.profileId === profileId || l.profileId == null,
-      );
+      return all.filter((l) => l.profileId === profileId || l.profileId == null);
     },
     [today, profileId],
     [],
   );
 
-  // Build DailyPaceSettings from active profile (merge with defaults for missing fields)
   const paceSettings: DailyPaceSettings = {
     dailyRvuGoal: activeProfile?.dailyRvuGoal ?? DEFAULT_DAILY_PACE_SETTINGS.dailyRvuGoal,
     workdayStart: activeProfile?.workdayStart ?? DEFAULT_DAILY_PACE_SETTINGS.workdayStart,
-    workdayEnd: activeProfile?.workdayEnd ?? DEFAULT_DAILY_PACE_SETTINGS.workdayEnd,
+    workdayEnd:   activeProfile?.workdayEnd   ?? DEFAULT_DAILY_PACE_SETTINGS.workdayEnd,
     breakMinutes: activeProfile?.breakMinutes ?? DEFAULT_DAILY_PACE_SETTINGS.breakMinutes,
   };
 
-  // Track whether goal was already achieved to suppress repeat confetti
   const prevAchievedRef = useRef(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [metrics, setMetrics] = useState<DailyPaceMetrics | null>(null);
@@ -235,40 +264,46 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
       setShowConfetti(true);
       setTimeout(() => setShowConfetti(false), 4500);
     }
-    // Reset achievement tracking if user falls back below goal (e.g. deleted a log)
     if (m.currentRvu < m.dailyGoal) {
       prevAchievedRef.current = false;
     }
-  }, [todayLogs, paceSettings.dailyRvuGoal, paceSettings.workdayStart, paceSettings.workdayEnd, paceSettings.breakMinutes]);
+  }, [
+    todayLogs,
+    paceSettings.dailyRvuGoal,
+    paceSettings.workdayStart,
+    paceSettings.workdayEnd,
+    paceSettings.breakMinutes,
+  ]);
 
-  // Recalculate immediately when deps change, then every 60s
   useEffect(() => {
     recalculate();
     const interval = setInterval(recalculate, 60_000);
     return () => clearInterval(interval);
   }, [recalculate]);
 
-  // ── Loading state ────────────────────────────────────────────────────────
+  // ── Loading ──────────────────────────────────────────────────────────────
   if (!metrics || todayLogs === undefined) {
     return (
       <div className="flex items-center justify-center py-24">
-        <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        <div
+          className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin"
+          style={{ borderColor: `${theme.colors.accent} transparent ${theme.colors.accent} ${theme.colors.accent}` }}
+        />
       </div>
     );
   }
 
   const sd = getStatusDisplay(metrics.status);
+  const color = statusColor(metrics.status);
 
   const paceDiffAbs = Math.abs(metrics.paceDifference);
   const paceDiffLabel =
-    metrics.paceDifference >= 0
-      ? `+${paceDiffAbs.toFixed(1)}`
-      : `−${paceDiffAbs.toFixed(1)}`;
+    metrics.paceDifference >= 0 ? `+${paceDiffAbs.toFixed(1)}` : `−${paceDiffAbs.toFixed(1)}`;
   const paceDiffColor =
-    metrics.paceDifference >= 0.5 ? 'text-emerald-400' :
-    metrics.paceDifference <= -0.5 ? 'text-red-400' : 'text-blue-400';
+    metrics.paceDifference >= 0.5 ? theme.colors.ahead :
+    metrics.paceDifference <= -0.5 ? theme.colors.behind :
+    theme.colors.onTrack;
 
-  // 12-hr formatted shift time display
   function fmt12(hhmm: string) {
     const [h, m] = hhmm.split(':').map(Number);
     const ampm = h >= 12 ? 'PM' : 'AM';
@@ -277,76 +312,110 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
+    <div className="max-w-2xl mx-auto space-y-5 animate-float-up">
       <ConfettiCanvas active={showConfetti} />
 
-      {/* Header */}
+      {/* ── Header ───────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Daily Pace</h1>
-          <p className="text-slate-500 text-sm mt-0.5">
+          <h1
+            className="text-2xl font-bold tracking-tight"
+            style={{ color: 'var(--theme-text-primary)' }}
+          >
+            Daily Pace
+          </h1>
+          <p className="text-sm mt-0.5" style={{ color: 'var(--theme-text-muted)' }}>
             {fmt12(paceSettings.workdayStart)} – {fmt12(paceSettings.workdayEnd)}
             {paceSettings.breakMinutes > 0 && ` · ${paceSettings.breakMinutes}m break`}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Mini Window popout */}
           <button
             onClick={() => {
               const url = `${window.location.origin}/mini-pace`;
               window.open(url, 'wrvu-mini-pace', 'width=700,height=300,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no');
             }}
             title="Open compact companion display on second monitor"
-            className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 text-sm font-medium hover:bg-white/10 hover:text-white transition-all flex items-center gap-1.5"
+            className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5"
+            style={{
+              background: 'var(--theme-bg-card)',
+              border: '1px solid var(--theme-border)',
+              color: 'var(--theme-text-muted)',
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-primary)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--theme-border-active)';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-muted)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--theme-border)';
+            }}
           >
             <span>📌</span>
             <span className="hidden sm:inline">Mini Window</span>
           </button>
           <button
             onClick={() => onNavigate('log')}
-            className="px-4 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-sm font-medium hover:bg-indigo-500/30 transition-all"
+            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+            style={{
+              background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.primaryLight})`,
+              color: '#fff',
+              boxShadow: `0 2px 12px rgba(37,99,168,0.35)`,
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 4px 20px rgba(37,99,168,0.5)`;
+              (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 2px 12px rgba(37,99,168,0.35)`;
+              (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
+            }}
           >
             + Log Study
           </button>
         </div>
       </div>
 
-      {/* ── TOP: Gauge + Status ─────────────────────────────────────────── */}
-      <div className="card flex flex-col items-center gap-4 py-8">
+      {/* ── Gauge + Status ───────────────────────────────────────────── */}
+      <div className="card flex flex-col items-center gap-5 py-8">
         <CircularGauge
           current={metrics.currentRvu}
           goal={metrics.dailyGoal}
-          glowColor={sd.glowColor}
+          glowColor={color}
           status={metrics.status}
         />
-
         <div className="text-center">
-          <p className={`text-2xl font-bold ${sd.color}`}>
+          <p className="text-2xl font-bold" style={{ color }}>
             {sd.emoji} {sd.label}
           </p>
           {metrics.status !== 'before_work' && metrics.status !== 'goal_achieved' && (
-            <p className="text-slate-500 text-sm mt-1">
+            <p className="text-sm mt-1" style={{ color: 'var(--theme-text-muted)' }}>
               {formatMinutes(metrics.elapsedWorkMinutes)} elapsed ·{' '}
               {formatMinutes(metrics.remainingWorkMinutes)} remaining
             </p>
           )}
           {metrics.status === 'goal_achieved' && (
-            <p className="text-amber-400/70 text-sm mt-1 font-medium">
+            <p className="text-sm mt-1 font-medium" style={{ color: theme.colors.goalGold + 'cc' }}>
               Daily goal complete 🎉
             </p>
           )}
           {metrics.status === 'before_work' && (
-            <p className="text-slate-500 text-sm mt-1">
+            <p className="text-sm mt-1" style={{ color: 'var(--theme-text-muted)' }}>
               Shift starts at {fmt12(paceSettings.workdayStart)}
             </p>
           )}
         </div>
       </div>
 
-      {/* ── MIDDLE: Dual Progress Bars ──────────────────────────────────── */}
+      {/* ── Progress Bars ────────────────────────────────────────────── */}
       {metrics.status !== 'before_work' && (
-        <div className="card space-y-2">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Progress vs Pace</p>
+        <div className="card space-y-3">
+          <p
+            className="text-xs font-semibold uppercase tracking-wider"
+            style={{ color: 'var(--theme-text-muted)' }}
+          >
+            Progress vs Pace
+          </p>
           <DualProgressBars
             expectedPct={metrics.expectedPercent}
             actualPct={metrics.actualPercent}
@@ -355,73 +424,74 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
         </div>
       )}
 
-      {/* ── BOTTOM: Stat Cards ──────────────────────────────────────────── */}
+      {/* ── Stat Cards ───────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <StatCard
           label="Current"
           value={`${metrics.currentRvu.toFixed(1)}`}
           sub={`of ${metrics.dailyGoal} goal`}
-          accent="text-white"
-          glow
+          highlight
         />
         <StatCard
           label="Expected by Now"
           value={`${metrics.expectedRvu.toFixed(1)}`}
           sub="wRVU at current time"
-          accent="text-slate-300"
+          valueColor="var(--theme-text-secondary)"
         />
         <StatCard
           label="Ahead / Behind"
           value={metrics.status === 'before_work' ? '—' : `${paceDiffLabel} wRVU`}
           sub={metrics.status === 'before_work' ? 'not started' : 'vs linear pace'}
-          accent={paceDiffColor}
+          valueColor={paceDiffColor}
         />
         <StatCard
           label="Projected Finish"
           value={
-            metrics.status === 'before_work'
-              ? '—'
-              : metrics.status === 'after_work' || metrics.status === 'goal_achieved'
+            metrics.status === 'before_work' ? '—' :
+            metrics.status === 'after_work' || metrics.status === 'goal_achieved'
               ? `${metrics.currentRvu.toFixed(1)}`
               : `${metrics.projectedEndOfDay.toFixed(1)}`
           }
           sub="wRVU by end of shift"
-          accent={
+          valueColor={
             metrics.projectedEndOfDay >= metrics.dailyGoal || metrics.status === 'goal_achieved'
-              ? 'text-emerald-400'
-              : 'text-orange-400'
+              ? theme.colors.ahead
+              : theme.colors.caution
           }
         />
         <StatCard
           label="Remaining"
           value={metrics.remainingToGoal > 0 ? `${metrics.remainingToGoal.toFixed(1)}` : '0.0'}
           sub="wRVU to goal"
-          accent={metrics.remainingToGoal === 0 ? 'text-emerald-400' : 'text-white'}
+          valueColor={
+            metrics.remainingToGoal === 0 ? theme.colors.ahead : undefined
+          }
         />
         <StatCard
           label="Required Rate"
           value={
-            metrics.remainingWorkMinutes <= 0 || metrics.remainingToGoal <= 0
-              ? '—'
-              : `${metrics.requiredRvuPerHour.toFixed(1)}/hr`
+            metrics.remainingWorkMinutes <= 0 || metrics.remainingToGoal <= 0 ? '—' :
+            `${metrics.requiredRvuPerHour.toFixed(1)}/hr`
           }
           sub="to finish at goal"
-          accent={
-            metrics.requiredRvuPerHour > 25
-              ? 'text-red-400'
-              : metrics.requiredRvuPerHour > 15
-              ? 'text-orange-400'
-              : 'text-slate-300'
+          valueColor={
+            metrics.requiredRvuPerHour > 25 ? theme.colors.behind :
+            metrics.requiredRvuPerHour > 15 ? theme.colors.caution :
+            'var(--theme-text-secondary)'
           }
         />
       </div>
 
-      {/* Study count + shortcut */}
-      <div className="flex items-center justify-between text-xs text-slate-500 px-1">
-        <span>{todayLogs.length} {todayLogs.length === 1 ? 'study' : 'studies'} logged today</span>
+      {/* Study count */}
+      <div className="flex items-center justify-between text-xs px-1" style={{ color: 'var(--theme-text-disabled)' }}>
+        <span>
+          {todayLogs.length} {todayLogs.length === 1 ? 'study' : 'studies'} logged today
+        </span>
         <button
           onClick={() => onNavigate('history')}
-          className="hover:text-slate-300 transition-colors"
+          className="transition-colors"
+          onMouseEnter={(e) => (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-secondary)'}
+          onMouseLeave={(e) => (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-disabled)'}
         >
           View history →
         </button>

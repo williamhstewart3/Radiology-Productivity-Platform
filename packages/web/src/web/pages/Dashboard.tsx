@@ -7,6 +7,7 @@ import { ProgressBar } from '../components/ProgressBar';
 import { StatusBadge } from '../components/StatusBadge';
 import { ConfettiCanvas } from '../components/ConfettiCanvas';
 import { ProfileAvatar } from '../components/OrgSwitcher';
+import { theme } from '../lib/theme';
 import type { UserSettings, StudyLog, Modality, RadiologistProfile } from '../types';
 import { MODALITY_LABELS } from '../types';
 
@@ -50,9 +51,14 @@ function ModePills({ mode, onChange, practiceLabel, orgLabel }: ModePillsProps) 
           onClick={() => onChange(p.id)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 ${
             mode === p.id
-              ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/30'
-              : 'text-slate-400 hover:text-white hover:bg-white/5'
+              ? 'border'
+              : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
           }`}
+          style={mode === p.id ? {
+            background: 'rgba(91,184,212,0.18)',
+            borderColor: 'rgba(91,184,212,0.35)',
+            color: theme.colors.accent,
+          } : {}}
         >
           <span>{p.icon}</span>
           <span className="hidden sm:inline">{p.label}</span>
@@ -83,15 +89,22 @@ function RadCard({ profile, logs, settings, isActive }: RadCardProps) {
   const stats = computeYtdStats(ytdLogs, effectiveSettings);
 
   return (
-    <div className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all ${
-      isActive ? 'bg-indigo-500/8 border-indigo-500/20' : 'bg-white/3 border-white/8'
-    }`}>
+    <div
+      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all"
+      style={isActive ? {
+        background: 'rgba(37,99,168,0.12)',
+        borderColor: 'rgba(37,99,168,0.28)',
+      } : {
+        background: 'rgba(255,255,255,0.03)',
+        borderColor: 'rgba(255,255,255,0.08)',
+      }}
+    >
       <ProfileAvatar initials={profile.initials} color={profile.color} size="sm" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <p className="text-sm font-medium text-white truncate">{profile.name}</p>
           {isActive && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 font-medium shrink-0">YOU</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium shrink-0" style={{ background: 'rgba(91,184,212,0.2)', color: theme.colors.accent }}>YOU</span>
           )}
         </div>
         <div className="mt-0.5">
@@ -324,7 +337,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           )}
           <button
             onClick={() => onNavigate('log')}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-indigo-500/25"
+            className="px-4 py-2 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg"
+            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})`, boxShadow: `0 4px 14px rgba(37,99,168,0.35)` }}
           >
             + Log Study
           </button>
@@ -469,14 +483,15 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         <div className="card space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-white">Today by Modality</p>
-            <button onClick={() => onNavigate('log')} className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
+            <button onClick={() => onNavigate('log')} className="text-xs transition-colors" style={{ color: theme.colors.accent }}>
               + Add
             </button>
           </div>
           {modalityData.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-slate-500 text-sm">No studies logged today</p>
-              <button onClick={() => onNavigate('log')} className="mt-3 px-4 py-2 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 text-sm hover:bg-indigo-500/25 transition-colors">
+              <button onClick={() => onNavigate('log')} className="mt-3 px-4 py-2 rounded-lg text-sm transition-colors"
+                style={{ background: 'rgba(37,99,168,0.15)', border: '1px solid rgba(37,99,168,0.3)', color: theme.colors.accent }}>
                 Log your first study
               </button>
             </div>
@@ -511,13 +526,17 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 <div key={date} className="flex-1 flex flex-col items-center gap-1">
                   <div className="w-full flex items-end justify-center" style={{ height: '80px' }}>
                     <div
-                      className={`w-full rounded-t transition-all duration-500 ${
-                        isToday ? 'bg-gradient-to-t from-indigo-500 to-violet-400' : rvu > 0 ? 'bg-white/20' : 'bg-white/5'
-                      }`}
-                      style={{ height: `${Math.max(pct, rvu > 0 ? 8 : 0)}%` }}
+                      className="w-full rounded-t transition-all duration-500"
+                      style={{
+                        height: `${Math.max(pct, rvu > 0 ? 8 : 0)}%`,
+                        background: isToday
+                          ? `linear-gradient(to top, ${theme.colors.primary}, ${theme.colors.accent})`
+                          : rvu > 0 ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.05)',
+                      }}
                     />
                   </div>
-                  <span className={`text-[9px] ${isToday ? 'text-indigo-400 font-bold' : 'text-slate-500'}`}>
+                  <span className={`text-[9px] ${isToday ? 'font-bold' : 'text-slate-500'}`}
+                    style={isToday ? { color: theme.colors.accent } : {}}>
                     {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
                   </span>
                   {rvu > 0 && <span className="text-[9px] text-slate-400">{fmt(rvu, 0)}</span>}

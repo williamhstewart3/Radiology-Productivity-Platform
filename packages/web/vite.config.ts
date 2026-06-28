@@ -19,6 +19,7 @@ export default defineConfig(({ mode }) => {
 			},
 		},
 		server: {
+			port: 4200,
 			allowedHosts: true,
 			hmr: { overlay: false, },
 			cors: false

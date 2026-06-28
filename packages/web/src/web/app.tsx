@@ -5,13 +5,15 @@ import { OrgProvider } from './contexts/OrgContext';
 import { OrgSwitcher } from './components/OrgSwitcher';
 import { DailyPaceDashboard } from './components/DailyPaceDashboard';
 import { MiniPaceWindow } from './components/MiniPaceWindow';
+import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
 import { Dashboard } from './pages/Dashboard';
 import { LogStudy } from './pages/LogStudy';
 import { Import } from './pages/Import';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
-import Organizations from './pages/Organizations';
+import { Organizations } from './pages/Organizations';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
+import { injectTheme } from './lib/theme';
 
 type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'organizations';
 
@@ -29,6 +31,11 @@ function MainApp() {
   const [activeTab, setActiveTab] = useState<Tab>('pace');
   const [isDark, setIsDark] = useState(true);
 
+  // Inject theme tokens into CSS variables on mount
+  useEffect(() => {
+    injectTheme();
+  }, []);
+
   useEffect(() => {
     if (isDark) {
       document.documentElement.classList.add('dark');
@@ -39,11 +46,16 @@ function MainApp() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0a0e1a] text-white">
+      <div className="min-h-screen flex items-center justify-center"
+        style={{ background: 'var(--theme-bg-base)' }}>
         <div className="text-center space-y-4">
-          <div className="text-red-400 text-4xl">⚠️</div>
-          <p className="text-red-400 font-semibold">Initialization failed</p>
-          <p className="text-slate-400 text-sm max-w-md">{error}</p>
+          <div className="text-4xl">⚠️</div>
+          <p className="font-semibold" style={{ color: 'var(--theme-behind)' }}>
+            Initialization failed
+          </p>
+          <p className="text-sm max-w-md" style={{ color: 'var(--theme-text-muted)' }}>
+            {error}
+          </p>
         </div>
       </div>
     );
@@ -51,10 +63,30 @@ function MainApp() {
 
   if (!isReady) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0a0e1a]">
-        <div className="text-center space-y-4">
-          <div className="w-12 h-12 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-slate-400 text-sm">Loading wRVU Tracker…</p>
+      <div className="min-h-screen flex items-center justify-center"
+        style={{ background: 'var(--theme-bg-base)' }}>
+        <div className="text-center space-y-6">
+          {/* Branded splash */}
+          <div className="flex flex-col items-center gap-4">
+            <BaptistLogoMark size={52} />
+            <div className="flex flex-col items-center gap-1">
+              <p className="font-bold text-lg tracking-tight" style={{ color: 'var(--theme-text-primary)' }}>
+                wRVU Tracker
+              </p>
+              <p className="text-xs font-medium tracking-widest uppercase"
+                style={{ color: 'var(--theme-accent)' }}>
+                Baptist Medical Group
+              </p>
+            </div>
+          </div>
+          {/* Spinner */}
+          <div
+            className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin mx-auto"
+            style={{ borderColor: `var(--theme-accent) transparent var(--theme-accent) var(--theme-accent)` }}
+          />
+          <p className="text-sm" style={{ color: 'var(--theme-text-muted)' }}>
+            Loading…
+          </p>
         </div>
       </div>
     );
@@ -62,46 +94,62 @@ function MainApp() {
 
   return (
     <div className={isDark ? 'dark' : ''}>
-      <div className="min-h-screen bg-[#0a0e1a] dark:bg-[#0a0e1a] text-white flex flex-col">
+      <div className="min-h-screen flex flex-col" style={{ background: 'var(--theme-bg-base)', color: 'var(--theme-text-primary)' }}>
         <DisclaimerBanner />
 
-        {/* Top Nav */}
-        <header className="sticky top-0 z-40 bg-[#0d1225]/80 backdrop-blur-md border-b border-white/5">
+        {/* ── Top Nav ──────────────────────────────────────────────────── */}
+        <header
+          className="sticky top-0 z-40 backdrop-blur-md"
+          style={{
+            background: 'rgba(15,24,36,0.88)',
+            borderBottom: '1px solid var(--theme-border)',
+          }}
+        >
           <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
-            {/* Logo */}
-            <div className="flex items-center gap-3 shrink-0">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-sm font-bold">
-                R
-              </div>
-              <span className="font-semibold text-white tracking-tight hidden sm:block">wRVU Tracker</span>
-            </div>
+            {/* Logo lockup */}
+            <BaptistLogoLockup size="sm" className="hidden sm:flex" />
+            {/* Mobile: icon only */}
+            <BaptistLogoMark size={28} className="sm:hidden" />
 
             {/* Desktop tabs */}
-            <nav className="hidden md:flex items-center gap-1 flex-1 justify-center">
+            <nav className="hidden md:flex items-center gap-0.5 flex-1 justify-center">
               {NAV_ITEMS.map((item) => (
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                     activeTab === item.id
                       ? item.id === 'pace'
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                        : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                      : 'text-slate-400 hover:text-white hover:bg-white/5'
+                        ? 'nav-tab-pace-active'
+                        : 'nav-tab-active'
+                      : 'nav-tab-inactive'
                   }`}
                 >
-                  <span className="mr-1.5">{item.icon}</span>
+                  <span className="mr-1.5 text-[13px]">{item.icon}</span>
                   {item.label}
                 </button>
               ))}
             </nav>
 
-            {/* Right side: Org/Practice/Radiologist switcher + theme toggle */}
+            {/* Right: OrgSwitcher + theme toggle */}
             <div className="flex items-center gap-2 shrink-0">
               <OrgSwitcher onManage={() => setActiveTab('organizations')} />
               <button
                 onClick={() => setIsDark(!isDark)}
-                className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-all"
+                style={{
+                  background: 'rgba(91,184,212,0.07)',
+                  border: '1px solid var(--theme-border)',
+                  color: 'var(--theme-text-muted)',
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-primary)';
+                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(91,184,212,0.12)';
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-muted)';
+                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(91,184,212,0.07)';
+                }}
                 title="Toggle theme"
               >
                 {isDark ? '☀️' : '🌙'}
@@ -110,7 +158,7 @@ function MainApp() {
           </div>
         </header>
 
-        {/* Page content */}
+        {/* ── Page content ─────────────────────────────────────────────── */}
         <main className="flex-1 overflow-auto">
           <div className="max-w-7xl mx-auto px-4 py-6">
             {activeTab === 'pace'          && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
@@ -123,20 +171,27 @@ function MainApp() {
           </div>
         </main>
 
-        {/* Mobile bottom nav */}
-        <nav className="md:hidden sticky bottom-0 bg-[#0d1225]/95 backdrop-blur-md border-t border-white/5 px-2 py-2 z-40">
+        {/* ── Mobile bottom nav ─────────────────────────────────────────── */}
+        <nav
+          className="md:hidden sticky bottom-0 px-2 py-2 z-40 backdrop-blur-md"
+          style={{
+            background: 'rgba(15,24,36,0.96)',
+            borderTop: '1px solid var(--theme-border)',
+          }}
+        >
           <div className="flex justify-around">
             {NAV_ITEMS.map((item) => (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all ${
-                  activeTab === item.id
+                className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all"
+                style={{
+                  color: activeTab === item.id
                     ? item.id === 'pace'
-                      ? 'text-amber-400'
-                      : 'text-indigo-400'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
+                      ? 'var(--theme-caution)'
+                      : 'var(--theme-accent)'
+                    : 'var(--theme-text-muted)',
+                }}
               >
                 <span className="text-lg">{item.icon}</span>
                 <span className="text-[10px] font-medium">{item.label}</span>
@@ -153,9 +208,9 @@ export default function App() {
   return (
     <OrgProvider>
       <Switch>
-        {/* Standalone mini window — no nav, no init guard, loads independently */}
+        {/* Standalone mini window — no nav, no init guard */}
         <Route path="/mini-pace">
-          <div className="min-h-screen bg-[#080c18]">
+          <div className="min-h-screen" style={{ background: 'var(--theme-bg-deep)' }}>
             <MiniPaceWindow />
           </div>
         </Route>
