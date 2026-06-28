@@ -4,7 +4,8 @@ import { theme } from '../lib/theme';
 import { db, ensureUserSettings } from '../db/database';
 import { importRvuFile } from '../utils/rvuFileImporter';
 import { buildSeedCptRows } from '../data/seedCptData';
-import type { UserSettings } from '../types';
+import { normalizeExamText } from '../utils/textMatching';
+import type { UserSettings, ExamAlias } from '../types';
 import type { ImportResult } from '../utils/rvuFileImporter';
 
 export function Settings() {
@@ -84,6 +85,65 @@ export function Settings() {
     await db.cptRvuTable.bulkPut(buildSeedCptRows());
     const count = await db.cptRvuTable.count();
     setCptCount(count);
+  }
+
+  // ── Learned Mappings ───────────────────────────────────────────────────────
+  const learnedAliases = useLiveQuery<ExamAlias[]>(
+    () => db.examAliases.orderBy('lastUsedAt').reverse().toArray(),
+    [],
+  );
+
+  const [aliasSearch, setAliasSearch] = useState('');
+  const [editingAlias, setEditingAlias] = useState<ExamAlias | null>(null);
+  const [editRaw, setEditRaw] = useState('');
+
+  const filteredAliases = (learnedAliases ?? []).filter((a) => {
+    if (!aliasSearch.trim()) return true;
+    const q = aliasSearch.toLowerCase();
+    return (
+      a.aliasTextRaw.toLowerCase().includes(q) ||
+      a.canonicalExamName?.toLowerCase().includes(q) ||
+      a.cptCode.includes(q)
+    );
+  });
+
+  async function handleDeleteAlias(id: string) {
+    if (!confirm('Delete this learned mapping?')) return;
+    await db.examAliases.delete(id);
+  }
+
+  function startEditAlias(alias: ExamAlias) {
+    setEditingAlias(alias);
+    setEditRaw(alias.aliasTextRaw);
+  }
+
+  async function handleSaveAlias() {
+    if (!editingAlias) return;
+    const trimmed = editRaw.trim();
+    if (!trimmed) return;
+    await db.examAliases.update(editingAlias.id, {
+      aliasTextRaw: trimmed,
+      aliasText: normalizeExamText(trimmed),
+    });
+    setEditingAlias(null);
+  }
+
+  function formatCptList(alias: ExamAlias): string {
+    if (alias.cptCodes && alias.cptCodes.length > 0) {
+      return alias.cptCodes.join(' · ');
+    }
+    return alias.modifier ? `${alias.cptCode}-${alias.modifier}` : alias.cptCode;
+  }
+
+  function sourceLabel(source: ExamAlias['source']): string {
+    switch (source) {
+      case 'user':              return 'Manual search';
+      case 'manual_name_match': return 'Quick log';
+      case 'ocr_confirmed':     return 'OCR import';
+      case 'manual':            return 'Manual';
+      case 'seed':              return 'Built-in';
+      default:                  return source;
+    }
   }
 
   return (
@@ -317,6 +377,140 @@ export function Settings() {
         >
           Reset to built-in seed data
         </button>
+      </div>
+
+      {/* Learned Mappings */}
+      <div className="card space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Learned Mappings</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              OCR titles you've manually corrected. Applied automatically on future imports.
+            </p>
+          </div>
+          <span className="text-xs text-slate-500 shrink-0">
+            {learnedAliases?.length ?? 0} saved
+          </span>
+        </div>
+
+        {/* Search */}
+        {(learnedAliases?.length ?? 0) > 0 && (
+          <input
+            type="text"
+            value={aliasSearch}
+            onChange={(e) => setAliasSearch(e.target.value)}
+            placeholder="Search by raw title, exam name, or CPT…"
+            className="input w-full text-xs"
+          />
+        )}
+
+        {/* Edit modal */}
+        {editingAlias && (
+          <div className="rounded-xl border border-sky-500/30 bg-slate-800/80 p-3 space-y-2">
+            <p className="text-xs text-sky-400 font-semibold uppercase tracking-wider">Edit Raw Title</p>
+            <p className="text-[10px] text-slate-500">Changing the raw title updates the normalized lookup key.</p>
+            <input
+              autoFocus
+              type="text"
+              value={editRaw}
+              onChange={(e) => setEditRaw(e.target.value)}
+              className="input w-full text-xs"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleSaveAlias}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
+              >
+                Save
+              </button>
+              <button
+                onClick={() => setEditingAlias(null)}
+                className="px-3 py-1.5 rounded-lg text-xs text-slate-400 border border-white/10 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Alias list */}
+        {filteredAliases.length === 0 && (
+          <div className="text-center py-8 text-slate-500 text-xs">
+            {(learnedAliases?.length ?? 0) === 0
+              ? 'No learned mappings yet. Correct an exam during import and it will appear here.'
+              : 'No mappings match your search.'}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {filteredAliases.map((alias) => (
+            <div
+              key={alias.id}
+              className="rounded-xl border border-white/8 bg-white/3 p-3 space-y-1.5 hover:border-white/15 transition-colors"
+            >
+              {/* Row header */}
+              <div className="flex items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  {/* Raw OCR title */}
+                  <p className="text-xs font-mono text-slate-300 truncate" title={alias.aliasTextRaw}>
+                    {alias.aliasTextRaw}
+                  </p>
+                  {/* Arrow + canonical name */}
+                  {alias.canonicalExamName && (
+                    <p className="text-[10px] text-slate-500 mt-0.5 truncate">
+                      → <span className="text-slate-400">{alias.canonicalExamName}</span>
+                    </p>
+                  )}
+                </div>
+                {/* Actions */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => startEditAlias(alias)}
+                    className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-slate-400 hover:text-white hover:border-white/25 transition-colors"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleDeleteAlias(alias.id)}
+                    className="text-[10px] px-2 py-0.5 rounded border border-red-500/20 text-red-400/70 hover:text-red-400 hover:border-red-500/40 transition-colors"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+
+              {/* CPT codes + RVU */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="font-mono text-[10px] text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded">
+                  {formatCptList(alias)}
+                </span>
+                {alias.totalWorkRvu != null && alias.totalWorkRvu > 0 && (
+                  <span className="text-[10px] text-emerald-400">
+                    {alias.totalWorkRvu.toFixed(2)} wRVU
+                  </span>
+                )}
+                <span className="text-[10px] text-slate-600 ml-auto">
+                  {sourceLabel(alias.source)} · {alias.timesUsed}× used
+                  {alias.lastUsedAt && ` · ${new Date(alias.lastUsedAt).toLocaleDateString()}`}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Clear all */}
+        {(learnedAliases?.length ?? 0) > 0 && (
+          <button
+            onClick={async () => {
+              if (!confirm(`Delete all ${learnedAliases?.length} learned mappings?`)) return;
+              await db.examAliases.clear();
+            }}
+            className="text-xs text-slate-500 hover:text-red-400 transition-colors"
+          >
+            Clear all learned mappings
+          </button>
+        )}
       </div>
 
       {/* Danger zone */}

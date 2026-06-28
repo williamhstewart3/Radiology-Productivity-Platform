@@ -19,7 +19,7 @@ import { learnAlias } from '../utils/matching';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import { ManualImportProvider } from '../providers/ManualImportProvider';
-import type { MatchCandidate, StudyLog } from '../types';
+import type { MatchCandidate, StudyLog, ExamAlias } from '../types';
 import { MODALITY_LABELS } from '../types';
 import type { DuplicateMatch, StudyCandidate } from '../utils/duplicateDetection';
 
@@ -128,7 +128,12 @@ export function LogStudy({ onSaved }: LogStudyProps) {
       };
 
       await db.studyLogs.add(log);
-      await learnAlias(examInput.trim(), selected.cptCode, selected.modifier, 'manual_name_match');
+      await learnAlias({
+        rawText: examInput.trim(),
+        canonicalExamName: selected.description,
+        candidates: [{ cptCode: selected.cptCode, modifier: selected.modifier, workRvu: selected.workRvu }],
+        source: 'manual_name_match' as ExamAlias['source'],
+      });
 
       setDupeWarning(null);
       setForceSave(false);

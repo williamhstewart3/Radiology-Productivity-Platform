@@ -233,8 +233,14 @@ export function Import({ onImported }: ImportProps) {
       needsReview: false,
     });
 
-    // Learn the alias immediately — next import benefits right away
-    await learnAlias(row.source.examTitle, candidate.cptCode, candidate.modifier ?? null, 'user');
+    // Learn the alias immediately — next import benefits right away.
+    // Pass the canonical description as the exam name so Settings shows it clearly.
+    await learnAlias({
+      rawText: row.source.examTitle,
+      canonicalExamName: candidate.description,
+      candidates: [{ cptCode: candidate.cptCode, modifier: candidate.modifier, workRvu: candidate.workRvu }],
+      source: 'user',
+    });
 
     setSearchPanelTempId(null);
   }

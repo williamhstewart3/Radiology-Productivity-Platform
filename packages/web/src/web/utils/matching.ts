@@ -282,33 +282,95 @@ export async function searchExamLibrary(
 
 // ─── Alias learning ──────────────────────────────────────────────────────────
 
+// ─── Alias learning ──────────────────────────────────────────────────────────
+
+/**
+ * Payload for saving a learned alias — supports one-to-many CPT mappings.
+ *
+ * For simple single-CPT exams, pass exactly one entry in `candidates`.
+ * For multi-CPT exams (e.g. CTA Head+Neck → [70496-26, 70498-26]), pass
+ * all professional-component candidates; `totalWorkRvu` is summed automatically.
+ */
+export interface LearnAliasPayload {
+  /** Raw OCR / paste title as it appeared on the screenshot. */
+  rawText: string;
+  /** Canonical exam name from the library (e.g. "CTA Head and Neck with Contrast"). */
+  canonicalExamName: string | null;
+  /**
+   * All CPT candidates confirmed for this exam.
+   * The first entry is treated as the primary CPT for single-code lookups.
+   */
+  candidates: Array<{ cptCode: string; modifier: string | null; workRvu: number | null }>;
+  source: ExamAlias['source'];
+  /** Profile scope. null = current default profile. */
+  profileId?: string | null;
+}
+
 /**
  * Saves a confirmed exam-name → CPT mapping to the alias table.
+ * Supports one-to-many CPT mappings (e.g. multi-CPT CTA protocols).
  *
- * Called after every user-confirmed import. On the next import:
+ * On the next import:
  *   • Exact normalized match → auto-assigns at 0.97 confidence, no review prompt
  *   • Fuzzy match → surfaces as top candidate
  *
  * Works for all import sources: paste, OCR, CSV, PowerScribe API.
  */
+export async function learnAlias(payload: LearnAliasPayload): Promise<void>;
+/** @deprecated Pass a LearnAliasPayload object instead. */
 export async function learnAlias(
   rawText: string,
   cptCode: string,
   modifier: string | null,
   source: ExamAlias['source'],
+): Promise<void>;
+export async function learnAlias(
+  payloadOrRaw: LearnAliasPayload | string,
+  cptCode?: string,
+  modifier?: string | null,
+  source?: ExamAlias['source'],
 ): Promise<void> {
+  // Normalize both call signatures into a single payload
+  let payload: LearnAliasPayload;
+  if (typeof payloadOrRaw === 'string') {
+    payload = {
+      rawText: payloadOrRaw,
+      canonicalExamName: null,
+      candidates: [{ cptCode: cptCode!, modifier: modifier ?? null, workRvu: null }],
+      source: source!,
+    };
+  } else {
+    payload = payloadOrRaw;
+  }
+
+  if (!payload.candidates.length) return;
+
+  const { rawText, canonicalExamName, candidates, profileId = null } = payload;
+  const primary = candidates[0];
+
   const normalized = normalizeExamText(rawText);
   const existing = await db.examAliases.where('aliasText').equals(normalized).first();
+
+  // Serialize multi-CPT list: "CPTCODE" or "CPTCODE-MOD"
+  const cptCodes = candidates.map((c) =>
+    c.modifier ? `${c.cptCode}-${c.modifier}` : c.cptCode,
+  );
+  const totalWorkRvu = candidates.reduce(
+    (sum, c) => (c.workRvu != null ? sum + c.workRvu : sum),
+    0,
+  ) || null;
 
   const now = new Date().toISOString();
 
   if (existing) {
     await db.examAliases.update(existing.id, {
-      cptCode,
-      modifier,
+      cptCode: primary.cptCode,
+      modifier: primary.modifier,
+      cptCodes,
+      totalWorkRvu,
+      canonicalExamName: canonicalExamName ?? existing.canonicalExamName,
       timesUsed: existing.timesUsed + 1,
       lastUsedAt: now,
-      // Confidence creeps toward 1.0 as the mapping is reconfirmed
       matchConfidence: Math.min(1, existing.matchConfidence + 0.02),
     });
     return;
@@ -316,12 +378,16 @@ export async function learnAlias(
 
   await db.examAliases.add({
     id: crypto.randomUUID(),
+    profileId,
     aliasText: normalized,
     aliasTextRaw: rawText,
-    cptCode,
-    modifier,
+    canonicalExamName: canonicalExamName ?? null,
+    cptCode: primary.cptCode,
+    modifier: primary.modifier,
+    cptCodes,
+    totalWorkRvu,
     matchConfidence: 0.90,
-    source,
+    source: payload.source,
     timesUsed: 1,
     lastUsedAt: now,
     createdAt: now,

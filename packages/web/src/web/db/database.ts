@@ -70,6 +70,27 @@ export class RvuDatabase extends Dexie {
       organizations: 'id',
       practices: 'id, organizationId',
     });
+
+    // v5: adds canonicalExamName, cptCodes (multi-CPT), totalWorkRvu fields.
+    //     No data transform needed — new fields are optional / default to null / [].
+    //     Existing single-CPT alias rows remain valid (cptCodes empty → use cptCode).
+    this.version(5).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, aliasText, cptCode, canonicalExamName',
+      studyLogs: 'id, profileId, logDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      // Back-fill missing fields on existing aliases so the type is consistent
+      return trans.table('examAliases').toCollection().modify((alias) => {
+        if (!('cptCodes' in alias))       alias.cptCodes = [];
+        if (!('totalWorkRvu' in alias))   alias.totalWorkRvu = null;
+        if (!('canonicalExamName' in alias)) alias.canonicalExamName = null;
+      });
+    });
   }
 }
 

@@ -74,10 +74,27 @@ export interface ExamAlias {
   profileId: string | null;
   aliasText: string;
   aliasTextRaw: string;
+  /**
+   * The canonical exam name selected from the library (e.g. "CTA Head and Neck with Contrast").
+   * Stored for display in Settings and for future multi-CPT grouping.
+   */
+  canonicalExamName: string | null;
+  /**
+   * Primary CPT code for this alias (used for single-CPT fast-path lookups).
+   * For multi-CPT exams (e.g. CTA Head+Neck → 70496-26 + 70498-26), this
+   * holds the first / highest-RVU code; the full list is in cptCodes.
+   */
   cptCode: string;
   modifier: string | null;
+  /**
+   * All CPT codes for this exam, each serialized as "CPTCODE" or "CPTCODE-MOD".
+   * Empty array = legacy single-code alias (treat cptCode+modifier as the only entry).
+   */
+  cptCodes: string[];
+  /** Sum of work RVUs for all professional-component CPTs in cptCodes. */
+  totalWorkRvu: number | null;
   matchConfidence: number;
-  source: 'manual' | 'ocr_confirmed' | 'seed';
+  source: 'manual' | 'ocr_confirmed' | 'seed' | 'user';
   timesUsed: number;
   lastUsedAt: string | null;
   createdAt: string;

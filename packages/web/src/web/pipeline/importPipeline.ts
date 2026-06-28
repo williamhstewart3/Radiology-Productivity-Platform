@@ -264,7 +264,12 @@ export async function commitPipelineResults(
     };
 
     await db.studyLogs.add(log);
-    await learnAlias(study.examTitle, cand.cptCode, cand.modifier, 'ocr_confirmed');
+    await learnAlias({
+      rawText: study.examTitle,
+      canonicalExamName: cand.description,
+      candidates: [{ cptCode: cand.cptCode, modifier: cand.modifier, workRvu: cand.workRvu }],
+      source: 'ocr_confirmed',
+    });
 
     importedCount++;
     if (isReview) reviewNeededCount++;
