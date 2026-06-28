@@ -150,7 +150,7 @@ export interface UserSettings {
   breakMinutes: number;
 }
 
-/** Color accent for a radiologist profile. */
+/** Color accent for a radiologist profile, practice, or org. */
 export type ProfileColor =
   | 'indigo'
   | 'violet'
@@ -161,9 +161,41 @@ export type ProfileColor =
   | 'orange'
   | 'teal';
 
+/**
+ * Top-level organizational entity (e.g. "Baptist Medical Group").
+ * Contains one or more practices.
+ */
+export interface Organization {
+  id: string;
+  name: string;
+  /** Short initials (≤3 chars) for avatar. */
+  initials: string;
+  color: ProfileColor;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A practice / site within an organization (e.g. "Memphis", "Oxford").
+ * Contains one or more radiologist profiles.
+ */
+export interface Practice {
+  id: string;
+  /** Parent organization. */
+  organizationId: string;
+  name: string;
+  /** Optional city / location label. */
+  city: string | null;
+  color: ProfileColor;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** One radiologist / user context. All study data is scoped to a profile. */
 export interface RadiologistProfile {
   id: string;
+  /** Parent practice. null = legacy / unassigned. */
+  practiceId: string | null;
   /** Display name shown in the UI. */
   name: string;
   /** Short initials (≤3 chars) shown in the avatar bubble. */
@@ -175,7 +207,7 @@ export interface RadiologistProfile {
   /** ISO timestamp of last time this profile was the active one. */
   lastUsed: string;
 
-  // ── Goal + schedule (per-profile) ─────────────────────────────────────────
+  // ── Goal + schedule (per-radiologist) ────────────────────────────────────
   dailyRvuGoal: number;
   annualRvuGoal: number;
   fiscalYearStartMonth: number;

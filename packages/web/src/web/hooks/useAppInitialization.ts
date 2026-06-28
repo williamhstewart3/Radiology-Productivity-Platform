@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { db, ensureUserSettings, ensureDefaultProfile } from '../db/database';
+import { db, ensureUserSettings, ensureOrgHierarchy } from '../db/database';
 import { buildSeedCptRows } from '../data/seedCptData';
 
 /**
- * Runs once on app startup: ensures user_settings exists and seeds the
- * verified CPT rows if the cpt_rvu_table is completely empty. If the user
- * has already imported a real RVU file, this is a no-op.
+ * Runs once on app startup:
+ *  1. Ensures user_settings row exists.
+ *  2. Ensures the full org → practice → radiologist hierarchy exists.
+ *  3. Seeds CPT rows if the table is empty.
  */
 export function useAppInitialization() {
   const [isReady, setIsReady] = useState(false);
@@ -17,7 +18,7 @@ export function useAppInitialization() {
     async function init() {
       try {
         await ensureUserSettings();
-        await ensureDefaultProfile();
+        await ensureOrgHierarchy();
 
         const existingCount = await db.cptRvuTable.count();
         if (existingCount === 0) {
@@ -33,9 +34,7 @@ export function useAppInitialization() {
     }
 
     init();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   return { isReady, error };

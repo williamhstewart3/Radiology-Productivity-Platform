@@ -6,6 +6,8 @@ import type {
   DailySession,
   UserSettings,
   RadiologistProfile,
+  Organization,
+  Practice,
 } from '../types';
 
 /**
@@ -21,6 +23,8 @@ export class RvuDatabase extends Dexie {
   dailySessions!: Table<DailySession, string>;
   userSettings!: Table<UserSettings, string>;
   radiologistProfiles!: Table<RadiologistProfile, string>;
+  organizations!: Table<Organization, string>;
+  practices!: Table<Practice, string>;
 
   constructor() {
     super('rvu_tracker_db');
@@ -34,8 +38,6 @@ export class RvuDatabase extends Dexie {
     });
 
     // v2: adds studyFingerprint index for O(1) duplicate detection.
-    // Existing rows without a fingerprint are left as-is; Dexie handles
-    // sparse indexes — null/undefined values are simply not indexed.
     this.version(2).stores({
       cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
       examAliases: 'id, aliasText, cptCode',
@@ -44,10 +46,7 @@ export class RvuDatabase extends Dexie {
       userSettings: 'id',
     });
 
-    // v3: adds radiologistProfiles table; adds profileId index to studyLogs
-    // and examAliases. No data transform needed — old rows without profileId
-    // are sparse-indexed (null/undefined not indexed), and are treated as
-    // belonging to the default profile at query time.
+    // v3: adds radiologistProfiles table; adds profileId index to studyLogs and examAliases.
     this.version(3).stores({
       cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
       examAliases: 'id, profileId, aliasText, cptCode',
@@ -56,12 +55,29 @@ export class RvuDatabase extends Dexie {
       userSettings: 'id',
       radiologistProfiles: 'id, active, lastUsed',
     });
+
+    // v4: adds organizations and practices tables.
+    //     adds practiceId index to radiologistProfiles.
+    //     adds organizationId index to practices.
+    //     No data transform needed — old rows without practiceId are sparse-indexed.
+    this.version(4).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, aliasText, cptCode',
+      studyLogs: 'id, profileId, logDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    });
   }
 }
 
 export const db = new RvuDatabase();
 
-/** Ensures a single user_settings row exists, creating sane defaults if not. */
+// ─── Seed helpers ──────────────────────────────────────────────────────────────
+
+/** Ensures a single user_settings row exists. */
 export async function ensureUserSettings(): Promise<UserSettings> {
   const existing = await db.userSettings.get('default');
   if (existing) return existing;
@@ -77,7 +93,6 @@ export async function ensureUserSettings(): Promise<UserSettings> {
     activeRvuFileVersion: 'RVU26A',
     theme: 'system',
     updatedAt: new Date().toISOString(),
-    // Daily Pace defaults
     dailyRvuGoal: 90,
     workdayStart: '08:00',
     workdayEnd: '17:00',
@@ -88,37 +103,89 @@ export async function ensureUserSettings(): Promise<UserSettings> {
 }
 
 /**
- * Ensures at least one RadiologistProfile exists.
- * If none exist, creates a "Default" profile and marks it active.
- * Also migrates goal/schedule fields from userSettings → default profile
- * so first-time users don't lose their existing config.
+ * Ensures at least one Organization exists.
+ * Returns the first (and typically only) organization.
+ */
+export async function ensureDefaultOrganization(): Promise<Organization> {
+  const existing = await db.organizations.toArray();
+  if (existing.length > 0) return existing[0];
+
+  const now = new Date().toISOString();
+  const org: Organization = {
+    id: 'org-default',
+    name: 'My Organization',
+    initials: 'MO',
+    color: 'indigo',
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.organizations.put(org);
+  return org;
+}
+
+/**
+ * Ensures at least one Practice exists under the given org.
+ * Returns the first practice in the org.
+ */
+export async function ensureDefaultPractice(organizationId: string): Promise<Practice> {
+  const existing = await db.practices
+    .where('organizationId')
+    .equals(organizationId)
+    .first();
+  if (existing) return existing;
+
+  const now = new Date().toISOString();
+  const practice: Practice = {
+    id: 'practice-default',
+    organizationId,
+    name: 'My Practice',
+    city: null,
+    color: 'violet',
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.practices.put(practice);
+  return practice;
+}
+
+/**
+ * Ensures at least one RadiologistProfile exists, attached to the given practice.
+ * If profiles exist without a practiceId, migrates them to the default practice.
  * Returns the currently active profile.
  */
-export async function ensureDefaultProfile(): Promise<RadiologistProfile> {
-  const count = await db.radiologistProfiles.count();
+export async function ensureDefaultProfile(practiceId: string): Promise<RadiologistProfile> {
+  const allProfiles = await db.radiologistProfiles.toArray();
 
-  if (count > 0) {
-    // Return whichever profile is marked active (or most recently used)
-    const active = await db.radiologistProfiles
-      .where('active')
-      .equals(1 as any)
-      .first();
-    if (active) return active;
-
-    // Fallback: most recently used
-    const all = await db.radiologistProfiles.orderBy('lastUsed').reverse().first();
-    if (all) {
-      await db.radiologistProfiles.update(all.id, { active: true });
-      return { ...all, active: true };
+  if (allProfiles.length > 0) {
+    // Migrate any legacy profiles that lack a practiceId
+    const unattached = allProfiles.filter((p) => !p.practiceId);
+    if (unattached.length > 0) {
+      await db.transaction('rw', db.radiologistProfiles, async () => {
+        for (const p of unattached) {
+          await db.radiologistProfiles.update(p.id, {
+            practiceId,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      });
     }
+
+    // Return active profile
+    const active = allProfiles.find((p) => p.active);
+    if (active) return { ...active, practiceId: active.practiceId ?? practiceId };
+
+    const fallback = allProfiles[0];
+    await db.radiologistProfiles.update(fallback.id, { active: true });
+    return { ...fallback, active: true, practiceId: fallback.practiceId ?? practiceId };
   }
 
-  // No profiles yet — create default, inheriting any existing userSettings
+  // No profiles at all — create default
   const existingSettings = await db.userSettings.get('default');
   const now = new Date().toISOString();
 
   const profile: RadiologistProfile = {
     id: 'profile-default',
+    practiceId,
     name: 'My Profile',
     initials: 'ME',
     color: 'indigo',
@@ -138,4 +205,19 @@ export async function ensureDefaultProfile(): Promise<RadiologistProfile> {
 
   await db.radiologistProfiles.put(profile);
   return profile;
+}
+
+/**
+ * Master seed: ensures org → practice → radiologist chain exists.
+ * Called once on app startup. Safe to call multiple times (idempotent).
+ */
+export async function ensureOrgHierarchy(): Promise<{
+  org: Organization;
+  practice: Practice;
+  profile: RadiologistProfile;
+}> {
+  const org = await ensureDefaultOrganization();
+  const practice = await ensureDefaultPractice(org.id);
+  const profile = await ensureDefaultProfile(practice.id);
+  return { org, practice, profile };
 }

@@ -1,7 +1,7 @@
 /**
  * useProfile.ts
  *
- * Re-exports useProfile from ProfileContext for conventional hook import paths.
- * Usage: import { useProfile } from '../hooks/useProfile';
+ * Backward-compat re-export. All existing code that imports useProfile()
+ * continues to work — it now reads from OrgContext instead of ProfileContext.
  */
-export { useProfile } from '../contexts/ProfileContext';
+export { useProfile } from '../contexts/OrgContext';

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Route, Switch } from 'wouter';
 import { useAppInitialization } from './hooks/useAppInitialization';
-import { ProfileProvider } from './contexts/ProfileContext';
-import { ProfileSwitcher } from './components/ProfileSwitcher';
+import { OrgProvider } from './contexts/OrgContext';
+import { OrgSwitcher } from './components/OrgSwitcher';
 import { DailyPaceDashboard } from './components/DailyPaceDashboard';
 import { MiniPaceWindow } from './components/MiniPaceWindow';
 import { Dashboard } from './pages/Dashboard';
@@ -10,10 +10,10 @@ import { LogStudy } from './pages/LogStudy';
 import { Import } from './pages/Import';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
-import { Profiles } from './pages/Profiles';
+import Organizations from './pages/Organizations';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 
-type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'profiles';
+type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'organizations';
 
 const NAV_ITEMS: { id: Tab; label: string; icon: string }[] = [
   { id: 'pace',      label: 'Daily Pace', icon: '⚡' },
@@ -96,9 +96,9 @@ function MainApp() {
               ))}
             </nav>
 
-            {/* Right side: Profile switcher + theme toggle */}
+            {/* Right side: Org/Practice/Radiologist switcher + theme toggle */}
             <div className="flex items-center gap-2 shrink-0">
-              <ProfileSwitcher onManageProfiles={() => setActiveTab('profiles')} />
+              <OrgSwitcher onManage={() => setActiveTab('organizations')} />
               <button
                 onClick={() => setIsDark(!isDark)}
                 className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all"
@@ -113,13 +113,13 @@ function MainApp() {
         {/* Page content */}
         <main className="flex-1 overflow-auto">
           <div className="max-w-7xl mx-auto px-4 py-6">
-            {activeTab === 'pace'      && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
-            {activeTab === 'dashboard' && <Dashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
-            {activeTab === 'log'       && <LogStudy onSaved={() => setActiveTab('pace')} />}
-            {activeTab === 'import'    && <Import onImported={() => setActiveTab('pace')} />}
-            {activeTab === 'history'   && <History />}
-            {activeTab === 'settings'  && <Settings />}
-            {activeTab === 'profiles'  && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} />}
+            {activeTab === 'pace'          && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
+            {activeTab === 'dashboard'     && <Dashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
+            {activeTab === 'log'           && <LogStudy onSaved={() => setActiveTab('pace')} />}
+            {activeTab === 'import'        && <Import onImported={() => setActiveTab('pace')} />}
+            {activeTab === 'history'       && <History />}
+            {activeTab === 'settings'      && <Settings />}
+            {activeTab === 'organizations' && <Organizations onNavigate={(t) => setActiveTab(t as Tab)} />}
           </div>
         </main>
 
@@ -151,7 +151,7 @@ function MainApp() {
 
 export default function App() {
   return (
-    <ProfileProvider>
+    <OrgProvider>
       <Switch>
         {/* Standalone mini window — no nav, no init guard, loads independently */}
         <Route path="/mini-pace">
@@ -165,6 +165,6 @@ export default function App() {
           <MainApp />
         </Route>
       </Switch>
-    </ProfileProvider>
+    </OrgProvider>
   );
 }

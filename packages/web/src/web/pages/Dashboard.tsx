@@ -1,67 +1,173 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { db } from '../db/database';
-import { useProfile } from '../hooks/useProfile';
-import { computeYtdStats, computeDailyStats, todayDateString, groupLogsByDate } from '../utils/calculations';
+import { useOrg } from '../hooks/useOrg';
+import { computeYtdStats, computeDailyStats, todayDateString } from '../utils/calculations';
 import { ProgressBar } from '../components/ProgressBar';
 import { StatusBadge } from '../components/StatusBadge';
 import { ConfettiCanvas } from '../components/ConfettiCanvas';
-import type { UserSettings, StudyLog, Modality } from '../types';
+import { ProfileAvatar } from '../components/OrgSwitcher';
+import type { UserSettings, StudyLog, Modality, RadiologistProfile } from '../types';
 import { MODALITY_LABELS } from '../types';
 
+// ─── Constants ─────────────────────────────────────────────────────────────────
+
 const MODALITY_COLORS: Record<Modality, string> = {
-  CT: '#6366f1',
-  MRI: '#8b5cf6',
-  US: '#06b6d4',
-  XR: '#3b82f6',
-  NM_PET: '#f59e0b',
-  MAMMO: '#ec4899',
-  FLUORO: '#10b981',
-  PROCEDURE: '#ef4444',
-  OTHER: '#64748b',
+  CT: '#6366f1', MRI: '#8b5cf6', US: '#06b6d4', XR: '#3b82f6',
+  NM_PET: '#f59e0b', MAMMO: '#ec4899', FLUORO: '#10b981',
+  PROCEDURE: '#ef4444', OTHER: '#64748b',
 };
+
+type DashMode = 'my' | 'practice' | 'org';
 
 function fmt(n: number, decimals = 1) {
   return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
-
 function fmtInt(n: number) {
   return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
 }
+
+// ─── Mode pill toggle ──────────────────────────────────────────────────────────
+
+interface ModePillsProps {
+  mode: DashMode;
+  onChange: (m: DashMode) => void;
+  practiceLabel: string;
+  orgLabel: string;
+}
+
+function ModePills({ mode, onChange, practiceLabel, orgLabel }: ModePillsProps) {
+  const pills: { id: DashMode; label: string; icon: string }[] = [
+    { id: 'my',       label: 'My Production',   icon: '👤' },
+    { id: 'practice', label: practiceLabel,      icon: '🏥' },
+    { id: 'org',      label: orgLabel,           icon: '🏢' },
+  ];
+  return (
+    <div className="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/8">
+      {pills.map((p) => (
+        <button
+          key={p.id}
+          onClick={() => onChange(p.id)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 ${
+            mode === p.id
+              ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/30'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <span>{p.icon}</span>
+          <span className="hidden sm:inline">{p.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Radiologist mini-card (for practice/org view) ────────────────────────────
+
+interface RadCardProps {
+  profile: RadiologistProfile;
+  logs: StudyLog[];
+  settings: UserSettings;
+  isActive: boolean;
+}
+
+function RadCard({ profile, logs, settings, isActive }: RadCardProps) {
+  const effectiveSettings = {
+    ...settings,
+    annualRvuGoal: profile.annualRvuGoal,
+    fiscalYearStartMonth: profile.fiscalYearStartMonth,
+  };
+  const year = new Date().getFullYear();
+  const fiscalStart = new Date(year, profile.fiscalYearStartMonth - 1, 1);
+  const ytdLogs = logs.filter((l) => l.logDate >= fiscalStart.toISOString().slice(0, 10));
+  const stats = computeYtdStats(ytdLogs, effectiveSettings);
+
+  return (
+    <div className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all ${
+      isActive ? 'bg-indigo-500/8 border-indigo-500/20' : 'bg-white/3 border-white/8'
+    }`}>
+      <ProfileAvatar initials={profile.initials} color={profile.color} size="sm" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <p className="text-sm font-medium text-white truncate">{profile.name}</p>
+          {isActive && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 font-medium shrink-0">YOU</span>
+          )}
+        </div>
+        <div className="mt-0.5">
+          <ProgressBar value={stats.percentToGoal} status="neutral" height="sm" />
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <p className="text-sm font-bold text-white">{fmtInt(stats.ytdWorkRvu)}</p>
+        <p className="text-[10px] text-slate-500">{fmt(stats.percentToGoal, 0)}%</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ────────────────────────────────────────────────────────────
 
 interface DashboardProps {
   onNavigate: (tab: 'log' | 'import' | 'history' | 'settings') => void;
 }
 
 export function Dashboard({ onNavigate }: DashboardProps) {
+  const [mode, setMode] = useState<DashMode>('my');
   const [showConfetti, setShowConfetti] = useState(false);
   const [prevPercent, setPrevPercent] = useState<number | null>(null);
 
   const today = todayDateString();
-  const { activeProfile } = useProfile();
+  const {
+    activeProfile,
+    activePractice,
+    activeOrg,
+    practiceRadiologists,
+    orgRadiologists,
+    practices,
+  } = useOrg();
+
   const profileId = activeProfile?.id ?? null;
 
   const settings = useLiveQuery<UserSettings | undefined>(
     () => db.userSettings.get('default'),
-    []
+    [],
   );
 
-  const allLogs = useLiveQuery<StudyLog[]>(
-    async () => {
-      if (!profileId) return [];
-      const all = await db.studyLogs.orderBy('logDate').toArray();
-      return all.filter((l) => l.profileId === profileId || l.profileId == null);
-    },
-    [profileId]
-  );
+  // All study logs — we filter in JS because we need to aggregate across
+  // multiple profileIds for practice/org views
+  const allStudyLogs = useLiveQuery<StudyLog[]>(
+    () => db.studyLogs.orderBy('logDate').toArray(),
+    [],
+    [],
+  ) ?? [];
 
-  const todayLogs = useLiveQuery<StudyLog[]>(
-    async () => {
-      if (!profileId) return [];
-      const all = await db.studyLogs.where('logDate').equals(today).toArray();
-      return all.filter((l) => l.profileId === profileId || l.profileId == null);
-    },
-    [today, profileId]
+  // ── Filtered log sets per mode ────────────────────────────────────────────
+
+  const myProfileIds = useMemo(() => new Set([profileId, null]), [profileId]);
+
+  const practiceProfileIds = useMemo(() => {
+    const ids = new Set(practiceRadiologists.map((r) => r.id));
+    ids.add(null); // legacy rows
+    return ids;
+  }, [practiceRadiologists]);
+
+  const orgProfileIds = useMemo(() => {
+    const ids = new Set(orgRadiologists.map((r) => r.id));
+    ids.add(null);
+    return ids;
+  }, [orgRadiologists]);
+
+  const activeLogs = useMemo(() => {
+    if (!allStudyLogs) return [];
+    if (mode === 'my') return allStudyLogs.filter((l) => myProfileIds.has(l.profileId));
+    if (mode === 'practice') return allStudyLogs.filter((l) => practiceProfileIds.has(l.profileId));
+    return allStudyLogs.filter((l) => orgProfileIds.has(l.profileId));
+  }, [allStudyLogs, mode, myProfileIds, practiceProfileIds, orgProfileIds]);
+
+  const todayActiveLogs = useMemo(
+    () => activeLogs.filter((l) => l.logDate === today),
+    [activeLogs, today],
   );
 
   const reviewCount = useLiveQuery<number>(
@@ -70,36 +176,41 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       const all = await db.studyLogs.where('needsReview').equals(1 as any).toArray();
       return all.filter((l) => l.profileId === profileId || l.profileId == null).length;
     },
-    [profileId]
+    [profileId],
   );
 
-  const ytdStats = (() => {
-    if (!allLogs || !settings) return null;
-    // Merge: profile goal/fiscal settings override global userSettings
+  // ── Effective goal for current mode ──────────────────────────────────────
+
+  const effectiveAnnualGoal = useMemo(() => {
+    if (mode === 'my') return activeProfile?.annualRvuGoal ?? settings?.annualRvuGoal ?? 15000;
+    if (mode === 'practice') return practiceRadiologists.reduce((s, r) => s + r.annualRvuGoal, 0);
+    return orgRadiologists.reduce((s, r) => s + r.annualRvuGoal, 0);
+  }, [mode, activeProfile, settings, practiceRadiologists, orgRadiologists]);
+
+  const effectiveFiscalMonth = activeProfile?.fiscalYearStartMonth ?? settings?.fiscalYearStartMonth ?? 1;
+
+  const ytdStats = useMemo(() => {
+    if (!settings) return null;
     const effectiveSettings = {
       ...settings,
-      annualRvuGoal: activeProfile?.annualRvuGoal ?? settings.annualRvuGoal,
-      fiscalYearStartMonth: activeProfile?.fiscalYearStartMonth ?? settings.fiscalYearStartMonth,
+      annualRvuGoal: effectiveAnnualGoal,
+      fiscalYearStartMonth: effectiveFiscalMonth,
     };
     const year = new Date().getFullYear();
-    const fiscalStart = new Date(year, (effectiveSettings.fiscalYearStartMonth ?? 1) - 1, 1);
-    const logsThisYear = allLogs.filter(
-      (l) => l.logDate >= fiscalStart.toISOString().slice(0, 10)
-    );
-    return computeYtdStats(logsThisYear, effectiveSettings);
-  })();
+    const fiscalStart = new Date(year, effectiveFiscalMonth - 1, 1);
+    const ytdLogs = activeLogs.filter((l) => l.logDate >= fiscalStart.toISOString().slice(0, 10));
+    return computeYtdStats(ytdLogs, effectiveSettings);
+  }, [activeLogs, settings, effectiveAnnualGoal, effectiveFiscalMonth]);
 
-  const todayStats = (() => {
-    if (!todayLogs) return null;
-    return computeDailyStats(todayLogs, null);
-  })();
+  const todayStats = useMemo(() => {
+    return computeDailyStats(todayActiveLogs, null);
+  }, [todayActiveLogs]);
 
-  // Confetti on milestone crossings
+  // Confetti on milestone (my mode only)
   useEffect(() => {
-    if (!ytdStats) return;
+    if (!ytdStats || mode !== 'my') return;
     const pct = ytdStats.percentToGoal;
-    const milestones = [25, 50, 75, 100];
-    for (const m of milestones) {
+    for (const m of [25, 50, 75, 100]) {
       if (prevPercent !== null && prevPercent < m && pct >= m) {
         setShowConfetti(true);
         setTimeout(() => setShowConfetti(false), 4000);
@@ -107,63 +218,108 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       }
     }
     setPrevPercent(pct);
-  }, [ytdStats?.percentToGoal]);
+  }, [ytdStats?.percentToGoal, mode]);
 
   const paceStatus = (() => {
     if (!ytdStats) return 'neutral' as const;
-    const ratio = ytdStats.ytdWorkRvu / Math.max(1, ytdStats.dailyAverageYtd * ytdStats.daysElapsedInYear);
     if (ytdStats.percentToGoal >= 100) return 'ahead' as const;
     const expectedPct = (ytdStats.daysElapsedInYear / (ytdStats.daysElapsedInYear + ytdStats.daysRemainingInYear)) * 100;
     if (ytdStats.percentToGoal >= expectedPct * 0.97) return 'on_track' as const;
-    if (ytdStats.percentToGoal >= expectedPct * 0.9) return 'on_track' as const;
     return 'behind' as const;
   })();
 
-  // Modality breakdown for today
-  const modalityData = (() => {
+  const modalityData = useMemo(() => {
     if (!todayStats) return [];
     return Object.entries(todayStats.byModality)
       .filter(([, v]) => v > 0)
       .map(([k, v]) => ({ modality: k as Modality, rvu: v }))
       .sort((a, b) => b.rvu - a.rvu);
-  })();
+  }, [todayStats]);
 
-  // Weekly trend (last 7 days)
-  const weeklyData = (() => {
-    if (!allLogs) return [];
+  const weeklyData = useMemo(() => {
     const days: { date: string; rvu: number }[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().slice(0, 10);
-      const logsForDay = allLogs.filter((l) => l.logDate === dateStr && !l.needsReview);
-      const rvu = logsForDay.reduce((s, l) => s + (l.workRvu ?? 0), 0);
+      const rvu = activeLogs
+        .filter((l) => l.logDate === dateStr && !l.needsReview)
+        .reduce((s, l) => s + (l.workRvu ?? 0), 0);
       days.push({ date: dateStr, rvu });
     }
     return days;
-  })();
+  }, [activeLogs]);
 
   const weekMax = Math.max(...weeklyData.map((d) => d.rvu), 1);
+
+  // ── Mode labels ───────────────────────────────────────────────────────────
+
+  const practiceLabel = activePractice
+    ? activePractice.name
+    : 'Practice';
+
+  const orgLabel = activeOrg
+    ? activeOrg.name
+    : 'Organization';
+
+  // Radiologists to show in the breakdown panel (practice/org mode)
+  const radBreakdown = mode === 'practice'
+    ? practiceRadiologists
+    : mode === 'org'
+    ? orgRadiologists
+    : [];
+
+  // Group org radiologists by practice for org view
+  const practiceGroups = useMemo(() => {
+    if (mode !== 'org') return [];
+    const grouped = new Map<string, { practiceName: string; rads: RadiologistProfile[] }>();
+    for (const rad of orgRadiologists) {
+      const p = rad.practiceId ? practices.find((pr) => pr.id === rad.practiceId) : null;
+      const key = p?.id ?? 'unassigned';
+      if (!grouped.has(key)) {
+        grouped.set(key, { practiceName: p?.name ?? 'Unassigned', rads: [] });
+      }
+      grouped.get(key)!.rads.push(rad);
+    }
+    return Array.from(grouped.values());
+  }, [mode, orgRadiologists, practices]);
+
+  // Logs per radiologist for breakdown cards
+  const logsByProfile = useMemo(() => {
+    const map = new Map<string, StudyLog[]>();
+    for (const log of allStudyLogs) {
+      const key = log.profileId ?? 'null';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(log);
+    }
+    return map;
+  }, [allStudyLogs]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       <ConfettiCanvas active={showConfetti} />
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Annual Dashboard</h1>
           <p className="text-slate-400 text-sm mt-0.5">
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <ModePills
+            mode={mode}
+            onChange={setMode}
+            practiceLabel={practiceLabel}
+            orgLabel={orgLabel}
+          />
           {(reviewCount ?? 0) > 0 && (
             <button
               onClick={() => onNavigate('history')}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 text-sm font-medium hover:bg-amber-500/25 transition-colors"
             >
-              ⚠️ {reviewCount} need review
+              ⚠️ {reviewCount}
             </button>
           )}
           <button
@@ -175,44 +331,50 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </div>
       </div>
 
+      {/* Mode context label */}
+      {mode !== 'my' && (
+        <div className="flex items-center gap-2 text-sm text-slate-400">
+          <span className="text-lg">{mode === 'practice' ? '🏥' : '🏢'}</span>
+          <span>
+            Showing production for{' '}
+            <span className="text-white font-medium">
+              {mode === 'practice' ? practiceLabel : orgLabel}
+            </span>
+            {' '}·{' '}
+            <span className="text-slate-500">
+              {(mode === 'practice' ? practiceRadiologists : orgRadiologists).length} radiologist
+              {(mode === 'practice' ? practiceRadiologists : orgRadiologists).length !== 1 ? 's' : ''}
+              {' '}· combined goal {fmtInt(effectiveAnnualGoal)} wRVU
+            </span>
+          </span>
+        </div>
+      )}
+
       {/* Top metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Today */}
         <div className="card col-span-1">
-          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Today</p>
-          <p className="text-3xl font-bold text-white mt-1">
-            {fmt(todayStats?.totalWorkRvu ?? 0)}
+          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">
+            {mode === 'my' ? 'Today' : 'Today (All)'}
           </p>
+          <p className="text-3xl font-bold text-white mt-1">{fmt(todayStats?.totalWorkRvu ?? 0)}</p>
           <p className="text-slate-400 text-xs mt-1">
-            {todayStats?.studyCount ?? 0} studies · avg {fmt(todayStats?.avgRvuPerStudy ?? 0)} wRVU
+            {todayStats?.studyCount ?? 0} studies
           </p>
         </div>
-
-        {/* YTD wRVU */}
         <div className="card col-span-1">
           <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">YTD wRVU</p>
-          <p className="text-3xl font-bold text-white mt-1">
-            {fmtInt(ytdStats?.ytdWorkRvu ?? 0)}
-          </p>
-          <p className="text-slate-400 text-xs mt-1">
-            of {fmtInt(ytdStats?.annualGoal ?? 0)} goal
-          </p>
+          <p className="text-3xl font-bold text-white mt-1">{fmtInt(ytdStats?.ytdWorkRvu ?? 0)}</p>
+          <p className="text-slate-400 text-xs mt-1">of {fmtInt(ytdStats?.annualGoal ?? 0)}</p>
         </div>
-
-        {/* % to Goal */}
         <div className="card col-span-1">
           <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">% to Goal</p>
-          <p className="text-3xl font-bold text-white mt-1">
-            {fmt(ytdStats?.percentToGoal ?? 0, 1)}%
-          </p>
-          <p className="text-slate-400 text-xs mt-1">
-            {fmtInt(ytdStats?.remainingRvu ?? 0)} remaining
-          </p>
+          <p className="text-3xl font-bold text-white mt-1">{fmt(ytdStats?.percentToGoal ?? 0, 1)}%</p>
+          <p className="text-slate-400 text-xs mt-1">{fmtInt(ytdStats?.remainingRvu ?? 0)} remaining</p>
         </div>
-
-        {/* Req pace */}
         <div className="card col-span-1">
-          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Req. Pace</p>
+          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">
+            {mode === 'my' ? 'Req. Pace' : 'Combined Avg/Day'}
+          </p>
           <p className="text-3xl font-bold text-white mt-1">
             {fmt(ytdStats?.requiredRvuPerWorkday ?? 0)}
           </p>
@@ -224,82 +386,97 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       <div className="card space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-semibold text-white">Annual Goal Progress</p>
+            <p className="text-sm font-semibold text-white">
+              {mode === 'my' ? 'My Annual Goal Progress' : mode === 'practice' ? `${practiceLabel} Progress` : `${orgLabel} Progress`}
+            </p>
             <p className="text-xs text-slate-400 mt-0.5">
-              {fmtInt(ytdStats?.daysElapsedInYear ?? 0)} days elapsed · 
-              {fmtInt(ytdStats?.daysRemainingInYear ?? 0)} remaining
+              {fmtInt(ytdStats?.daysElapsedInYear ?? 0)} days elapsed · {fmtInt(ytdStats?.daysRemainingInYear ?? 0)} remaining
             </p>
           </div>
           <StatusBadge status={paceStatus} />
         </div>
-
-        <div className="space-y-2">
-          {/* Actual progress */}
-          <ProgressBar
-            value={ytdStats?.percentToGoal ?? 0}
-            status={paceStatus}
-            height="lg"
-            animated
-          />
-          {/* Expected progress line marker */}
-          <div className="flex justify-between text-xs text-slate-500">
-            <span>0</span>
-            <span className="text-white font-medium">
-              {fmt(ytdStats?.ytdWorkRvu ?? 0, 0)} / {fmtInt(ytdStats?.annualGoal ?? 0)} wRVU
-            </span>
-            <span>Goal</span>
-          </div>
+        <ProgressBar value={ytdStats?.percentToGoal ?? 0} status={paceStatus} height="lg" animated />
+        <div className="flex justify-between text-xs text-slate-500">
+          <span>0</span>
+          <span className="text-white font-medium">
+            {fmt(ytdStats?.ytdWorkRvu ?? 0, 0)} / {fmtInt(ytdStats?.annualGoal ?? 0)} wRVU
+          </span>
+          <span>Goal</span>
         </div>
-
-        {/* Projection */}
         <div className="pt-2 border-t border-white/5 flex gap-6">
           <div>
             <p className="text-xs text-slate-400">Projected Year-End</p>
             <p className={`text-lg font-bold mt-0.5 ${
-              (ytdStats?.projectedYearEnd ?? 0) >= (ytdStats?.annualGoal ?? 0)
-                ? 'text-emerald-400'
-                : 'text-red-400'
-            }`}>
-              {fmtInt(ytdStats?.projectedYearEnd ?? 0)}
-            </p>
+              (ytdStats?.projectedYearEnd ?? 0) >= (ytdStats?.annualGoal ?? 0) ? 'text-emerald-400' : 'text-red-400'
+            }`}>{fmtInt(ytdStats?.projectedYearEnd ?? 0)}</p>
           </div>
           <div>
             <p className="text-xs text-slate-400">Daily Avg (YTD)</p>
-            <p className="text-lg font-bold text-white mt-0.5">
-              {fmt(ytdStats?.dailyAverageYtd ?? 0)}
-            </p>
+            <p className="text-lg font-bold text-white mt-0.5">{fmt(ytdStats?.dailyAverageYtd ?? 0)}</p>
           </div>
           <div>
             <p className="text-xs text-slate-400">Workdays Left</p>
-            <p className="text-lg font-bold text-white mt-0.5">
-              {fmtInt(ytdStats?.workdaysRemainingEstimate ?? 0)}
-            </p>
+            <p className="text-lg font-bold text-white mt-0.5">{fmtInt(ytdStats?.workdaysRemainingEstimate ?? 0)}</p>
           </div>
         </div>
       </div>
 
+      {/* Practice / Org breakdown */}
+      {mode !== 'my' && settings && radBreakdown.length > 0 && (
+        <div className="card space-y-3">
+          <p className="text-sm font-semibold text-white">
+            {mode === 'practice' ? 'Radiologist Breakdown' : 'By Practice'}
+          </p>
+
+          {mode === 'practice' ? (
+            <div className="space-y-2">
+              {radBreakdown.map((r) => (
+                <RadCard
+                  key={r.id}
+                  profile={r}
+                  logs={logsByProfile.get(r.id) ?? []}
+                  settings={settings}
+                  isActive={r.id === activeProfile?.id}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {practiceGroups.map((group) => (
+                <div key={group.practiceName} className="space-y-2">
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <span>🏥</span> {group.practiceName}
+                  </p>
+                  {group.rads.map((r) => (
+                    <RadCard
+                      key={r.id}
+                      profile={r}
+                      logs={logsByProfile.get(r.id) ?? []}
+                      settings={settings}
+                      isActive={r.id === activeProfile?.id}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Lower section: today breakdown + weekly trend */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
         {/* Today's modality breakdown */}
         <div className="card space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-white">Today by Modality</p>
-            <button
-              onClick={() => onNavigate('log')}
-              className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-            >
+            <button onClick={() => onNavigate('log')} className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
               + Add
             </button>
           </div>
-
           {modalityData.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-slate-500 text-sm">No studies logged today</p>
-              <button
-                onClick={() => onNavigate('log')}
-                className="mt-3 px-4 py-2 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 text-sm hover:bg-indigo-500/25 transition-colors"
-              >
+              <button onClick={() => onNavigate('log')} className="mt-3 px-4 py-2 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 text-sm hover:bg-indigo-500/25 transition-colors">
                 Log your first study
               </button>
             </div>
@@ -314,10 +491,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                       <span className="text-white font-medium">{fmt(rvu)} wRVU</span>
                     </div>
                     <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${pct}%`, backgroundColor: MODALITY_COLORS[modality] }}
-                      />
+                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: MODALITY_COLORS[modality] }} />
                     </div>
                   </div>
                 );
@@ -338,11 +512,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                   <div className="w-full flex items-end justify-center" style={{ height: '80px' }}>
                     <div
                       className={`w-full rounded-t transition-all duration-500 ${
-                        isToday
-                          ? 'bg-gradient-to-t from-indigo-500 to-violet-400'
-                          : rvu > 0
-                          ? 'bg-white/20'
-                          : 'bg-white/5'
+                        isToday ? 'bg-gradient-to-t from-indigo-500 to-violet-400' : rvu > 0 ? 'bg-white/20' : 'bg-white/5'
                       }`}
                       style={{ height: `${Math.max(pct, rvu > 0 ? 8 : 0)}%` }}
                     />
@@ -350,9 +520,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                   <span className={`text-[9px] ${isToday ? 'text-indigo-400 font-bold' : 'text-slate-500'}`}>
                     {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
                   </span>
-                  {rvu > 0 && (
-                    <span className="text-[9px] text-slate-400">{fmt(rvu, 0)}</span>
-                  )}
+                  {rvu > 0 && <span className="text-[9px] text-slate-400">{fmt(rvu, 0)}</span>}
                 </div>
               );
             })}
@@ -363,10 +531,10 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       {/* Quick actions */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Log Study', icon: '✏️', tab: 'log' as const, color: 'indigo' },
-          { label: 'Bulk Import', icon: '📥', tab: 'import' as const, color: 'violet' },
-          { label: 'History', icon: '📋', tab: 'history' as const, color: 'blue' },
-          { label: 'Settings', icon: '⚙️', tab: 'settings' as const, color: 'slate' },
+          { label: 'Log Study', icon: '✏️', tab: 'log' as const },
+          { label: 'Bulk Import', icon: '📥', tab: 'import' as const },
+          { label: 'History', icon: '📋', tab: 'history' as const },
+          { label: 'Settings', icon: '⚙️', tab: 'settings' as const },
         ].map(({ label, icon, tab }) => (
           <button
             key={tab}
@@ -374,9 +542,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             className="card flex items-center gap-3 hover:bg-white/8 transition-colors group cursor-pointer"
           >
             <span className="text-xl">{icon}</span>
-            <span className="text-sm text-slate-300 group-hover:text-white transition-colors font-medium">
-              {label}
-            </span>
+            <span className="text-sm text-slate-300 group-hover:text-white transition-colors font-medium">{label}</span>
           </button>
         ))}
       </div>
