@@ -21,10 +21,10 @@ export class OCRImportProvider implements ImportProvider {
   readonly name = 'OCR Screenshot';
   readonly sourceId = 'ocr' as const;
 
-  private file: File;
+  private file: File | Blob;
   private studyDate: string;
 
-  constructor(file: File, studyDate: string) {
+  constructor(file: File | Blob, studyDate: string) {
     this.file = file;
     this.studyDate = studyDate;
   }

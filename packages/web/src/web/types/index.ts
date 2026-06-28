@@ -166,6 +166,9 @@ export interface UserSettings {
   workdayStart: string;  // "HH:MM" 24-hr
   workdayEnd: string;    // "HH:MM" 24-hr
   breakMinutes: number;
+  // PowerScribe Watcher settings
+  watchFolderPath: string | null;
+  autoDeleteProcessed: boolean;
 }
 
 /** Color accent for a radiologist profile, practice, or org. */

@@ -91,6 +91,24 @@ export class RvuDatabase extends Dexie {
         if (!('canonicalExamName' in alias)) alias.canonicalExamName = null;
       });
     });
+
+    // v6: adds watchFolderPath + autoDeleteProcessed to userSettings.
+    //     Same stores, no index changes needed.
+    this.version(6).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, aliasText, cptCode, canonicalExamName',
+      studyLogs: 'id, profileId, logDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      return trans.table('userSettings').toCollection().modify((settings) => {
+        if (!('watchFolderPath' in settings))     settings.watchFolderPath = null;
+        if (!('autoDeleteProcessed' in settings)) settings.autoDeleteProcessed = false;
+      });
+    });
   }
 }
 
@@ -118,6 +136,8 @@ export async function ensureUserSettings(): Promise<UserSettings> {
     workdayStart: '08:00',
     workdayEnd: '17:00',
     breakMinutes: 0,
+    watchFolderPath: null,
+    autoDeleteProcessed: false,
   };
   await db.userSettings.put(defaults);
   return defaults;

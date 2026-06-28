@@ -13,16 +13,18 @@ import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 import { Organizations } from './pages/Organizations';
 import { Locations } from './pages/Locations';
+import { WatcherPage } from './pages/WatcherPage';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
-type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations';
+type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher';
 
 const NAV_ITEMS: { id: Tab; label: string; icon: string }[] = [
   { id: 'pace',      label: 'Daily Pace', icon: '⚡' },
   { id: 'dashboard', label: 'Annual',     icon: '📊' },
   { id: 'log',       label: 'Log Study',  icon: '✏️' },
   { id: 'import',    label: 'Import',     icon: '📥' },
+  { id: 'watcher',   label: 'Watcher',    icon: '👁' },
   { id: 'history',   label: 'History',    icon: '📋' },
   { id: 'settings',  label: 'Settings',   icon: '⚙️' },
 ];
@@ -169,6 +171,7 @@ function MainApp() {
             {activeTab === 'history'       && <History />}
             {activeTab === 'settings'      && <Settings />}
             {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
+            {activeTab === 'watcher'       && <WatcherPage onNavigateToImport={() => setActiveTab('import')} />}
           </div>
         </main>
 
