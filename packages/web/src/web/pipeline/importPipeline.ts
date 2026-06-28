@@ -241,11 +241,19 @@ export async function commitPipelineResults(
       row.needsReview ||
       row.duplicateStatus === 'possible';
 
+    // studyDate comes from OCR if available; otherwise falls back to effectiveDate.
+    // When we have an OCR-confirmed date, logDate should reflect it.
+    const studyDate = study.studyDate || effectiveDate;
+    const logDateFinal = (study.dateTimeConfidence ?? 0) > 0 ? studyDate : effectiveDate;
+
     const log: StudyLog = {
       id: crypto.randomUUID(),
       profileId: profileId ?? null,
-      logDate: effectiveDate,
+      logDate: logDateFinal,
       studyDateTime: study.studyTime,
+      studyDate: studyDate,
+      dateTimeConfidence: study.dateTimeConfidence ?? 0,
+      dateTimeSource: study.dateTimeSource ?? 'import_default',
       examNameRaw: study.examTitle,
       cptCode: cand.cptCode,
       modifier: cand.modifier,

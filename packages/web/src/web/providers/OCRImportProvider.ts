@@ -35,18 +35,26 @@ export class OCRImportProvider implements ImportProvider {
     const parsed = parseOcrLines(result.lines);
     const now = new Date().toISOString();
 
-    return parsed.map((p) => ({
-      examTitle: p.examName,
-      canonicalExam: null,
-      cpt: null,
-      workRvu: null,
-      studyDate: this.studyDate,
-      studyTime: p.studyDateTime,
-      modality: null,
-      accessionNumber: p.accessionNumber,
-      patientMRN: null,
-      source: 'ocr' as const,
-      importedAt: now,
-    }));
+    return parsed.map((p) => {
+      // If OCR found a date in this line, use it as the effective study date.
+      // Otherwise fall back to the user-selected date passed to the constructor.
+      const effectiveDate = p.studyDate ?? this.studyDate;
+
+      return {
+        examTitle: p.examName,
+        canonicalExam: null,
+        cpt: null,
+        workRvu: null,
+        studyDate: effectiveDate,
+        studyTime: p.studyDateTime,
+        modality: null,
+        accessionNumber: p.accessionNumber,
+        patientMRN: null,
+        source: 'ocr' as const,
+        importedAt: now,
+        dateTimeConfidence: p.dateTimeConfidence,
+        dateTimeSource: p.dateTimeConfidence > 0 ? 'ocr' : 'import_default',
+      };
+    });
   }
 }

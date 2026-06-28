@@ -96,6 +96,20 @@ export interface ImportedStudy {
 
   /** ISO timestamp of when this study was ingested by the provider. */
   importedAt: string;
+
+  /**
+   * Confidence in the studyTime/studyDate values. 0.0–1.0.
+   * 1.0 = full date+time from OCR, 0.85 = date only, 0.5 = relative date,
+   * 0.0 = no date found (pipeline will use logDate as fallback).
+   * null = provider didn't assess confidence (treat as 0.0).
+   */
+  dateTimeConfidence: number | null;
+
+  /**
+   * How the date/time was determined. Passed through to StudyLog.dateTimeSource.
+   * null = provider didn't set this (defaults to 'import_default' in pipeline).
+   */
+  dateTimeSource: import('./index').DateTimeSource | null;
 }
 
 // ─── Provider interface ────────────────────────────────────────────────────

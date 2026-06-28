@@ -45,6 +45,8 @@ export class ManualImportProvider implements ImportProvider {
         patientMRN: null,
         source: 'manual',
         importedAt: new Date().toISOString(),
+        dateTimeConfidence: 0,
+        dateTimeSource: 'manual' as const,
       },
     ];
   }

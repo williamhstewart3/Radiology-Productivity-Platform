@@ -128,6 +128,8 @@ export class PowerScribeImportProvider implements ImportProvider {
     // ── Placeholder ───────────────────────────────────────────────────────────
     // Remove this comment and the line below when implementing live sync.
     void this.config; // suppress "unused variable" warning
+    // When live: set dateTimeConfidence = 1.0 and dateTimeSource = 'api_future'
+    // for studies where the PowerScribe API provides a confirmed study datetime.
     return [];
   }
 

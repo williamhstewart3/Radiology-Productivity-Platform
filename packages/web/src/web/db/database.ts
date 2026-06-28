@@ -109,6 +109,33 @@ export class RvuDatabase extends Dexie {
         if (!('autoDeleteProcessed' in settings)) settings.autoDeleteProcessed = false;
       });
     });
+
+    // v7: adds studyDate, dateTimeConfidence, dateTimeSource fields to studyLogs.
+    //     Adds studyDate index for efficient grouping in History.
+    //     Back-fills existing rows: studyDate = logDate, dateTimeSource = 'import_default',
+    //     dateTimeConfidence = 0 (no OCR date was available when those rows were created).
+    this.version(7).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, aliasText, cptCode, canonicalExamName',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      return trans.table('studyLogs').toCollection().modify((log) => {
+        if (!('studyDate' in log) || log.studyDate == null) {
+          log.studyDate = log.logDate ?? null;
+        }
+        if (!('dateTimeConfidence' in log) || log.dateTimeConfidence == null) {
+          log.dateTimeConfidence = 0;
+        }
+        if (!('dateTimeSource' in log) || log.dateTimeSource == null) {
+          log.dateTimeSource = 'import_default';
+        }
+      });
+    });
   }
 }
 

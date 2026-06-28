@@ -87,6 +87,14 @@ export function History() {
       arr.push(log);
       map.set(log.logDate, arr);
     }
+    // Sort each day's logs by studyDateTime (if available), else by createdAt
+    for (const [, dayLogs] of map) {
+      dayLogs.sort((a, b) => {
+        const ta = a.studyDateTime ?? a.createdAt;
+        const tb = b.studyDateTime ?? b.createdAt;
+        return ta.localeCompare(tb);
+      });
+    }
     return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
   })();
 
@@ -232,6 +240,18 @@ export function History() {
                           {log.modality && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/8 text-slate-400">
                               {MODALITY_LABELS[log.modality as Modality]}
+                            </span>
+                          )}
+                          {log.studyDateTime && (
+                            <span className="text-[10px] font-mono text-slate-500" title={log.studyDateTime}>
+                              {new Date(log.studyDateTime).toLocaleTimeString('en-US', {
+                                hour: 'numeric', minute: '2-digit', hour12: true,
+                              })}
+                            </span>
+                          )}
+                          {log.dateTimeSource === 'ocr' && (log.dateTimeConfidence ?? 0) >= 1.0 && (
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-500/70 font-medium">
+                              OCR
                             </span>
                           )}
                           {log.needsReview && (

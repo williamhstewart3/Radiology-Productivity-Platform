@@ -112,6 +112,7 @@ export class CSVImportProvider implements ImportProvider {
         const workRvuRaw = headerMap.workRvu !== undefined ? cells[headerMap.workRvu] : null;
         const workRvuNum = workRvuRaw ? parseFloat(workRvuRaw) : null;
 
+        const hasExplicitDate = headerMap.studyDate !== undefined && !!parseDate(cells[headerMap.studyDate]);
         return [{
           examTitle: title?.trim() || cptRaw?.trim() || '',
           canonicalExam: null,
@@ -124,6 +125,8 @@ export class CSVImportProvider implements ImportProvider {
           patientMRN: headerMap.patientMRN !== undefined ? cells[headerMap.patientMRN] || null : null,
           source: 'csv' as const,
           importedAt: now,
+          dateTimeConfidence: hasExplicitDate ? 0.85 : 0,
+          dateTimeSource: hasExplicitDate ? 'import_default' : 'import_default',
         } satisfies ImportedStudy];
       });
     }
@@ -146,6 +149,8 @@ export class CSVImportProvider implements ImportProvider {
       patientMRN: null,
       source: 'csv' as const,
       importedAt: now,
+      dateTimeConfidence: 0,
+      dateTimeSource: 'import_default' as const,
     }));
   }
 }

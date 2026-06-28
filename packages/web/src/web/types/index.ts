@@ -108,13 +108,34 @@ export type MatchMethod =
   | 'radiology_match'
   | 'unmatched';
 
+/** Source of the study date/time — used to show confidence indicators in UI. */
+export type DateTimeSource = 'ocr' | 'import_default' | 'manual' | 'api_future';
+
 /** One completed study log — the core transactional record. */
 export interface StudyLog {
   id: string;
   /** Profile this log belongs to. null = legacy row (treated as default profile). */
   profileId: string | null;
-  logDate: string; // YYYY-MM-DD, local calendar day
-  studyDateTime: string | null;
+  logDate: string; // YYYY-MM-DD, local calendar day (= studyDate when OCR-confirmed)
+  studyDateTime: string | null; // Full ISO 8601 datetime if known, else null
+  /**
+   * YYYY-MM-DD extracted from OCR or source data — distinct from logDate so
+   * we can show it was OCR-confirmed vs just the import day.
+   * When OCR provides a date, logDate is set to this value.
+   */
+  studyDate: string | null;
+  /**
+   * Confidence score for the date/time extraction. 0.0–1.0.
+   * 1.0 = exact OCR match (date + time), 0.85 = date only, 0.5 = relative,
+   * 0.0 = fallback (import date used).
+   * null = legacy row (pre-v7).
+   */
+  dateTimeConfidence: number | null;
+  /**
+   * How the date/time was determined.
+   * null = legacy row (pre-v7).
+   */
+  dateTimeSource: DateTimeSource | null;
   examNameRaw: string;
   cptCode: string | null;
   modifier: string | null;

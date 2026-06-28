@@ -6,16 +6,31 @@
  * saved (see the review table requirement).
  */
 
+import { parseDateTimeFromOcr } from './studyDateParser';
+
 export interface ParsedLine {
   rawText: string;
   examName: string;
   studyDateTime: string | null;
+  studyDate: string | null;
   accessionNumber: string | null;
+  /** 0.0–1.0 confidence in the extracted date/time */
+  dateTimeConfidence: number;
 }
 
-const DATE_TIME_PATTERN = /(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)/i;
 const ACCESSION_PATTERN = /\b(?:ACC|ACCESSION)[#:\s]*([A-Z0-9-]{5,})\b/i;
 const STANDALONE_LONG_NUMBER = /\b(\d{7,12})\b/;
+
+// Date patterns to strip from exam name after extraction (so they don't
+// contaminate the exam name text). Match the same patterns as studyDateParser.
+const DATE_STRIP_PATTERNS = [
+  /\d{1,2}\/\d{1,2}\/\d{2,4}\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?/gi,
+  /\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2})?/gi,
+  /\d{1,2}-\d{1,2}-\d{4}\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?/gi,
+  /\d{1,2}\/\d{1,2}\/\d{2,4}/gi,
+  /\d{4}-\d{2}-\d{2}/gi,
+  /\d{1,2}-\d{1,2}-\d{4}/gi,
+];
 
 export function parseOcrLines(lines: string[]): ParsedLine[] {
   return lines.map((line) => parseSingleLine(line)).filter((p): p is ParsedLine => p !== null);
@@ -30,14 +45,21 @@ function parseSingleLine(rawLine: string): ParsedLine | null {
   }
 
   let working = trimmed;
-  let studyDateTime: string | null = null;
-  let accessionNumber: string | null = null;
 
-  const dtMatch = working.match(DATE_TIME_PATTERN);
-  if (dtMatch) {
-    studyDateTime = normalizeDateTime(dtMatch[1], dtMatch[2]);
-    working = working.replace(dtMatch[0], ' ');
+  // ── Extract date/time using the dedicated parser ──────────────────────────
+  const dtResult = parseDateTimeFromOcr(working);
+  const studyDateTime = dtResult?.studyDateTime ?? null;
+  const studyDate = dtResult?.studyDate ?? null;
+  const dateTimeConfidence = dtResult?.confidence ?? 0;
+
+  // Strip all date/time tokens from the working string so they don't land
+  // in the exam name
+  for (const pattern of DATE_STRIP_PATTERNS) {
+    working = working.replace(pattern, ' ');
   }
+
+  // ── Extract accession number ───────────────────────────────────────────────
+  let accessionNumber: string | null = null;
 
   const accMatch = working.match(ACCESSION_PATTERN);
   if (accMatch) {
@@ -51,18 +73,9 @@ function parseSingleLine(rawLine: string): ParsedLine | null {
     }
   }
 
+  // ── Clean up exam name ────────────────────────────────────────────────────
   const examName = working.replace(/\s{2,}/g, ' ').trim();
   if (examName.length < 2) return null;
 
-  return { rawText: trimmed, examName, studyDateTime, accessionNumber };
-}
-
-function normalizeDateTime(datePart: string, timePart: string): string | null {
-  try {
-    const dt = new Date(`${datePart} ${timePart}`);
-    if (Number.isNaN(dt.getTime())) return null;
-    return dt.toISOString();
-  } catch {
-    return null;
-  }
+  return { rawText: trimmed, examName, studyDateTime, studyDate, accessionNumber, dateTimeConfidence };
 }

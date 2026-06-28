@@ -1,69 +1,40 @@
-# PowerScribe Screenshot Watcher — Build Plan
-
-## Architecture
-
-**Constraint**: No cloud, no external API, local-only. Tesseract.js already exists.
-**Platform**: Desktop-first (Electron) but also works in browser via File System Access API drag-drop.
-
-## Components to build
-
-### 1. Electron main.ts additions
-- `fs:watchFolder(folderPath)` — start fs.watch on a folder, emit `watcher:new-file` events to renderer
-- `fs:stopWatcher()` — stop the watcher
-- `fs:readFileBuffer(path)` — read binary (for images → blob for Tesseract)
-- `fs:moveFile(src, dest)` — move processed/failed screenshots
-- `fs:ensureDir(path)` — mkdir -p
-- `fs:listDir(path)` — list PNG/JPG files in folder (for re-processing missed files)
-- `fs:getDefaultWatchPath()` — returns `~/Documents/PowerScribe Screenshots`
-- `watcher:new-file` event push to renderer
-
-### 2. preload.ts additions
-- Expose all above IPC calls + `onWatcherFile(cb)` event listener
-- `stopWatcherFile()` cleanup
-
-### 3. desktop.ts type additions
-- All new IPC method types
-
-### 4. New: `packages/web/src/web/utils/folderWatcher.ts`
-- `useFolderWatcher(config)` React hook
-  - Polls for new files (browser fallback) OR uses IPC (desktop)
-  - Calls TesseractProvider.extractText()
-  - Feeds result through existing OCRImportProvider → runImportPipeline()
-  - Moves file to /processed or /failed via IPC
-  - Emits status events for the UI
-
-### 5. New: `packages/web/src/web/pages/WatcherPage.tsx`  
-- PHI warning banner (prominent red, always visible)
-- Folder path selector (uses dialog:open on desktop, explains limitation on web)
-- Start/Stop watcher toggle
-- Live activity feed: file processed, RVUs captured, errors
-- Stats: files today, RVUs captured today, last file time
-- "Auto-delete processed" toggle (stored in UserSettings)
-- Link to Settings → Learned Mappings
-
-### 6. Settings additions
-- `watchFolderPath: string | null`
-- `autoDeleteProcessed: boolean`
-- DB migration v6 (add to userSettings via Dexie upgrade)
-
-### 7. AutoHotkey script
-- `PowerScribe_Watcher.ahk` — dropped in repo root
-- Win+Shift+P hotkey: capture screen region → save timestamped PNG to watch folder
-- No external calls, pure local file write
-
-### 8. app.tsx
-- Add 'watcher' tab to NAV_ITEMS + Tab union
-
-## Files to create/modify
-- `packages/desktop/electron/main.ts` — add watcher IPC
-- `packages/desktop/electron/preload.ts` — expose watcher API
-- `packages/web/src/web/lib/desktop.ts` — add watcher types
-- `packages/web/src/web/utils/folderWatcher.ts` — new hook
-- `packages/web/src/web/pages/WatcherPage.tsx` — new page
-- `packages/web/src/web/pages/Settings.tsx` — watcher settings fields
-- `packages/web/src/web/db/database.ts` — v6 migration
-- `packages/web/src/web/types/index.ts` — add watchFolderPath + autoDeleteProcessed to UserSettings
-- `packages/web/src/web/app.tsx` — add watcher tab
-- `PowerScribe_Watcher.ahk` — new file in repo root
+# OCR DateTime Feature — Implementation Tracker
 
 ## Status: IN PROGRESS
+
+## Key Findings from Code Read
+- `StudyLog` already has `studyDateTime: string | null` — no new field needed there!
+- `OcrReviewRow` in types/index.ts also already has `studyDateTime`
+- `ImportedStudy` has `studyTime: string | null` (used for studyDateTime in DB)
+- `powerScribeParser.ts` already has DATE_TIME_PATTERN regex — but it's basic; needs enhancement
+- DB is at v6; need v7 for new fields: `studyDate`, `importedAt`, `sourceScreenshotId`, `dateTimeConfidence`, `dateTimeSource`
+- `buildFingerprint` already uses `studyDateTime` for minute-bucket fingerprinting
+- `OCRImportProvider` calls `parseOcrLines` → returns `studyDateTime` already
+- History groups by `logDate` — need to show time when available
+
+## New Fields Needed on StudyLog
+- `studyDate: string | null`       — YYYY-MM-DD extracted from OCR (separate from logDate)
+- `importedAt: string`             — audit timestamp (already has createdAt, so maybe skip)
+- `sourceScreenshotId: string | null` — hash/path of screenshot for dedup
+- `dateTimeConfidence: number | null` — 0.0–1.0
+- `dateTimeSource: 'ocr' | 'import_default' | 'manual' | 'api_future' | null`
+
+## Tasks
+- [x] Read all files
+- [ ] 1. Create `utils/studyDateParser.ts` — enhanced datetime extraction
+- [ ] 2. Update `types/index.ts` — add new fields to StudyLog
+- [ ] 3. `db/database.ts` — v7 migration with backfill
+- [ ] 4. Update `utils/powerScribeParser.ts` — use studyDateParser, return confidence
+- [ ] 5. Update `providers/OCRImportProvider.ts` — attach dateTimeSource/confidence
+- [ ] 6. Update `types/importProvider.ts` — add dateTimeConfidence/Source to ImportedStudy
+- [ ] 7. Update `pipeline/importPipeline.ts` — pass through new fields to StudyLog
+- [ ] 8. Update `pages/Import.tsx` — show time badge per row, ⚠️ when not OCR
+- [ ] 9. Update `pages/History.tsx` — show time in log rows, sort by studyDateTime within day
+- [ ] 10. Build verify + commit + push
+
+## Decisions
+- `logDate` stays as RVU calc date; when OCR gives date, set logDate = studyDate
+- `dateTimeConfidence` on ImportedStudy feeds through to StudyLog
+- Skip `sourceScreenshotId` for now — sourceImportId already covers batch dedup
+- History: show time chip on each log row when studyDateTime is present
+- Import review: show extracted time per row with source badge (OCR ✓ vs inferred ⚠️)

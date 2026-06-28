@@ -411,9 +411,37 @@ export function Import({ onImported }: ImportProps) {
                     {row.source.accessionNumber && (
                       <p className="text-xs text-slate-500">Acc: {row.source.accessionNumber}</p>
                     )}
-                    {row.source.source !== 'paste' && (
-                      <p className="text-xs text-slate-600 uppercase tracking-wider">{row.source.source}</p>
-                    )}
+                    {/* Date/time row with source confidence indicator */}
+                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                      {row.source.studyTime ? (
+                        <span className="text-xs font-mono text-slate-300">
+                          {new Date(row.source.studyTime).toLocaleString('en-US', {
+                            month: 'numeric', day: 'numeric',
+                            hour: 'numeric', minute: '2-digit', hour12: true,
+                          })}
+                        </span>
+                      ) : row.source.studyDate ? (
+                        <span className="text-xs font-mono text-slate-300">
+                          {new Date(row.source.studyDate + 'T12:00:00').toLocaleDateString('en-US', {
+                            month: 'numeric', day: 'numeric', year: 'numeric',
+                          })}
+                        </span>
+                      ) : null}
+                      {/* Source confidence badge */}
+                      {row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) >= 1.0 ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 font-medium">
+                          OCR ✓
+                        </span>
+                      ) : row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) > 0 ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/25 text-sky-400 font-medium">
+                          OCR date
+                        </span>
+                      ) : (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/25 text-amber-400/80 font-medium" title="Date was not extracted from OCR — using the log date you selected">
+                          ⚠ inferred
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                     {isPossibleDupe && row.included && (
