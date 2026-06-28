@@ -275,7 +275,7 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
       <ConfettiCanvas active={showConfetti} />
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Daily Pace</h1>
           <p className="text-slate-500 text-sm mt-0.5">
@@ -283,12 +283,26 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
             {paceSettings.breakMinutes > 0 && ` · ${paceSettings.breakMinutes}m break`}
           </p>
         </div>
-        <button
-          onClick={() => onNavigate('log')}
-          className="px-4 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-sm font-medium hover:bg-indigo-500/30 transition-all"
-        >
-          + Log Study
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Mini Window popout */}
+          <button
+            onClick={() => {
+              const url = `${window.location.origin}/mini-pace`;
+              window.open(url, 'wrvu-mini-pace', 'width=900,height=420,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no');
+            }}
+            title="Open compact companion display on second monitor"
+            className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 text-sm font-medium hover:bg-white/10 hover:text-white transition-all flex items-center gap-1.5"
+          >
+            <span>📌</span>
+            <span className="hidden sm:inline">Mini Window</span>
+          </button>
+          <button
+            onClick={() => onNavigate('log')}
+            className="px-4 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-sm font-medium hover:bg-indigo-500/30 transition-all"
+          >
+            + Log Study
+          </button>
+        </div>
       </div>
 
       {/* ── TOP: Gauge + Status ─────────────────────────────────────────── */}

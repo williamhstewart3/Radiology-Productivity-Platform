@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
+import { Route, Switch } from 'wouter';
 import { useAppInitialization } from './hooks/useAppInitialization';
 import { DailyPaceDashboard } from './components/DailyPaceDashboard';
+import { MiniPaceWindow } from './components/MiniPaceWindow';
 import { Dashboard } from './pages/Dashboard';
 import { LogStudy } from './pages/LogStudy';
 import { Import } from './pages/Import';
@@ -19,7 +21,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: string }[] = [
   { id: 'settings',  label: 'Settings',   icon: '⚙️' },
 ];
 
-export default function App() {
+function MainApp() {
   const { isReady, error } = useAppInitialization();
   const [activeTab, setActiveTab] = useState<Tab>('pace');
   const [isDark, setIsDark] = useState(true);
@@ -135,5 +137,23 @@ export default function App() {
         </nav>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Switch>
+      {/* Standalone mini window — no nav, no init guard, loads independently */}
+      <Route path="/mini-pace">
+        <div className="min-h-screen bg-[#080c18]">
+          <MiniPaceWindow />
+        </div>
+      </Route>
+
+      {/* Main app */}
+      <Route>
+        <MainApp />
+      </Route>
+    </Switch>
   );
 }
