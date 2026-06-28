@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev:web",
+      "type": "shell",
+      "command": "bash -lc '. $HOME/.bun/env || true; bun run dev'",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev:desktop",
+      "type": "shell",
+      "command": "bash -lc '. $HOME/.bun/env || true; bun run dev:desktop'",
+      "presentation": { "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev:mobile",
+      "type": "shell",
+      "command": "bash -lc '. $HOME/.bun/env || true; bun run dev:mobile'",
+      "presentation": { "panel": "shared" },
+      "problemMatcher": []
+    }
+  ]
+}

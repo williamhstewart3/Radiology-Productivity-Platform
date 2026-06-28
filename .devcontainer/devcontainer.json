@@ -1,0 +1,21 @@
+{
+  "name": "wRVUtracker Dev Container",
+  "image": "mcr.microsoft.com/vscode/devcontainers/javascript-node:18-bullseye",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "ms-vscode.vscode-typescript-next",
+        "eamodio.gitlens"
+      ]
+    }
+  },
+  "postCreateCommand": "bash -lc \"if [ -f \"$HOME/.bun/bin/bun\" ]; then echo 'bun already installed'; else curl -fsSL https://bun.sh/install | bash -s -- -y; fi && . $HOME/.bun/env || true && echo 'BUN:' $(bun -v || echo 'bun not found') && cd /workspace && . $HOME/.bun/env || true && bun install --ignore-scripts || true\"",
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/bash"
+  },
+  "remoteUser": "vscode"
+}
