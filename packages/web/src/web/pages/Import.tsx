@@ -23,7 +23,6 @@ import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
-import { MODALITY_LABELS } from '../types';
 
 // ─── ExamSearchPanel ─────────────────────────────────────────────────────────
 
@@ -128,6 +127,7 @@ interface ImportProps {
 
 type Mode = 'paste' | 'ocr' | 'powerscribe';
 type Step = 'input' | 'review' | 'done';
+const WATCHER_REVIEW_KEY = 'wrvu_pending_watcher_review';
 
 export function Import({ onImported }: ImportProps) {
   const { activeProfile } = useProfile();
@@ -147,6 +147,22 @@ export function Import({ onImported }: ImportProps) {
   const [showSkipped, setShowSkipped]       = useState(false);
   const [searchPanelTempId, setSearchPanelTempId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const raw = sessionStorage.getItem(WATCHER_REVIEW_KEY);
+    if (!raw) return;
+    try {
+      const rows = JSON.parse(raw) as PipelineReviewRow[];
+      if (Array.isArray(rows) && rows.length > 0) {
+        setReviewRows(rows);
+        setSkippedRows([]);
+        setLogDate(rows[0]?.source.studyDate ?? todayDateString());
+        setStep('review');
+      }
+    } finally {
+      sessionStorage.removeItem(WATCHER_REVIEW_KEY);
+    }
+  }, []);
 
   // ── Process helpers ───────────────────────────────────────────────────────
 
@@ -240,6 +256,7 @@ export function Import({ onImported }: ImportProps) {
       canonicalExamName: candidate.description,
       candidates: [{ cptCode: candidate.cptCode, modifier: candidate.modifier, workRvu: candidate.workRvu }],
       source: 'user',
+      profileId: activeProfile?.id ?? null,
     });
 
     setSearchPanelTempId(null);
@@ -287,6 +304,7 @@ export function Import({ onImported }: ImportProps) {
               setReviewRows([]);
               setSkippedRows([]);
               setShowSkipped(false);
+              sessionStorage.removeItem(WATCHER_REVIEW_KEY);
             }}
             className="px-6 py-2.5 rounded-xl border border-white/15 text-slate-300 text-sm hover:border-white/30 transition-colors"
           >

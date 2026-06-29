@@ -60,17 +60,25 @@ ipcMain.handle("fs:readBuffer", async (_, filePath: string) => {
 // Move a file (processed / failed routing)
 ipcMain.handle("fs:move", async (_, src: string, dest: string) => {
   await fs.mkdir(path.dirname(dest), { recursive: true });
-  await fs.rename(src, dest);
+  let finalDest = dest;
+  const parsed = path.parse(dest);
+  for (let i = 1; fsSync.existsSync(finalDest); i++) {
+    finalDest = path.join(parsed.dir, `${parsed.name}_${i}${parsed.ext}`);
+  }
+  await fs.rename(src, finalDest);
+  return { ok: true, path: finalDest };
 });
 
 // Delete a file
 ipcMain.handle("fs:delete", async (_, filePath: string) => {
   await fs.unlink(filePath);
+  return { ok: true };
 });
 
 // Ensure directory exists (mkdir -p)
 ipcMain.handle("fs:ensureDir", async (_, dirPath: string) => {
   await fs.mkdir(dirPath, { recursive: true });
+  return { ok: true };
 });
 
 // List image files in a directory (PNG + JPG only)

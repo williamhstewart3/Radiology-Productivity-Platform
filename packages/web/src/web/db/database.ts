@@ -155,6 +155,18 @@ export class RvuDatabase extends Dexie {
         }
       });
     });
+
+    // v9: adds lastUsedAt index to examAliases so Settings can sort learned mappings.
+    this.version(9).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    });
   }
 }
 

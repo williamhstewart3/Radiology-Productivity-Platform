@@ -267,7 +267,7 @@ interface ProfilesProps {
   initialEditId?: string | null;
 }
 
-export function Profiles({ onNavigate, initialEditId }: ProfilesProps) {
+export function Profiles({ initialEditId }: ProfilesProps) {
   const { profiles, activeProfile, switchProfile, createProfile, updateProfile, deleteProfile } = useProfile();
   const [editing, setEditing] = useState<string | null>(initialEditId ?? null); // profile id or 'new'
   const [saving, setSaving] = useState(false);
@@ -280,6 +280,7 @@ export function Profiles({ onNavigate, initialEditId }: ProfilesProps) {
     setError(null);
     try {
       await createProfile({
+        practiceId: activeProfile?.practiceId ?? null,
         name: data.name.trim(),
         initials: data.initials.trim() || data.name.slice(0, 2).toUpperCase(),
         color: data.color,

@@ -130,7 +130,7 @@ export async function runImportPipeline(
     // lookup to preserve the source system's billing intent. The alias table
     // still runs — existing aliases will surface as additional candidates.
     const query = study.cpt ?? study.examTitle;
-    const candidates = await findMatchCandidates(query, 4);
+    const candidates = await findMatchCandidates(query, 4, profileId);
     matched.push({ study, candidates });
   }
 
@@ -277,6 +277,7 @@ export async function commitPipelineResults(
       canonicalExamName: cand.description,
       candidates: [{ cptCode: cand.cptCode, modifier: cand.modifier, workRvu: cand.workRvu }],
       source: 'ocr_confirmed',
+      profileId: profileId ?? null,
     });
 
     importedCount++;

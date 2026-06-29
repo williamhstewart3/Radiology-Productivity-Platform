@@ -37,6 +37,57 @@ export const MODALITY_LABELS: Record<Modality, string> = {
   OTHER: 'Other',
 };
 
+// Legacy localStorage dashboard model. Most of the current app uses Dexie,
+// but a few helper modules are still compiled and typed against this shape.
+export type StatusType =
+  | 'ahead'
+  | 'on-track'
+  | 'falling-behind'
+  | 'danger-zone'
+  | 'goal-hit';
+
+export interface DaySettings {
+  dailyGoal: number;
+  startTime: string;
+  endTime: string;
+  lunchMinutes: number;
+}
+
+export interface PaceMetrics {
+  currentWRVU: number;
+  expectedWRVU: number;
+  projectedTotal: number;
+  percentComplete: number;
+  percentOfExpected: number;
+  remainingWRVU: number;
+  requiredPerHour: number;
+  elapsedMinutes: number;
+  totalWorkMinutes: number;
+  status: StatusType;
+  paceDiff: number;
+}
+
+export interface QuickAddStudy {
+  id: string;
+  name: string;
+  estimatedWrvu: number;
+}
+
+export interface WRVUEntry {
+  id: string;
+  examName: string;
+  wrvu: number;
+  timestamp: string;
+  runningTotal: number;
+}
+
+export interface AppState {
+  settings: DaySettings;
+  quickAdds: QuickAddStudy[];
+  entries: WRVUEntry[];
+  theme: 'light' | 'dark';
+}
+
 /** PFS status indicator categories — used to decide whether a code should
  * be suggested as a default match. We never silently mutate these. */
 export type StatusCategory = 'active' | 'restricted' | 'excluded' | 'unknown';
@@ -94,7 +145,7 @@ export interface ExamAlias {
   /** Sum of work RVUs for all professional-component CPTs in cptCodes. */
   totalWorkRvu: number | null;
   matchConfidence: number;
-  source: 'manual' | 'ocr_confirmed' | 'seed' | 'user';
+  source: 'manual' | 'manual_name_match' | 'ocr_confirmed' | 'seed' | 'user';
   timesUsed: number;
   lastUsedAt: string | null;
   createdAt: string;

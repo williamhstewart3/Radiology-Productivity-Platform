@@ -426,7 +426,7 @@ function RadiologistForm({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export function Locations({ onNavigate }: { onNavigate: (tab: string) => void }) {
+export function Locations(_props: { onNavigate: (tab: string) => void }) {
   const {
     locations,
     radiologists,

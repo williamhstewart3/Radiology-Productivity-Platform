@@ -19,7 +19,7 @@ import { learnAlias } from '../utils/matching';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import { ManualImportProvider } from '../providers/ManualImportProvider';
-import type { MatchCandidate, StudyLog, ExamAlias } from '../types';
+import type { MatchCandidate, StudyLog } from '../types';
 import { MODALITY_LABELS } from '../types';
 import type { DuplicateMatch, StudyCandidate } from '../utils/duplicateDetection';
 
@@ -45,7 +45,7 @@ export function LogStudy({ onSaved }: LogStudyProps) {
     if (!q.trim()) { setCandidates([]); return; }
     setSearching(true);
     try {
-      const results = await findMatchCandidates(q, 6);
+      const results = await findMatchCandidates(q, 6, activeProfile?.id ?? null);
       setCandidates(results);
       if (results.length > 0 && results[0].confidence >= 0.9) {
         setSelected(results[0]);
@@ -55,7 +55,7 @@ export function LogStudy({ onSaved }: LogStudyProps) {
     } finally {
       setSearching(false);
     }
-  }, []);
+  }, [activeProfile?.id]);
 
   useEffect(() => {
     const timer = setTimeout(() => search(examInput), 300);
@@ -110,6 +110,9 @@ export function LogStudy({ onSaved }: LogStudyProps) {
         profileId: activeProfile?.id ?? null,
         logDate,
         studyDateTime: null,
+        studyDate: logDate,
+        dateTimeConfidence: 0,
+        dateTimeSource: 'manual',
         examNameRaw: examInput.trim(),
         cptCode: selected.cptCode,
         modifier: selected.modifier,
@@ -132,7 +135,8 @@ export function LogStudy({ onSaved }: LogStudyProps) {
         rawText: examInput.trim(),
         canonicalExamName: selected.description,
         candidates: [{ cptCode: selected.cptCode, modifier: selected.modifier, workRvu: selected.workRvu }],
-        source: 'manual_name_match' as ExamAlias['source'],
+        source: 'manual_name_match',
+        profileId: activeProfile?.id ?? null,
       });
 
       setDupeWarning(null);

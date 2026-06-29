@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { motion } from 'framer-motion';
 import { db } from '../db/database';
 import { useProfile } from '../hooks/useProfile';
 import {
@@ -44,11 +45,10 @@ function statusColor(status: DailyPaceMetrics['status']): string {
 interface GaugeProps {
   current: number;
   goal: number;
-  glowColor: string;
   status: DailyPaceMetrics['status'];
 }
 
-function CircularGauge({ current, goal, glowColor, status }: GaugeProps) {
+function CircularGauge({ current, goal, status }: GaugeProps) {
   const pct = Math.min(1, current / Math.max(1, goal));
   const radius = 90;
   const stroke = 10;
@@ -349,7 +349,12 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-5 animate-float-up">
+    <motion.div
+      className="mx-auto max-w-3xl space-y-5"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18, ease: 'easeOut' }}
+    >
       <ConfettiCanvas active={showConfetti} />
 
       {/* ── Header ───────────────────────────────────────────────────── */}
@@ -425,7 +430,6 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
         <CircularGauge
           current={metrics.currentRvu}
           goal={metrics.dailyGoal}
-          glowColor={color}
           status={metrics.status}
         />
         <div className="text-center space-y-1">
@@ -535,6 +539,6 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
           View history →
         </button>
       </div>
-    </div>
+    </motion.div>
   );
 }

@@ -85,6 +85,7 @@ export function WatcherPage({ onNavigateToImport }: { onNavigateToImport?: () =>
     activityLog,
     stats,
     pendingReviewCount,
+    pendingReviewRows,
     start,
     stop,
     clearActivity,
@@ -266,7 +267,10 @@ export function WatcherPage({ onNavigateToImport }: { onNavigateToImport?: () =>
           </div>
           {onNavigateToImport && (
             <button
-              onClick={onNavigateToImport}
+              onClick={() => {
+                sessionStorage.setItem('wrvu_pending_watcher_review', JSON.stringify(pendingReviewRows));
+                onNavigateToImport();
+              }}
               className="text-xs font-semibold px-3 py-1.5 rounded-lg"
               style={{ background: 'rgba(245,158,11,0.15)', color: t.caution, border: `1px solid rgba(245,158,11,0.3)` }}
             >

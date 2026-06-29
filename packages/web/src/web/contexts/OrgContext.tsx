@@ -27,7 +27,6 @@ import type {
   Practice,
   Location,
   RadiologistProfile,
-  ProfileColor,
 } from '../types';
 
 // ─── Context shape ─────────────────────────────────────────────────────────────

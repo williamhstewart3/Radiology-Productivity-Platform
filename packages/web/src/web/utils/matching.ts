@@ -63,6 +63,7 @@ function isProfessionalRow(row: CptRvuRow): boolean {
 export async function findMatchCandidates(
   rawInput: string,
   maxResults = 5,
+  profileId?: string | null,
 ): Promise<MatchCandidate[]> {
   const trimmed = rawInput.trim();
   if (!trimmed) return [];
@@ -96,9 +97,18 @@ export async function findMatchCandidates(
   // High-confidence auto-match: user confirmed this exact mapping before.
   // Try both the standard key and the radiology-expanded key.
   const allAliases = await db.examAliases.toArray();
+  const scopedAliases = allAliases.filter(
+    (a) => a.profileId === (profileId ?? null) || a.profileId == null,
+  );
+  const sortByScope = (aliases: ExamAlias[]) =>
+    [...aliases].sort((a, b) => {
+      const aOwn = a.profileId === (profileId ?? null) ? 0 : 1;
+      const bOwn = b.profileId === (profileId ?? null) ? 0 : 1;
+      return aOwn - bOwn;
+    });
   const exactAlias =
-    allAliases.find((a) => a.aliasText === normalizedInput) ??
-    allAliases.find((a) => a.aliasText === radiologyNormalizedKey);
+    sortByScope(scopedAliases.filter((a) => a.aliasText === normalizedInput))[0] ??
+    sortByScope(scopedAliases.filter((a) => a.aliasText === radiologyNormalizedKey))[0];
   if (exactAlias) {
     const rows = await db.cptRvuTable
       .where('cptCode')
@@ -112,7 +122,7 @@ export async function findMatchCandidates(
   }
 
   // ── 3. Alias table — fuzzy match ─────────────────────────────────────────
-  const fuzzyAliasScored = allAliases
+  const fuzzyAliasScored = scopedAliases
     .map((alias) => ({ alias, score: combinedSimilarity(trimmed, alias.aliasTextRaw) }))
     .filter((x) => x.score >= 0.5)
     .sort((a, b) => b.score - a.score)
@@ -349,7 +359,8 @@ export async function learnAlias(
   const primary = candidates[0];
 
   const normalized = normalizeExamText(rawText);
-  const existing = await db.examAliases.where('aliasText').equals(normalized).first();
+  const existing = (await db.examAliases.where('aliasText').equals(normalized).toArray())
+    .find((a) => a.profileId === profileId);
 
   // Serialize multi-CPT list: "CPTCODE" or "CPTCODE-MOD"
   const cptCodes = candidates.map((c) =>

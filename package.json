@@ -15,7 +15,7 @@
     "validate:releases": "bun run .runable/validate-releases.ts",
     "lint": "bun run validate:releases && oxlint . --deny-warnings --no-error-on-unmatched-pattern",
     "lint:fix": "oxlint . --fix --deny-warnings --no-error-on-unmatched-pattern",
-    "typecheck": "turbo typecheck",
+    "typecheck": "turbo typecheck --force",
     "db:generate": "turbo db:generate",
     "db:migrate": "turbo db:migrate",
     "db:push": "turbo db:push",

@@ -152,15 +152,6 @@ function CropTool({ imageSrc, onConfirm, onRetake }: CropToolProps) {
     };
   }
 
-  function pxToCrop(px: { left: number; top: number; width: number; height: number }, rw: number, rh: number, ox: number, oy: number): CropRect {
-    return {
-      x: Math.max(0, Math.min(1, (px.left - ox) / rw)),
-      y: Math.max(0, Math.min(1, (px.top - oy) / rh)),
-      w: Math.max(0.05, Math.min(1, px.width / rw)),
-      h: Math.max(0.05, Math.min(1, px.height / rh)),
-    };
-  }
-
   function clampCrop(c: CropRect): CropRect {
     const x = Math.max(0, Math.min(0.95, c.x));
     const y = Math.max(0, Math.min(0.95, c.y));
@@ -369,11 +360,9 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
 
   // Image state — only one lives at a time
   const [originalSrc, setOriginalSrc]   = useState<string | null>(null);   // revoked after crop
-  const [croppedBlob, setCroppedBlob]   = useState<Blob | null>(null);     // revoked after OCR
   const [croppedPreview, setCroppedPreview] = useState<string | null>(null);// for display only
 
   // Pipeline state
-  const [processing, setProcessing] = useState(false);
   const [reviewRows, setReviewRows]   = useState<PipelineReviewRow[]>([]);
   const [skippedRows, setSkippedRows] = useState<PipelineReviewRow[]>([]);
   const [error, setError]             = useState<string | null>(null);
@@ -422,17 +411,15 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
       // Small preview for the processing screen (revoked after OCR)
       const previewUrl = URL.createObjectURL(blob);
       setCroppedPreview(previewUrl);
-      setCroppedBlob(blob);
 
       processBlob(blob, previewUrl);
-    } catch (e) {
+    } catch {
       setError('Crop failed — please try again');
     }
   }
 
   async function processBlob(blob: Blob, previewUrl?: string) {
     setStep('processing');
-    setProcessing(true);
     try {
       const provider = new OCRImportProvider(blob, logDate);
       const studies  = await provider.importStudies();
@@ -443,14 +430,11 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
       // Revoke cropped image after OCR is done — not needed anymore
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setCroppedPreview(null);
-      setCroppedBlob(null);
 
       setStep('review');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'OCR failed');
       setStep('capture');
-    } finally {
-      setProcessing(false);
     }
   }
 
@@ -508,6 +492,7 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
       canonicalExamName: candidate.description,
       candidates: [{ cptCode: candidate.cptCode, modifier: candidate.modifier, workRvu: candidate.workRvu }],
       source: 'user',
+      profileId: activeProfile?.id ?? null,
     });
     setSearchPanelTempId(null);
   }
@@ -549,7 +534,6 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
     if (croppedPreview) URL.revokeObjectURL(croppedPreview);
     setOriginalSrc(null);
     setCroppedPreview(null);
-    setCroppedBlob(null);
     setReviewRows([]);
     setSkippedRows([]);
     setError(null);

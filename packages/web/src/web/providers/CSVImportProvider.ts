@@ -16,6 +16,7 @@
  */
 
 import { parseBulkText } from '../utils/bulkTextParser';
+import Papa from 'papaparse';
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
 import type { Modality } from '../types';
 import { MODALITIES } from '../types';
@@ -82,15 +83,16 @@ export class CSVImportProvider implements ImportProvider {
 
   async importStudies(): Promise<ImportedStudy[]> {
     const now = new Date().toISOString();
-    const lines = this.rawContent
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
+    const parsed = Papa.parse<string[]>(this.rawContent, {
+      skipEmptyLines: true,
+    });
+    const lines = parsed.data
+      .filter((row) => row.some((cell) => cell.trim().length > 0));
 
     if (lines.length === 0) return [];
 
     // Detect if first line looks like a header row (has any known alias)
-    const firstLineCells = lines[0].split(',').map((c) => c.trim());
+    const firstLineCells = lines[0].map((c) => c.trim());
     const headerMap = buildHeaderMap(firstLineCells);
     const hasHeader = Object.keys(headerMap).length > 0;
 
@@ -98,7 +100,7 @@ export class CSVImportProvider implements ImportProvider {
     if (hasHeader) {
       const dataLines = lines.slice(1);
       return dataLines.flatMap((line) => {
-        const cells = line.split(',').map((c) => c.trim());
+        const cells = line.map((c) => c.trim());
         const title = headerMap.examTitle !== undefined ? cells[headerMap.examTitle] : null;
         const cptRaw = headerMap.cpt !== undefined ? cells[headerMap.cpt] : null;
 

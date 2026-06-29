@@ -75,31 +75,15 @@ WATCH_FOLDER := A_MyDocuments . "\wRVU_Screenshots"
     if (yPos < 0)
         yPos := 0
 
-    ; Use the built-in GDI+ screenshot via Gdip library
-    ; Requires Gdip_All.ahk (bundled as Gdip_All.ahk in the same folder,
-    ; or install via AutoHotkey package manager).
-    ; Fallback: use PowerShell if Gdip_All.ahk is not present.
-
-    IfExist, %A_ScriptDir%\Gdip_All.ahk
-    {
-        #Include Gdip_All.ahk
-        pToken := Gdip_Startup()
-        pBitmap := Gdip_BitmapFromScreen(xPos "|" yPos "|" xSize "|" ySize)
-        Gdip_SaveBitmapToFile(pBitmap, filePath)
-        Gdip_DisposeImage(pBitmap)
-        Gdip_Shutdown(pToken)
-    }
-    Else
-    {
-        ; PowerShell fallback — no extra dependencies required
-        psCmd := "Add-Type -AssemblyName System.Windows.Forms; "
-               . "$bmp = New-Object System.Drawing.Bitmap(" . xSize . "," . ySize . "); "
-               . "$g = [System.Drawing.Graphics]::FromImage($bmp); "
-               . "$g.CopyFromScreen(" . xPos . "," . yPos . ",0,0,[System.Drawing.Size]::new(" . xSize . "," . ySize . ")); "
-               . "$bmp.Save('" . filePath . "'); "
-               . "$g.Dispose(); $bmp.Dispose()"
-        RunWait, powershell.exe -NoProfile -NonInteractive -Command "%psCmd%",, Hide
-    }
+    ; PowerShell capture — no extra dependencies required. Avoid conditional
+    ; #Include here because AutoHotkey resolves includes before runtime.
+    psCmd := "Add-Type -AssemblyName System.Windows.Forms; "
+           . "$bmp = New-Object System.Drawing.Bitmap(" . xSize . "," . ySize . "); "
+           . "$g = [System.Drawing.Graphics]::FromImage($bmp); "
+           . "$g.CopyFromScreen(" . xPos . "," . yPos . ",0,0,[System.Drawing.Size]::new(" . xSize . "," . ySize . ")); "
+           . "$bmp.Save('" . filePath . "'); "
+           . "$g.Dispose(); $bmp.Dispose()"
+    RunWait, powershell.exe -NoProfile -NonInteractive -Command "%psCmd%",, Hide
 
     ; Brief visual confirmation (tray tip)
     TrayTip, wRVU Watcher, Captured: %fileName%, 2, 1

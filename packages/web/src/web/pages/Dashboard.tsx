@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState, useEffect, useMemo } from 'react';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { db } from '../db/database';
 import { useOrg } from '../hooks/useOrg';
 import { computeYtdStats, computeDailyStats, todayDateString } from '../utils/calculations';
@@ -134,7 +135,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const {
     activeProfile,
     activePractice,
-    activeOrg,
     practiceRadiologists,
     orgRadiologists,
     practices,
@@ -152,27 +152,25 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const allStudyLogs = useLiveQuery<StudyLog[]>(
     () => db.studyLogs.orderBy('logDate').toArray(),
     [],
-    [],
   ) ?? [];
 
   // ── Filtered log sets per mode ────────────────────────────────────────────
 
-  const myProfileIds = useMemo(() => new Set([profileId, null]), [profileId]);
+  const myProfileIds = useMemo(() => new Set<string | null>([profileId, null]), [profileId]);
 
   const practiceProfileIds = useMemo(() => {
-    const ids = new Set(practiceRadiologists.map((r) => r.id));
+    const ids = new Set<string | null>(practiceRadiologists.map((r) => r.id));
     ids.add(null); // legacy rows
     return ids;
   }, [practiceRadiologists]);
 
   const orgProfileIds = useMemo(() => {
-    const ids = new Set(orgRadiologists.map((r) => r.id));
+    const ids = new Set<string | null>(orgRadiologists.map((r) => r.id));
     ids.add(null);
     return ids;
   }, [orgRadiologists]);
 
   const activeLogs = useMemo(() => {
-    if (!allStudyLogs) return [];
     if (mode === 'my') return allStudyLogs.filter((l) => myProfileIds.has(l.profileId));
     if (mode === 'practice') return allStudyLogs.filter((l) => practiceProfileIds.has(l.profileId));
     return allStudyLogs.filter((l) => orgProfileIds.has(l.profileId));
@@ -262,8 +260,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     }
     return days;
   }, [activeLogs]);
-
-  const weekMax = Math.max(...weeklyData.map((d) => d.rvu), 1);
 
   // ── Mode labels ───────────────────────────────────────────────────────────
 
@@ -599,45 +595,48 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 
         {/* Weekly trend */}
         <div className="card space-y-3">
-          <p className="text-sm font-semibold" style={{ color: 'var(--theme-text-primary)' }}>7-Day Trend</p>
-          <div className="flex items-end gap-1.5" style={{ height: '96px' }}>
-            {weeklyData.map(({ date, rvu }) => {
-              const pct = (rvu / weekMax) * 100;
-              const isToday = date === today;
-              const hasData = rvu > 0;
-              return (
-                <div key={date} className="flex-1 flex flex-col items-center gap-1" style={{ height: '96px', justifyContent: 'flex-end' }}>
-                  <div className="w-full flex items-end justify-center" style={{ height: '72px' }}>
-                    <div
-                      className="w-full rounded-t-lg transition-all duration-600"
-                      style={{
-                        height: `${Math.max(pct, hasData ? 6 : 0)}%`,
-                        background: isToday
-                          ? `linear-gradient(to top, ${theme.colors.primary}, ${theme.colors.accent})`
-                          : hasData
-                          ? 'linear-gradient(to top, rgba(91,184,212,0.15), rgba(91,184,212,0.28))'
-                          : 'rgba(255,255,255,0.04)',
-                        boxShadow: isToday ? `0 -2px 12px rgba(91,184,212,0.3)` : 'none',
-                      }}
-                    />
-                  </div>
-                  <span
-                    style={{
-                      fontSize: '9px',
-                      fontWeight: isToday ? 700 : 500,
-                      color: isToday ? theme.colors.accent : 'var(--theme-text-disabled)',
-                    }}
-                  >
-                    {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
-                  </span>
-                  {hasData && (
-                    <span style={{ fontSize: '9px', color: 'var(--theme-text-muted)' }}>
-                      {fmt(rvu, 0)}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold" style={{ color: 'var(--theme-text-primary)' }}>7-Day Trend</p>
+            <span className="text-xs tabular-nums" style={{ color: 'var(--theme-text-muted)' }}>
+              {fmt(weeklyData.reduce((s, d) => s + d.rvu, 0), 0)} wRVU
+            </span>
+          </div>
+          <div className="h-[160px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={weeklyData.map((d) => ({
+                  ...d,
+                  day: new Date(d.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' }),
+                }))}
+                margin={{ top: 8, right: 4, left: -24, bottom: 0 }}
+              >
+                <CartesianGrid stroke="rgba(129,211,235,0.08)" vertical={false} />
+                <XAxis
+                  dataKey="day"
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fill: 'var(--theme-text-muted)', fontSize: 11 }}
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fill: 'var(--theme-text-disabled)', fontSize: 10 }}
+                  width={38}
+                />
+                <Tooltip
+                  cursor={{ fill: 'rgba(91,184,212,0.06)' }}
+                  contentStyle={{
+                    background: 'rgba(10,20,34,0.96)',
+                    border: '1px solid rgba(129,211,235,0.18)',
+                    borderRadius: 10,
+                    color: 'var(--theme-text-primary)',
+                  }}
+                  formatter={(value) => [`${fmt(Number(value), 1)} wRVU`, 'Production']}
+                  labelStyle={{ color: 'var(--theme-text-secondary)' }}
+                />
+                <Bar dataKey="rvu" radius={[6, 6, 2, 2]} fill="var(--theme-accent)" />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
       </div>

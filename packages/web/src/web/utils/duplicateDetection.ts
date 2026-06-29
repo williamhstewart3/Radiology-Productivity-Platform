@@ -246,10 +246,17 @@ export async function checkBatchDuplicates(
   candidates: StudyCandidate[],
   logDate: string,
 ): Promise<DuplicateCheckResult[]> {
-  const existingLogs = await db.studyLogs
-    .where('logDate')
-    .equals(logDate)
-    .toArray();
+  const candidateDates = [...new Set(candidates.map((c) => c.logDate || logDate))];
+  const logsByDate = new Map<string, StudyLog[]>();
+  for (const date of candidateDates) {
+    logsByDate.set(
+      date,
+      await db.studyLogs
+        .where('logDate')
+        .equals(date)
+        .toArray(),
+    );
+  }
 
   const results: DuplicateCheckResult[] = [];
   // Track fingerprints seen so far in THIS batch to catch within-batch dupes
@@ -279,6 +286,9 @@ export async function checkBatchDuplicates(
             cptCode: batchPrior.cptCode,
             logDate: batchPrior.logDate,
             studyDateTime: batchPrior.studyDateTime,
+            studyDate: batchPrior.logDate,
+            dateTimeConfidence: batchPrior.studyDateTime ? 1 : 0,
+            dateTimeSource: batchPrior.studyDateTime ? 'ocr' : 'import_default',
             accessionNumber: batchPrior.accessionNumber,
             modality: batchPrior.modality as StudyLog['modality'],
             // Required fields for type compliance
@@ -302,7 +312,10 @@ export async function checkBatchDuplicates(
 
     batchSeen.set(fp, candidate);
 
-    const match = await checkOneDuplicate(candidate, existingLogs);
+    const match = await checkOneDuplicate(
+      candidate,
+      logsByDate.get(candidate.logDate || logDate) ?? [],
+    );
     results.push({ candidate, match });
   }
 

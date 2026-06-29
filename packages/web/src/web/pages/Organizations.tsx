@@ -374,7 +374,7 @@ function RadiologistForm({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export function Organizations({ onNavigate }: { onNavigate: (tab: string) => void }) {
+export function Organizations(_props: { onNavigate: (tab: string) => void }) {
   const {
     organizations, practices, radiologists,
     createOrganization, updateOrganization, deleteOrganization,

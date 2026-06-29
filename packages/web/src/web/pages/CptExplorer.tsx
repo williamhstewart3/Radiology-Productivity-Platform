@@ -7,7 +7,7 @@
  * Layout (desktop): [CPT List 300px] | [Body Map flex] | [Log Panel 300px]
  */
 
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { buildFingerprint } from '../utils/duplicateDetection';
@@ -127,12 +127,6 @@ function PremiumBodyMap({ selectedRegion, hoveredRegion, onSelect, onHover, regi
     if (isHovered(r)) return 0.75;
     if (hasData(r)) return 0.35;
     return 0.12;
-  };
-
-  const getRegionGlow = (r: BodyRegion) => {
-    if (isActive(r)) return 'drop-shadow(0 0 8px rgba(91,184,212,0.85))';
-    if (isHovered(r)) return 'drop-shadow(0 0 5px rgba(91,184,212,0.5))';
-    return 'none';
   };
 
   // Region overlay definitions — smooth anatomical paths
