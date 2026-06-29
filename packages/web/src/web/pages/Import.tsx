@@ -121,6 +121,27 @@ function ExamSearchPanel({ initialQuery, onSelect, onClose }: ExamSearchPanelPro
 
 // ─── ImportProps ──────────────────────────────────────────────────────────────
 
+function candidateKey(candidate: MatchCandidate): string {
+  return `${candidate.cptCode}-${candidate.modifier ?? ''}`;
+}
+
+function getSelectedCandidateIndices(row: PipelineReviewRow): number[] {
+  if (row.selectedCandidateIndices?.length) {
+    return row.selectedCandidateIndices.filter((index) => Boolean(row.candidates[index]));
+  }
+  return row.selectedCandidateIndex === null ? [] : [row.selectedCandidateIndex];
+}
+
+function getSelectedCandidates(row: PipelineReviewRow): MatchCandidate[] {
+  return getSelectedCandidateIndices(row)
+    .map((index) => row.candidates[index])
+    .filter(Boolean);
+}
+
+function getSelectedWorkRvu(row: PipelineReviewRow): number {
+  return getSelectedCandidates(row).reduce((sum, candidate) => sum + (candidate.workRvu ?? 0), 0);
+}
+
 interface ImportProps {
   onImported: () => void;
 }
@@ -235,17 +256,35 @@ export function Import({ onImported }: ImportProps) {
     );
   }
 
+  function setSelectedCandidates(row: PipelineReviewRow, indices: number[]) {
+    const uniqueIndices = Array.from(new Set(indices)).filter((index) => Boolean(row.candidates[index]));
+    const selected = uniqueIndices.map((index) => row.candidates[index]);
+    updateRow(row.tempId, {
+      selectedCandidateIndex: uniqueIndices[0] ?? null,
+      selectedCandidateIndices: uniqueIndices,
+      needsReview: uniqueIndices.length === 0 || selected.some((c) => c.confidence < 0.75),
+    });
+  }
+
   async function handleManualSelect(tempId: string, candidate: MatchCandidate) {
     const row = reviewRows.find((r) => r.tempId === tempId);
     if (!row) return;
 
-    // Inject the manually chosen candidate at position 0 (auto-selected)
-    const updatedCandidates = [candidate, ...row.candidates.filter(
-      (c) => !(c.cptCode === candidate.cptCode && c.modifier === candidate.modifier),
-    )];
+    const existingKeys = new Set(row.candidates.map(candidateKey));
+    const updatedCandidates = existingKeys.has(candidateKey(candidate))
+      ? row.candidates
+      : [...row.candidates, candidate];
+    const selectedKeys = new Set(getSelectedCandidates(row).map(candidateKey));
+    selectedKeys.add(candidateKey(candidate));
+    const selectedCandidateIndices = updatedCandidates
+      .map((c, index) => (selectedKeys.has(candidateKey(c)) ? index : -1))
+      .filter((index) => index >= 0);
+    const selectedForAlias = selectedCandidateIndices.map((index) => updatedCandidates[index]).filter(Boolean);
+
     updateRow(tempId, {
       candidates: updatedCandidates,
-      selectedCandidateIndex: 0,
+      selectedCandidateIndex: selectedCandidateIndices[0] ?? null,
+      selectedCandidateIndices,
       needsReview: false,
     });
 
@@ -253,8 +292,12 @@ export function Import({ onImported }: ImportProps) {
     // Pass the canonical description as the exam name so Settings shows it clearly.
     await learnAlias({
       rawText: row.source.examTitle,
-      canonicalExamName: candidate.description,
-      candidates: [{ cptCode: candidate.cptCode, modifier: candidate.modifier, workRvu: candidate.workRvu }],
+      canonicalExamName: selectedForAlias.map((c) => c.description).join(' + '),
+      candidates: selectedForAlias.map((c) => ({
+        cptCode: c.cptCode,
+        modifier: c.modifier,
+        workRvu: c.workRvu,
+      })),
       source: 'user',
       profileId: activeProfile?.id ?? null,
     });
@@ -263,9 +306,10 @@ export function Import({ onImported }: ImportProps) {
   }
 
   const includedCount = reviewRows.filter((r) => r.included).length;
-  const matchedCount  = reviewRows.filter(
-    (r) => r.included && r.selectedCandidateIndex !== null,
-  ).length;
+  const matchedCount = reviewRows.filter((r) => r.included && getSelectedCandidates(r).length > 0).length;
+  const selectedCodeCount = reviewRows
+    .filter((r) => r.included)
+    .reduce((sum, row) => sum + getSelectedCandidates(row).length, 0);
   const possibleDupes = reviewRows.filter(
     (r) => r.included && r.duplicateStatus === 'possible',
   ).length;
@@ -417,6 +461,9 @@ export function Import({ onImported }: ImportProps) {
         <div className="space-y-3">
           {reviewRows.map((row, i) => {
             const isPossibleDupe = row.duplicateStatus === 'possible';
+            const selectedIndices = getSelectedCandidateIndices(row);
+            const selected = getSelectedCandidates(row);
+            const selectedTotal = getSelectedWorkRvu(row);
             return (
               <div
                 key={row.tempId}
@@ -502,6 +549,44 @@ export function Import({ onImported }: ImportProps) {
                 )}
 
                 {/* ── Candidate list or no-match state ─────────────── */}
+                {row.included && selected.length > 0 && (
+                  <div className="mb-2 rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-sky-300">
+                        Selected CPTs
+                      </span>
+                      <span className="text-xs font-semibold text-white">
+                        {selectedTotal.toFixed(2)} wRVU total
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {selected.map((candidate) => (
+                        <span
+                          key={candidateKey(candidate)}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-white/12 bg-white/5 px-2 py-1 text-xs text-slate-200"
+                        >
+                          <span className="font-mono font-bold text-white">{candidate.cptCode}</span>
+                          {candidate.modifier && <span className="text-slate-400">mod {candidate.modifier}</span>}
+                          <span className="text-slate-400">{candidate.workRvu?.toFixed(2)} wRVU</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedCandidates(
+                                row,
+                                selectedIndices.filter((index) => candidateKey(row.candidates[index]) !== candidateKey(candidate)),
+                              )
+                            }
+                            className="ml-1 text-slate-500 hover:text-red-300 transition-colors"
+                            title="Remove CPT from this study"
+                          >
+                            x
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {row.candidates.length === 0 ? (
                   <div className="space-y-2">
                     <p className="text-xs text-red-400 italic">
@@ -528,15 +613,17 @@ export function Import({ onImported }: ImportProps) {
                 ) : (
                   <div className="space-y-1">
                     {row.candidates.map((c, ci) => {
-                      const isSelected = row.selectedCandidateIndex === ci;
+                      const isSelected = selectedIndices.includes(ci);
                       return (
                         <button
                           key={`${c.cptCode}-${c.modifier}-${ci}`}
                           onClick={() =>
-                            updateRow(row.tempId, {
-                              selectedCandidateIndex: ci,
-                              needsReview: c.confidence < 0.75,
-                            })
+                            setSelectedCandidates(
+                              row,
+                              isSelected
+                                ? selectedIndices.filter((index) => index !== ci)
+                                : [...selectedIndices, ci],
+                            )
                           }
                           className={`w-full text-left rounded-lg border px-3 py-2 text-xs transition-all ${
                             isSelected
@@ -578,10 +665,15 @@ export function Import({ onImported }: ImportProps) {
                               low conf
                             </span>
                           )}
+                          {isSelected && (
+                            <span className="ml-1.5 text-sky-300 text-[10px] font-semibold uppercase tracking-wide">
+                              selected
+                            </span>
+                          )}
                         </button>
                       );
                     })}
-                    {/* "Can't find it?" — always available, surfaces search panel */}
+                    {/* Add another CPT is always available for combined-code studies. */}
                     <div className="flex items-center justify-end pt-0.5">
                       <button
                         onClick={() =>
@@ -591,7 +683,7 @@ export function Import({ onImported }: ImportProps) {
                         }
                         className="text-[11px] text-slate-500 hover:text-sky-400 transition-colors"
                       >
-                        {searchPanelTempId === row.tempId ? '↑ Close search' : "Can't find it? Search library →"}
+                        {searchPanelTempId === row.tempId ? '↑ Close search' : 'Add another CPT'}
                       </button>
                     </div>
                     {searchPanelTempId === row.tempId && (
@@ -631,7 +723,7 @@ export function Import({ onImported }: ImportProps) {
             onClick={handleCommit}
             disabled={
               importing ||
-              (matchedCount === 0 && reviewRows.length > 0) ||
+              (selectedCodeCount === 0 && reviewRows.length > 0) ||
               (reviewRows.length === 0 && skippedRows.length > 0 && matchedCount === 0)
             }
             className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
@@ -641,7 +733,7 @@ export function Import({ onImported }: ImportProps) {
               ? 'Saving…'
               : reviewRows.length === 0
               ? 'All Duplicates — Nothing to Import'
-              : `Save ${matchedCount} ${matchedCount === 1 ? 'Study' : 'Studies'}`}
+              : `Save ${matchedCount} ${matchedCount === 1 ? 'Study' : 'Studies'} (${selectedCodeCount} CPT${selectedCodeCount === 1 ? '' : 's'})`}
           </button>
         </div>
       </div>

@@ -24,6 +24,7 @@ import {
 } from '../utils/dailyPaceCalculations';
 import { todayDateString } from '../utils/calculations';
 import { ConfettiCanvas } from './ConfettiCanvas';
+import { MiniPaceWindow } from './MiniPaceWindow';
 import { theme } from '../lib/theme';
 
 // ─── Status → color token ────────────────────────────────────────────────────
@@ -290,6 +291,7 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
   const prevAchievedRef = useRef(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [metrics, setMetrics] = useState<DailyPaceMetrics | null>(null);
+  const [showMiniFallback, setShowMiniFallback] = useState(false);
 
   const recalculate = useCallback(() => {
     if (!todayLogs) return;
@@ -317,6 +319,23 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
     const interval = setInterval(recalculate, 60_000);
     return () => clearInterval(interval);
   }, [recalculate]);
+
+  const openMiniWindow = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL('/?mini=pace', window.location.origin).toString();
+    const popup = window.open(
+      url,
+      'wrvu-mini-pace',
+      'width=700,height=300,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no',
+    );
+
+    if (!popup) {
+      setShowMiniFallback(true);
+      return;
+    }
+
+    popup.focus();
+  }, []);
 
   // ── Loading ──────────────────────────────────────────────────────────────
   if (!metrics || todayLogs === undefined) {
@@ -356,6 +375,34 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
       transition={{ duration: 0.18, ease: 'easeOut' }}
     >
       <ConfettiCanvas active={showConfetti} />
+      {showMiniFallback && (
+        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/55 p-3 sm:items-center">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default"
+            aria-label="Close mini pace"
+            onClick={() => setShowMiniFallback(false)}
+          />
+          <div
+            className="relative w-full max-w-3xl rounded-2xl border border-white/12 bg-slate-950 p-3 shadow-2xl"
+            style={{ boxShadow: '0 24px 80px rgba(0,0,0,0.55)' }}
+          >
+            <div className="mb-2 flex items-center justify-between px-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Mini Pace
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowMiniFallback(false)}
+                className="rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300 hover:border-white/25 hover:text-white"
+              >
+                Close
+              </button>
+            </div>
+            <MiniPaceWindow embedded />
+          </div>
+        </div>
+      )}
 
       {/* ── Header ───────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -373,10 +420,7 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => {
-              const url = `${window.location.origin}/mini-pace`;
-              window.open(url, 'wrvu-mini-pace', 'width=700,height=300,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no');
-            }}
+            onClick={openMiniWindow}
             title="Open compact companion display on second monitor"
             className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5"
             style={{

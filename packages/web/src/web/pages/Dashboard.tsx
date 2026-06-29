@@ -123,13 +123,14 @@ function RadCard({ profile, logs, settings, isActive }: RadCardProps) {
 // ─── Main component ────────────────────────────────────────────────────────────
 
 interface DashboardProps {
-  onNavigate: (tab: 'log' | 'import' | 'history' | 'settings') => void;
+  onNavigate: (tab: 'log' | 'import' | 'history' | 'settings' | 'camera' | 'explorer') => void;
 }
 
 export function Dashboard({ onNavigate }: DashboardProps) {
   const [mode, setMode] = useState<DashMode>('my');
   const [showConfetti, setShowConfetti] = useState(false);
   const [prevPercent, setPrevPercent] = useState<number | null>(null);
+  const [showImportMethods, setShowImportMethods] = useState(false);
 
   const today = todayDateString();
   const {
@@ -645,13 +646,13 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: 'Log Study', icon: '✏️', tab: 'log' as const },
-          { label: 'Bulk Import', icon: '📥', tab: 'import' as const },
+          { label: 'Import', icon: '📥', tab: 'import' as const },
           { label: 'History', icon: '📋', tab: 'history' as const },
           { label: 'Settings', icon: '⚙️', tab: 'settings' as const },
         ].map(({ label, icon, tab }) => (
           <button
             key={tab}
-            onClick={() => onNavigate(tab)}
+            onClick={() => (tab === 'import' ? setShowImportMethods((v) => !v) : onNavigate(tab))}
             className="card flex items-center gap-3 cursor-pointer group transition-all duration-200"
             style={{ padding: '1rem 1.125rem' }}
           >
@@ -665,6 +666,28 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           </button>
         ))}
       </div>
+
+      {showImportMethods && (
+        <div className="card grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2" style={{ padding: '0.875rem' }}>
+          {[
+            { label: 'Capture with Camera', icon: '📷', tab: 'camera' as const },
+            { label: 'Upload Screenshot/Image', icon: '🖼', tab: 'import' as const },
+            { label: 'Drag & Drop Image', icon: '📄', tab: 'import' as const },
+            { label: 'CPT Lookup', icon: '🔎', tab: 'explorer' as const },
+            { label: 'Manual Text Entry', icon: '⌨️', tab: 'log' as const },
+          ].map(({ label, icon, tab }) => (
+            <button
+              key={label}
+              onClick={() => onNavigate(tab)}
+              className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/3 px-3 py-2.5 text-left text-sm transition-all hover:border-white/20 hover:bg-white/6"
+              style={{ color: 'var(--theme-text-secondary)' }}
+            >
+              <span className="text-lg">{icon}</span>
+              <span className="font-medium leading-snug">{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

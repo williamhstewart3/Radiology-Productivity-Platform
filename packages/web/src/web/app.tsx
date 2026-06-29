@@ -290,9 +290,18 @@ function MainApp() {
 }
 
 export default function App() {
+  const isMiniWindow =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('mini') === 'pace';
+
   return (
     <OrgProvider>
-      <Switch>
+      {isMiniWindow ? (
+        <div className="min-h-screen" style={{ background: 'var(--theme-bg-deep)' }}>
+          <MiniPaceWindow />
+        </div>
+      ) : (
+        <Switch>
         {/* Standalone mini window — no nav, no init guard */}
         <Route path="/mini-pace">
           <div className="min-h-screen" style={{ background: 'var(--theme-bg-deep)' }}>
@@ -304,7 +313,8 @@ export default function App() {
         <Route>
           <MainApp />
         </Route>
-      </Switch>
+        </Switch>
+      )}
     </OrgProvider>
   );
 }

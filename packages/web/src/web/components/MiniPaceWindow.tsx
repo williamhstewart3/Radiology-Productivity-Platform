@@ -113,7 +113,11 @@ function useCountUp(target: number, duration = 350): number {
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function MiniPaceWindow() {
+interface MiniPaceWindowProps {
+  embedded?: boolean;
+}
+
+export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
   const today = todayDateString();
   const { activeProfile } = useProfile();
   const profileId = activeProfile?.id ?? null;
@@ -187,7 +191,7 @@ export function MiniPaceWindow() {
   if (!metrics || todayLogs === undefined) {
     return (
       <div style={{
-        minHeight: '100vh',
+        minHeight: embedded ? '320px' : '100vh',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: t.colors.bgDeep,
       }}>
@@ -225,10 +229,10 @@ export function MiniPaceWindow() {
 
   return (
     <div style={{
-      minHeight: '100vh',
+      minHeight: embedded ? 'auto' : '100vh',
       background: t.colors.bgDeep,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 'clamp(12px, 3vw, 32px)',
+      padding: embedded ? '0' : 'clamp(12px, 3vw, 32px)',
       fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
     }}>
       <style>{`

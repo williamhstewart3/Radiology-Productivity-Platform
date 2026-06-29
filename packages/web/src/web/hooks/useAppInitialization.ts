@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { db, ensureUserSettings, ensureOrgHierarchy } from '../db/database';
+import { db } from '../db/database';
 import { buildSeedCptRows } from '../data/seedCptData';
+import { persistence } from '../services/persistence';
 
 /**
  * Runs once on app startup:
@@ -17,8 +18,7 @@ export function useAppInitialization() {
 
     async function init() {
       try {
-        await ensureUserSettings();
-        await ensureOrgHierarchy();
+        await persistence.ensureInitialized();
 
         const existingCount = await db.cptRvuTable.count();
         if (existingCount === 0) {

@@ -56,6 +56,8 @@ export interface PipelineReviewRow {
   candidates: MatchCandidate[];
   /** Index into candidates[] the pipeline recommends; null = needs manual pick. */
   selectedCandidateIndex: number | null;
+  /** One or more selected candidates for combined-code studies. */
+  selectedCandidateIndices: number[];
   /** True if the pipeline isn't confident enough to auto-accept this match. */
   needsReview: boolean;
 
@@ -178,6 +180,7 @@ export async function runImportPipeline(
       source: study,
       candidates,
       selectedCandidateIndex: selectedIndex,
+      selectedCandidateIndices: selectedIndex === null ? [] : [selectedIndex],
       needsReview: !autoAccept && (candidates.length === 0 || candidates[0].confidence < 0.75),
       duplicateStatus: dupStatus,
       duplicateExistingLogId: dupLogId,
@@ -220,68 +223,91 @@ export async function commitPipelineResults(
 
   for (const row of reviewRows) {
     if (!row.included) continue;
-    if (row.selectedCandidateIndex === null) continue;
-    const cand = row.candidates[row.selectedCandidateIndex];
-    if (!cand) continue;
+    const selectedIndices =
+      row.selectedCandidateIndices?.length
+        ? row.selectedCandidateIndices
+        : row.selectedCandidateIndex === null
+          ? []
+          : [row.selectedCandidateIndex];
+    const selectedCandidates = selectedIndices
+      .map((index) => row.candidates[index])
+      .filter((candidate): candidate is MatchCandidate => Boolean(candidate));
+    if (selectedCandidates.length === 0) continue;
 
     const study = row.source;
     const effectiveDate = study.studyDate || logDate;
+    const rowSessionId = crypto.randomUUID();
+    let rowCommitted = false;
+    let rowNeedsReview = false;
 
-    const fingerprint = buildFingerprint(
-      study.examTitle,
-      cand.cptCode,
-      effectiveDate,
-      study.studyTime,
-      study.accessionNumber,
-      cand.modality,
-    );
+    for (const cand of selectedCandidates) {
+      const fingerprint = buildFingerprint(
+        study.examTitle,
+        cand.cptCode,
+        effectiveDate,
+        study.studyTime,
+        study.accessionNumber,
+        cand.modality,
+      );
 
-    const isReview =
-      cand.confidence < 0.75 ||
-      row.needsReview ||
-      row.duplicateStatus === 'possible';
+      const existing = await db.studyLogs.where('studyFingerprint').equals(fingerprint).first();
+      if (existing) continue;
 
-    // studyDate comes from OCR if available; otherwise falls back to effectiveDate.
-    // When we have an OCR-confirmed date, logDate should reflect it.
-    const studyDate = study.studyDate || effectiveDate;
-    const logDateFinal = (study.dateTimeConfidence ?? 0) > 0 ? studyDate : effectiveDate;
+      const isReview =
+        cand.confidence < 0.75 ||
+        row.needsReview ||
+        row.duplicateStatus === 'possible';
 
-    const log: StudyLog = {
-      id: crypto.randomUUID(),
-      profileId: profileId ?? null,
-      logDate: logDateFinal,
-      studyDateTime: study.studyTime,
-      studyDate: studyDate,
-      dateTimeConfidence: study.dateTimeConfidence ?? 0,
-      dateTimeSource: study.dateTimeSource ?? 'import_default',
-      examNameRaw: study.examTitle,
-      cptCode: cand.cptCode,
-      modifier: cand.modifier,
-      workRvu: study.workRvu ?? cand.workRvu,   // provider value wins if present
-      modality: study.modality ?? cand.modality,
-      matchMethod: cand.method,
-      matchConfidence: cand.confidence,
-      needsReview: isReview,
-      accessionNumber: study.accessionNumber,
-      sessionId: null,
-      sourceImportId: importId,
-      notes: null,
-      studyFingerprint: fingerprint,
-      createdAt: now,
-      updatedAt: now,
-    };
+      // studyDate comes from OCR if available; otherwise falls back to effectiveDate.
+      // When we have an OCR-confirmed date, logDate should reflect it.
+      const studyDate = study.studyDate || effectiveDate;
+      const logDateFinal = (study.dateTimeConfidence ?? 0) > 0 ? studyDate : effectiveDate;
 
-    await db.studyLogs.add(log);
-    await learnAlias({
-      rawText: study.examTitle,
-      canonicalExamName: cand.description,
-      candidates: [{ cptCode: cand.cptCode, modifier: cand.modifier, workRvu: cand.workRvu }],
-      source: 'ocr_confirmed',
-      profileId: profileId ?? null,
-    });
+      const log: StudyLog = {
+        id: crypto.randomUUID(),
+        profileId: profileId ?? null,
+        logDate: logDateFinal,
+        studyDateTime: study.studyTime,
+        studyDate: studyDate,
+        dateTimeConfidence: study.dateTimeConfidence ?? 0,
+        dateTimeSource: study.dateTimeSource ?? 'import_default',
+        examNameRaw: study.examTitle,
+        cptCode: cand.cptCode,
+        modifier: cand.modifier,
+        workRvu: cand.workRvu,
+        modality: study.modality ?? cand.modality,
+        matchMethod: cand.method,
+        matchConfidence: cand.confidence,
+        needsReview: isReview,
+        accessionNumber: study.accessionNumber,
+        sessionId: rowSessionId,
+        sourceImportId: importId,
+        notes: selectedCandidates.length > 1 ? 'Combined CPT study' : null,
+        studyFingerprint: fingerprint,
+        createdAt: now,
+        updatedAt: now,
+      };
 
-    importedCount++;
-    if (isReview) reviewNeededCount++;
+      await db.studyLogs.add(log);
+      rowCommitted = true;
+      if (isReview) rowNeedsReview = true;
+    }
+
+    if (rowCommitted) {
+      await learnAlias({
+        rawText: study.examTitle,
+        canonicalExamName: selectedCandidates.map((candidate) => candidate.description).join(' + '),
+        candidates: selectedCandidates.map((candidate) => ({
+          cptCode: candidate.cptCode,
+          modifier: candidate.modifier,
+          workRvu: candidate.workRvu,
+        })),
+        source: 'ocr_confirmed',
+        profileId: profileId ?? null,
+      });
+      importedCount++;
+      if (rowNeedsReview) reviewNeededCount++;
+    }
   }
 
   return { importedCount, skippedCount, reviewNeededCount };

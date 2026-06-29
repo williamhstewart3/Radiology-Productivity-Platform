@@ -21,7 +21,8 @@ import {
   type ReactNode,
 } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, ensureOrgHierarchy } from '../db/database';
+import { db } from '../db/database';
+import { persistence } from '../services/persistence';
 import type {
   Organization,
   Practice,
@@ -107,7 +108,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    ensureOrgHierarchy().then(() => setIsReady(true));
+    persistence.ensureInitialized().then(() => setIsReady(true));
   }, []);
 
   // Live queries
