@@ -132,7 +132,7 @@ export interface ExamAlias {
   canonicalExamName: string | null;
   /**
    * Primary CPT code for this alias (used for single-CPT fast-path lookups).
-   * For multi-CPT exams (e.g. CTA Head+Neck → 70496-26 + 70498-26), this
+   * For multi-CPT exams (e.g. CTA Head+Neck -> 70496-26 + 70498-26), this
    * holds the first / highest-RVU code; the full list is in cptCodes.
    */
   cptCode: string;
@@ -176,7 +176,7 @@ export interface StudyLog {
    */
   studyDate: string | null;
   /**
-   * Confidence score for the date/time extraction. 0.0–1.0.
+   * Confidence score for the date/time extraction. 0.0-1.0.
    * 1.0 = exact OCR match (date + time), 0.85 = date only, 0.5 = relative,
    * 0.0 = fallback (import date used).
    * null = legacy row (pre-v7).
@@ -187,7 +187,14 @@ export interface StudyLog {
    * null = legacy row (pre-v7).
    */
   dateTimeSource: DateTimeSource | null;
+  /** Raw OCR/import exam title exactly as received. */
   examNameRaw: string;
+  /** Stable normalized title used for grouping and alias matching. */
+  examTitleNormalized: string | null;
+  /** User-facing title approved/renamed locally; this is the primary display name. */
+  examTitleDisplay: string | null;
+  /** Official CMS description for the linked CPT row, kept as reference text. */
+  cmsDescription: string | null;
   cptCode: string | null;
   modifier: string | null;
   workRvu: number | null; // SNAPSHOT — immutable even if RVU table updates later
@@ -267,7 +274,7 @@ export type ProfileColor =
 export interface Organization {
   id: string;
   name: string;
-  /** Short initials (≤3 chars) for avatar. */
+  /** Short initials (<=3 chars) for avatar. */
   initials: string;
   color: ProfileColor;
   createdAt: string;
@@ -285,10 +292,10 @@ export interface Practice {
   id: string;
   /** Always points to the hidden default organization. */
   organizationId: string;
-  /** Full location name shown in UI, e.g. "Baptist Memorial Hospital–Memphis" */
+  /** Full location name shown in UI, e.g. "Baptist Memorial Hospital-Memphis" */
   name: string;
   /**
-   * Optional short code (≤4 chars) shown where screen space is limited.
+   * Optional short code (<=4 chars) shown where screen space is limited.
    * e.g. "MEM", "NIGHTS", "REMOTE". Stored in the `city` column.
    */
   city: string | null;
@@ -307,7 +314,7 @@ export interface RadiologistProfile {
   practiceId: string | null;
   /** Display name shown in the UI. */
   name: string;
-  /** Short initials (≤3 chars) shown in the avatar bubble. */
+  /** Short initials (<=3 chars) shown in the avatar bubble. */
   initials: string;
   /** Accent color for this profile. */
   color: ProfileColor;
