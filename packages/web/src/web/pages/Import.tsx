@@ -19,6 +19,7 @@ import { OCRImportProvider } from '../providers/OCRImportProvider';
 import { CSVImportProvider } from '../providers/CSVImportProvider';
 import { runImportPipeline, commitPipelineResults } from '../pipeline/importPipeline';
 import { searchExamLibrary, learnAlias } from '../utils/matching';
+import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
@@ -140,6 +141,41 @@ function getSelectedCandidates(row: PipelineReviewRow): MatchCandidate[] {
 
 function getSelectedWorkRvu(row: PipelineReviewRow): number {
   return getSelectedCandidates(row).reduce((sum, candidate) => sum + (candidate.workRvu ?? 0), 0);
+}
+
+function buildManualSelectionPatch(
+  row: PipelineReviewRow,
+  candidatesToSelect: MatchCandidate[],
+): Pick<PipelineReviewRow, 'candidates' | 'selectedCandidateIndex' | 'selectedCandidateIndices' | 'needsReview'> {
+  const updatedCandidates = [...row.candidates];
+  const existingKeys = new Set(updatedCandidates.map(candidateKey));
+  for (const candidate of candidatesToSelect) {
+    if (!existingKeys.has(candidateKey(candidate))) {
+      updatedCandidates.push(candidate);
+      existingKeys.add(candidateKey(candidate));
+    }
+  }
+
+  const selectedKeys = new Set(getSelectedCandidates(row).map(candidateKey));
+  candidatesToSelect.forEach((candidate) => selectedKeys.add(candidateKey(candidate)));
+  const selectedCandidateIndices = updatedCandidates
+    .map((candidate, index) => (selectedKeys.has(candidateKey(candidate)) ? index : -1))
+    .filter((index) => index >= 0);
+
+  return {
+    candidates: updatedCandidates,
+    selectedCandidateIndex: selectedCandidateIndices[0] ?? null,
+    selectedCandidateIndices,
+    needsReview: false,
+  };
+}
+
+function getCandidatesFromPatch(
+  patch: Pick<PipelineReviewRow, 'candidates' | 'selectedCandidateIndices'>,
+): MatchCandidate[] {
+  return (patch.selectedCandidateIndices ?? [])
+    .map((index) => patch.candidates[index])
+    .filter(Boolean);
 }
 
 interface ImportProps {
@@ -270,37 +306,43 @@ export function Import({ onImported }: ImportProps) {
     const row = reviewRows.find((r) => r.tempId === tempId);
     if (!row) return;
 
-    const existingKeys = new Set(row.candidates.map(candidateKey));
-    const updatedCandidates = existingKeys.has(candidateKey(candidate))
-      ? row.candidates
-      : [...row.candidates, candidate];
-    const selectedKeys = new Set(getSelectedCandidates(row).map(candidateKey));
-    selectedKeys.add(candidateKey(candidate));
-    const selectedCandidateIndices = updatedCandidates
-      .map((c, index) => (selectedKeys.has(candidateKey(c)) ? index : -1))
-      .filter((index) => index >= 0);
-    const selectedForAlias = selectedCandidateIndices.map((index) => updatedCandidates[index]).filter(Boolean);
+    const normalizedSourceKey = normalizeRadiologyDescription(row.source.examTitle);
+    const rowsToUpdate = reviewRows.filter(
+      (reviewRow) => normalizeRadiologyDescription(reviewRow.source.examTitle) === normalizedSourceKey,
+    );
 
-    updateRow(tempId, {
-      candidates: updatedCandidates,
-      selectedCandidateIndex: selectedCandidateIndices[0] ?? null,
-      selectedCandidateIndices,
-      needsReview: false,
-    });
+    const patchesByTempId = new Map<string, ReturnType<typeof buildManualSelectionPatch>>();
+    for (const reviewRow of rowsToUpdate) {
+      patchesByTempId.set(reviewRow.tempId, buildManualSelectionPatch(reviewRow, [candidate]));
+    }
 
-    // Learn the alias immediately — next import benefits right away.
-    // Pass the canonical description as the exam name so Settings shows it clearly.
-    await learnAlias({
-      rawText: row.source.examTitle,
-      canonicalExamName: selectedForAlias.map((c) => c.description).join(' + '),
-      candidates: selectedForAlias.map((c) => ({
-        cptCode: c.cptCode,
-        modifier: c.modifier,
-        workRvu: c.workRvu,
-      })),
-      source: 'user',
-      profileId: activeProfile?.id ?? null,
-    });
+    setReviewRows((rows) =>
+      rows.map((reviewRow) => {
+        const patch = patchesByTempId.get(reviewRow.tempId);
+        return patch ? { ...reviewRow, ...patch } : reviewRow;
+      }),
+    );
+
+    const rowsByRawTitle = new Map<string, PipelineReviewRow>();
+    rowsToUpdate.forEach((reviewRow) => rowsByRawTitle.set(reviewRow.source.examTitle, reviewRow));
+
+    for (const aliasRow of rowsByRawTitle.values()) {
+      const patch = patchesByTempId.get(aliasRow.tempId);
+      const selectedForAlias = patch ? getCandidatesFromPatch(patch) : [];
+      if (!selectedForAlias.length) continue;
+
+      await learnAlias({
+        rawText: aliasRow.source.examTitle,
+        canonicalExamName: selectedForAlias.map((c) => c.description).join(' + '),
+        candidates: selectedForAlias.map((c) => ({
+          cptCode: c.cptCode,
+          modifier: c.modifier,
+          workRvu: c.workRvu,
+        })),
+        source: 'user',
+        profileId: activeProfile?.id ?? null,
+      });
+    }
 
     setSearchPanelTempId(null);
   }
