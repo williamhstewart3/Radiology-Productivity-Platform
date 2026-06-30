@@ -120,6 +120,7 @@ function toRemoteStudyLog(log: StudyLog, uploadDayId: string | null): Record<str
     cptCode: log.cptCode,
     modifier: log.modifier,
     workRvu: log.workRvu,
+    cmsDescription: log.cmsDescription,
   }].filter((code) => code.cptCode);
 
   return {
@@ -130,6 +131,9 @@ function toRemoteStudyLog(log: StudyLog, uploadDayId: string | null): Record<str
     study_date: log.studyDate,
     study_datetime: log.studyDateTime,
     exam_name_raw: log.examNameRaw,
+    exam_title_normalized: log.examTitleNormalized,
+    exam_title_display: log.examTitleDisplay ?? log.examNameRaw,
+    cms_description: log.cmsDescription,
     accession_number: log.accessionNumber,
     modality: log.modality,
     cpt_codes: cptCodes,
@@ -267,6 +271,20 @@ export const supabasePersistence = {
       method: 'POST',
       body: JSON.stringify(rows),
       headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    });
+  },
+
+  async updateStudyLogDisplayTitle(localIds: string[], displayTitle: string, normalizedTitle: string): Promise<void> {
+    if (!configured() || localIds.length === 0) return;
+    const encoded = localIds.map((id) => `"${id}"`).join(',');
+    await request(`productivity_exam_rows?local_log_id=in.(${encoded})`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        exam_title_display: displayTitle,
+        exam_title_normalized: normalizedTitle,
+        updated_at: new Date().toISOString(),
+      }),
+      headers: { Prefer: 'return=minimal' },
     });
   },
 
