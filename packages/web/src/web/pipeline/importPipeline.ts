@@ -64,7 +64,10 @@ export async function runImportPipeline(
 
   for (const study of studies) {
     const query = study.cpt ?? study.examTitle;
-    const candidates = (await findMatchCandidates(query, 6, profileId)).filter(productivityRelevant);
+    const candidates = (await findMatchCandidates(query, 6, profileId, {
+      requireExamContextForDirectCpt: study.source === 'ocr' && !study.cpt,
+      directCptContext: study.examTitle,
+    })).filter(productivityRelevant);
     matched.push({ study, candidates });
   }
 
