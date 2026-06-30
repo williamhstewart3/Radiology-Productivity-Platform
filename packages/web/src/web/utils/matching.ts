@@ -3,6 +3,10 @@ import type { CptRvuRow, ExamAlias, MatchCandidate } from '../types';
 import { combinedSimilarity, normalizeExamText } from './textMatching';
 import { normalizeForRadiology } from './examNormalizer';
 import { scoreRadiologyMatch, CONFIDENCE_THRESHOLD } from './examLibrary';
+import {
+  getCommonRadiologyMappingCodes,
+  normalizeRadiologyDescription,
+} from './radiologyDescriptionNormalization';
 
 const CPT_CODE_PATTERN = /^\d{5}$/;
 const EXAM_CONTEXT_PATTERN =
@@ -80,6 +84,26 @@ async function candidatesForAlias(alias: ExamAlias, confidence: number): Promise
   return candidates;
 }
 
+async function candidatesForCommonRadiologyMapping(rawInput: string): Promise<MatchCandidate[]> {
+  const candidates: MatchCandidate[] = [];
+  for (const cptCode of getCommonRadiologyMappingCodes(rawInput)) {
+    const rows = await getModifier26Rows(cptCode);
+    for (const row of rows) {
+      candidates.push(rowToCandidate(row, 0.99, 'radiology_match'));
+    }
+  }
+  return candidates;
+}
+
+function aliasNormalizedKeys(alias: ExamAlias): string[] {
+  return [
+    alias.aliasText,
+    normalizeExamText(alias.aliasTextRaw),
+    normalizeRadiologyDescription(alias.aliasTextRaw),
+    normalizeRadiologyDescription(alias.aliasText),
+  ].filter(Boolean);
+}
+
 function dedupeCandidates(candidates: MatchCandidate[]): MatchCandidate[] {
   const seen = new Set<string>();
   const result: MatchCandidate[] = [];
@@ -111,8 +135,10 @@ export async function findMatchCandidates(
   }
 
   const normalizedInput = normalizeExamText(trimmed);
+  const radiologyDescriptionKey = normalizeRadiologyDescription(trimmed);
   const radiologyNorm = normalizeForRadiology(trimmed);
   const radiologyNormalizedKey = normalizeExamText(radiologyNorm.normalizedTitle);
+  const exactKeys = new Set([normalizedInput, radiologyNormalizedKey, radiologyDescriptionKey].filter(Boolean));
 
   const allAliases = await db.examAliases.toArray();
   const scopedAliases = allAliases.filter(
@@ -125,33 +151,61 @@ export async function findMatchCandidates(
       return aOwn - bOwn;
     });
 
-  const exactAlias =
-    sortByScope(scopedAliases.filter((a) => a.aliasText === normalizedInput))[0] ??
-    sortByScope(scopedAliases.filter((a) => a.aliasText === radiologyNormalizedKey))[0];
+  const exactAlias = sortByScope(
+    scopedAliases.filter((alias) => aliasNormalizedKeys(alias).some((key) => exactKeys.has(key))),
+  )[0];
 
   if (exactAlias) {
-    candidates.push(...await candidatesForAlias(exactAlias, 0.97));
-  }
-
-  const fuzzyAliasScored = scopedAliases
-    .map((alias) => ({ alias, score: combinedSimilarity(trimmed, alias.aliasTextRaw) }))
-    .filter((x) => x.score >= 0.5)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxResults);
-
-  for (const { alias, score } of fuzzyAliasScored) {
-    candidates.push(...await candidatesForAlias(alias, score * 0.9));
+    candidates.push(...await candidatesForAlias(exactAlias, 0.98));
   }
 
   if (candidates.length < maxResults) {
-    const allCpt = await db.cptRvuTable
-      .where('statusCategory')
-      .anyOf(['active', 'restricted'])
-      .toArray();
+    candidates.push(...await candidatesForCommonRadiologyMapping(trimmed));
+  }
 
+  const allCpt = candidates.length < maxResults
+    ? await db.cptRvuTable.where('statusCategory').anyOf(['active', 'restricted']).toArray()
+    : [];
+
+  if (candidates.length < maxResults) {
+    const exactDescriptionRows = allCpt
+      .filter(isProductivityRelevantModifier26)
+      .filter((row) => normalizeRadiologyDescription(row.description) === radiologyDescriptionKey);
+
+    for (const row of exactDescriptionRows) {
+      candidates.push(rowToCandidate(row, 0.96, 'radiology_match'));
+      if (dedupeCandidates(candidates).length >= maxResults) break;
+    }
+  }
+
+  if (candidates.length < maxResults) {
+    const fuzzyAliasScored = scopedAliases
+      .map((alias) => ({
+        alias,
+        score: Math.max(
+          combinedSimilarity(trimmed, alias.aliasTextRaw),
+          combinedSimilarity(radiologyDescriptionKey, normalizeRadiologyDescription(alias.aliasTextRaw)),
+        ),
+      }))
+      .filter((x) => x.score >= 0.5)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxResults);
+
+    for (const { alias, score } of fuzzyAliasScored) {
+      candidates.push(...await candidatesForAlias(alias, score * 0.9));
+    }
+  }
+
+  if (candidates.length < maxResults) {
     const descScored = allCpt
       .filter(isProductivityRelevantModifier26)
-      .map((row) => ({ row, score: scoreRadiologyMatch(radiologyNorm, row.description) }))
+      .map((row) => {
+        const normalizedDescription = normalizeRadiologyDescription(row.description);
+        const exactNormalizedScore = normalizedDescription === radiologyDescriptionKey ? 0.96 : 0;
+        const radioScore = scoreRadiologyMatch(radiologyNorm, row.description);
+        const normalizedTextScore = combinedSimilarity(radiologyDescriptionKey, normalizedDescription);
+        return { row, score: Math.max(exactNormalizedScore, radioScore, normalizedTextScore * 0.92) };
+      })
       .filter((x) => x.score >= 0.35)
       .sort((a, b) => b.score - a.score)
       .slice(0, maxResults * 3);
@@ -191,21 +245,31 @@ export async function searchExamLibrary(
     return rows.map((row) => rowToCandidate(row, 1, 'manual_cpt')).slice(0, maxResults);
   }
 
+  const radiologyDescriptionKey = normalizeRadiologyDescription(trimmed);
   const radiologyNorm = normalizeForRadiology(trimmed);
   const allCpt = await db.cptRvuTable
     .where('statusCategory')
     .anyOf(['active', 'restricted'])
     .toArray();
 
+  const commonCandidates = await candidatesForCommonRadiologyMapping(trimmed);
+  const exactDescriptionCandidates = allCpt
+    .filter(isProductivityRelevantModifier26)
+    .filter((row) => normalizeRadiologyDescription(row.description) === radiologyDescriptionKey)
+    .map((row) => rowToCandidate(row, 0.96, 'radiology_match'));
+
   const tokenCount = trimmed.split(/\s+/).length;
-  return allCpt
+  const fuzzyCandidates = allCpt
     .filter(isProductivityRelevantModifier26)
     .map((row) => {
+      const normalizedDescription = normalizeRadiologyDescription(row.description);
       const radioScore = scoreRadiologyMatch(radiologyNorm, row.description);
       const textScore = combinedSimilarity(trimmed, row.description);
-      const score = tokenCount > 3
-        ? radioScore * 0.80 + textScore * 0.20
-        : radioScore * 0.50 + textScore * 0.50;
+      const normalizedTextScore = combinedSimilarity(radiologyDescriptionKey, normalizedDescription);
+      const blendedScore = tokenCount > 3
+        ? radioScore * 0.70 + textScore * 0.15 + normalizedTextScore * 0.15
+        : radioScore * 0.40 + textScore * 0.35 + normalizedTextScore * 0.25;
+      const score = Math.max(normalizedDescription === radiologyDescriptionKey ? 0.96 : 0, blendedScore);
       return { row, score };
     })
     .filter((x) => x.score >= 0.20)
@@ -214,8 +278,11 @@ export async function searchExamLibrary(
       if (scoreDiff !== 0) return scoreDiff;
       return (b.row.workRvu ?? 0) - (a.row.workRvu ?? 0);
     })
-    .slice(0, maxResults)
+    .slice(0, maxResults * 2)
     .map(({ row, score }) => rowToCandidate(row, score, 'radiology_match'));
+
+  return dedupeCandidates([...commonCandidates, ...exactDescriptionCandidates, ...fuzzyCandidates])
+    .slice(0, maxResults);
 }
 
 export interface LearnAliasPayload {
@@ -258,9 +325,13 @@ export async function learnAlias(
 
   const { rawText, canonicalExamName, profileId = null } = payload;
   const primary = candidates[0];
-  const normalized = normalizeExamText(rawText);
-  const existing = (await db.examAliases.where('aliasText').equals(normalized).toArray())
-    .find((a) => a.profileId === profileId);
+  const normalized = normalizeRadiologyDescription(rawText);
+  const legacyNormalized = normalizeExamText(rawText);
+  const existing = (await db.examAliases.toArray())
+    .find((a) => (
+      a.profileId === profileId &&
+      (a.aliasText === normalized || a.aliasText === legacyNormalized || normalizeRadiologyDescription(a.aliasTextRaw) === normalized)
+    ));
 
   const cptCodes = candidates.map((c) => `${c.cptCode}-26`);
   const totalWorkRvu = candidates.reduce((sum, c) => sum + (c.workRvu ?? 0), 0) || null;
@@ -268,6 +339,7 @@ export async function learnAlias(
 
   if (existing) {
     await db.examAliases.update(existing.id, {
+      aliasText: normalized,
       cptCode: primary.cptCode,
       modifier: '26',
       cptCodes,
