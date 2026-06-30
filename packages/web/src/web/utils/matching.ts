@@ -10,7 +10,7 @@ const EXAM_CONTEXT_PATTERN =
 const DATE_TIME_OR_IDENTIFIER_PATTERN =
   /\b(?:\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?|dob|date of birth|age|mrn|medical record|accession|acc|patient(?:\s+id)?|account|acct|encounter|order|csn|fin|har)\b/i;
 
-interface FindMatchOptions {
+export interface FindMatchOptions {
   /**
    * OCR screenshots often contain isolated date/time/MRN/accession numbers.
    * When true, a raw numeric string is not treated as a direct CPT unless
