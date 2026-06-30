@@ -72,6 +72,9 @@ create table if not exists public.productivity_exam_rows (
   study_date date,
   study_datetime timestamptz,
   exam_name_raw text not null,
+  exam_title_normalized text,
+  exam_title_display text,
+  cms_description text,
   accession_number text,
   modality text,
   cpt_codes jsonb not null default '[]'::jsonb,
@@ -88,11 +91,19 @@ create table if not exists public.productivity_exam_rows (
   updated_at timestamptz not null default now()
 );
 
+alter table public.productivity_exam_rows
+  add column if not exists exam_title_normalized text,
+  add column if not exists exam_title_display text,
+  add column if not exists cms_description text;
+
 create index if not exists productivity_exam_rows_date_idx
   on public.productivity_exam_rows (log_date, profile_id, deleted_at);
 
 create index if not exists productivity_exam_rows_upload_idx
   on public.productivity_exam_rows (upload_day_id);
+
+create index if not exists productivity_exam_rows_title_idx
+  on public.productivity_exam_rows (exam_title_normalized);
 
 alter table public.rvu_datasets enable row level security;
 alter table public.cpt_rvu_rows enable row level security;
