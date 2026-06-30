@@ -143,9 +143,89 @@ function getSelectedWorkRvu(row: PipelineReviewRow): number {
   return getSelectedCandidates(row).reduce((sum, candidate) => sum + (candidate.workRvu ?? 0), 0);
 }
 
+function normalizedExamKey(row: PipelineReviewRow): string {
+  return normalizeRadiologyDescription(row.source.examTitle);
+}
+
+function isRadiologyCpt(candidate: MatchCandidate): boolean {
+  return /^7\d{4}$/.test(candidate.cptCode);
+}
+
+function isProductivityCandidate(candidate: MatchCandidate): boolean {
+  return candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0;
+}
+
+function hasProcedureSignal(row: PipelineReviewRow): boolean {
+  const text = `${row.source.examTitle} ${row.candidates.map((c) => c.description).join(' ')}`.toLowerCase();
+  return /\b(?:biopsy|lesion|drain|drainage|aspirat|injection|catheter|tube|port|line|needle|arthrogram|myelogram|guided|guidance|stereo|procedure)\b/.test(text) ||
+    row.candidates.some((candidate) => candidate.modality === 'PROCEDURE');
+}
+
+function hasMultiplePossibleCptMatches(row: PipelineReviewRow): boolean {
+  const plausible = row.candidates.filter(
+    (candidate) => isProductivityCandidate(candidate) && candidate.confidence >= 0.65,
+  );
+  return plausible.length > 1 || getSelectedCandidates(row).length > 1;
+}
+
+function safeAutoApprovalCandidate(row: PipelineReviewRow): MatchCandidate | null {
+  const selected = getSelectedCandidates(row).filter(isProductivityCandidate);
+  const candidate = selected.length === 1 ? selected[0] : row.candidates.find(isProductivityCandidate);
+  if (!candidate) return null;
+  if (!isRadiologyCpt(candidate)) return null;
+  if ((candidate.workRvu ?? 0) <= 0) return null;
+  if (candidate.confidence < 0.85) return null;
+  if (hasMultiplePossibleCptMatches(row)) return null;
+  if (hasProcedureSignal(row)) return null;
+  return candidate;
+}
+
+function isSafeAutoApprovalRow(row: PipelineReviewRow): boolean {
+  return Boolean(row.included && row.duplicateStatus !== 'possible' && safeAutoApprovalCandidate(row));
+}
+
+function isPriorApprovedMappingRow(row: PipelineReviewRow): boolean {
+  const candidate = safeAutoApprovalCandidate(row);
+  return Boolean(candidate && candidate.method === 'alias_match' && candidate.confidence >= 0.95);
+}
+
+function confidenceLabel(row: PipelineReviewRow, candidate?: MatchCandidate): { label: string; tone: 'green' | 'sky' | 'amber' | 'red' } {
+  const current = candidate ?? getSelectedCandidates(row)[0] ?? row.candidates[0];
+  if (!current) return { label: 'No match', tone: 'red' };
+  if (current.method === 'alias_match' && current.confidence >= 0.95) {
+    return { label: 'Exact alias match', tone: 'green' };
+  }
+  if (current.confidence >= 0.85 && current.method === 'radiology_match') {
+    return { label: 'High-confidence normalized match', tone: 'sky' };
+  }
+  return { label: 'Fuzzy match needs review', tone: 'amber' };
+}
+
+function labelClass(tone: 'green' | 'sky' | 'amber' | 'red'): string {
+  if (tone === 'green') return 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400';
+  if (tone === 'sky') return 'bg-sky-500/15 border-sky-500/30 text-sky-300';
+  if (tone === 'amber') return 'bg-amber-500/15 border-amber-500/30 text-amber-300';
+  return 'bg-red-500/15 border-red-500/30 text-red-300';
+}
+
+function manualReviewReason(row: PipelineReviewRow): string | null {
+  const selected = getSelectedCandidates(row);
+  const candidate = selected[0] ?? row.candidates[0];
+  if (!candidate) return 'No match';
+  if (selected.length > 1) return 'Multiple CPTs selected';
+  if ((candidate.workRvu ?? 0) <= 0 || candidate.modifier !== '26') return 'Not modifier 26 productivity RVU';
+  if (!isRadiologyCpt(candidate)) return 'Non-7xxxx CPT requires explicit selection';
+  if (candidate.confidence < 0.85) return 'Low confidence';
+  if (hasMultiplePossibleCptMatches(row)) return 'Multiple possible CPT matches';
+  if (hasProcedureSignal(row)) return 'Possible multi-CPT/procedure exam';
+  if (row.duplicateStatus === 'possible') return 'Possible duplicate';
+  return null;
+}
+
 function buildManualSelectionPatch(
   row: PipelineReviewRow,
   candidatesToSelect: MatchCandidate[],
+  forceReviewed = false,
 ): Pick<PipelineReviewRow, 'candidates' | 'selectedCandidateIndex' | 'selectedCandidateIndices' | 'needsReview'> {
   const updatedCandidates = [...row.candidates];
   const existingKeys = new Set(updatedCandidates.map(candidateKey));
@@ -161,13 +241,22 @@ function buildManualSelectionPatch(
   const selectedCandidateIndices = updatedCandidates
     .map((candidate, index) => (selectedKeys.has(candidateKey(candidate)) ? index : -1))
     .filter((index) => index >= 0);
+  const nextRow = { ...row, candidates: updatedCandidates, selectedCandidateIndices, selectedCandidateIndex: selectedCandidateIndices[0] ?? null };
 
   return {
     candidates: updatedCandidates,
     selectedCandidateIndex: selectedCandidateIndices[0] ?? null,
     selectedCandidateIndices,
-    needsReview: false,
+    needsReview: forceReviewed ? false : Boolean(manualReviewReason(nextRow)),
   };
+}
+
+function buildApprovalPatch(row: PipelineReviewRow): Pick<PipelineReviewRow, 'selectedCandidateIndex' | 'selectedCandidateIndices' | 'needsReview'> | null {
+  const candidate = safeAutoApprovalCandidate(row);
+  if (!candidate) return null;
+  const index = row.candidates.findIndex((existing) => candidateKey(existing) === candidateKey(candidate));
+  if (index < 0) return null;
+  return { selectedCandidateIndex: index, selectedCandidateIndices: [index], needsReview: false };
 }
 
 function getCandidatesFromPatch(
@@ -295,25 +384,66 @@ export function Import({ onImported }: ImportProps) {
   function setSelectedCandidates(row: PipelineReviewRow, indices: number[]) {
     const uniqueIndices = Array.from(new Set(indices)).filter((index) => Boolean(row.candidates[index]));
     const selected = uniqueIndices.map((index) => row.candidates[index]);
+    const nextRow = { ...row, selectedCandidateIndex: uniqueIndices[0] ?? null, selectedCandidateIndices: uniqueIndices };
     updateRow(row.tempId, {
       selectedCandidateIndex: uniqueIndices[0] ?? null,
       selectedCandidateIndices: uniqueIndices,
-      needsReview: uniqueIndices.length === 0 || selected.some((c) => c.confidence < 0.75),
+      needsReview: uniqueIndices.length === 0 || selected.length !== 1 || Boolean(manualReviewReason(nextRow)),
     });
+  }
+
+  function approveRows(predicate: (row: PipelineReviewRow) => boolean) {
+    setReviewRows((rows) =>
+      rows.map((row) => {
+        if (!predicate(row)) return row;
+        const patch = buildApprovalPatch(row);
+        return patch ? { ...row, ...patch } : row;
+      }),
+    );
+  }
+
+  function approveHighConfidence() {
+    approveRows((row) => isSafeAutoApprovalRow(row));
+  }
+
+  function approvePriorMappings() {
+    approveRows((row) => isPriorApprovedMappingRow(row));
+  }
+
+  function approveSameNormalizedDescription(tempId: string) {
+    const sourceRow = reviewRows.find((row) => row.tempId === tempId);
+    if (!sourceRow) return;
+    const patch = buildApprovalPatch(sourceRow);
+    if (!patch) return;
+    const sourceCandidate = sourceRow.candidates[patch.selectedCandidateIndex ?? -1];
+    if (!sourceCandidate) return;
+    const sourceKey = normalizedExamKey(sourceRow);
+
+    setReviewRows((rows) =>
+      rows.map((row) => {
+        if (normalizedExamKey(row) !== sourceKey || !row.included) return row;
+        if (manualReviewReason({ ...row, candidates: row.candidates, selectedCandidateIndex: patch.selectedCandidateIndex, selectedCandidateIndices: patch.selectedCandidateIndices })) {
+          const manualPatch = buildManualSelectionPatch(row, [sourceCandidate], true);
+          return { ...row, ...manualPatch };
+        }
+        const approvalPatch = buildManualSelectionPatch(row, [sourceCandidate], true);
+        return { ...row, ...approvalPatch };
+      }),
+    );
   }
 
   async function handleManualSelect(tempId: string, candidate: MatchCandidate) {
     const row = reviewRows.find((r) => r.tempId === tempId);
     if (!row) return;
 
-    const normalizedSourceKey = normalizeRadiologyDescription(row.source.examTitle);
+    const normalizedSourceKey = normalizedExamKey(row);
     const rowsToUpdate = reviewRows.filter(
-      (reviewRow) => normalizeRadiologyDescription(reviewRow.source.examTitle) === normalizedSourceKey,
+      (reviewRow) => normalizedExamKey(reviewRow) === normalizedSourceKey,
     );
 
     const patchesByTempId = new Map<string, ReturnType<typeof buildManualSelectionPatch>>();
     for (const reviewRow of rowsToUpdate) {
-      patchesByTempId.set(reviewRow.tempId, buildManualSelectionPatch(reviewRow, [candidate]));
+      patchesByTempId.set(reviewRow.tempId, buildManualSelectionPatch(reviewRow, [candidate], true));
     }
 
     setReviewRows((rows) =>
@@ -355,6 +485,8 @@ export function Import({ onImported }: ImportProps) {
   const possibleDupes = reviewRows.filter(
     (r) => r.included && r.duplicateStatus === 'possible',
   ).length;
+  const safeApprovalCount = reviewRows.filter(isSafeAutoApprovalRow).length;
+  const priorMappingCount = reviewRows.filter(isPriorApprovedMappingRow).length;
 
   // ── Done screen ───────────────────────────────────────────────────────────
   if (step === 'done') {
@@ -442,6 +574,26 @@ export function Import({ onImported }: ImportProps) {
           />
         </div>
 
+        <div className="card flex flex-wrap items-center gap-2">
+          <button
+            onClick={approveHighConfidence}
+            disabled={safeApprovalCount === 0}
+            className="btn-ghost text-xs disabled:opacity-40"
+          >
+            Approve all high-confidence matches ({safeApprovalCount})
+          </button>
+          <button
+            onClick={approvePriorMappings}
+            disabled={priorMappingCount === 0}
+            className="btn-ghost text-xs disabled:opacity-40"
+          >
+            Approve all prior mappings ({priorMappingCount})
+          </button>
+          <span className="text-xs text-slate-500 ml-auto">
+            Low-confidence, ambiguous, procedure, 0.0 wRVU, and non-7xxxx rows stay in review.
+          </span>
+        </div>
+
         {/* ── Skipped duplicates panel ──────────────────────────────────── */}
         {skippedRows.length > 0 && (
           <div className="rounded-xl border border-slate-700/60 bg-slate-800/40 overflow-hidden">
@@ -506,6 +658,9 @@ export function Import({ onImported }: ImportProps) {
             const selectedIndices = getSelectedCandidateIndices(row);
             const selected = getSelectedCandidates(row);
             const selectedTotal = getSelectedWorkRvu(row);
+            const label = confidenceLabel(row);
+            const reviewReason = manualReviewReason(row);
+            const canApproveSame = Boolean(buildApprovalPatch(row));
             return (
               <div
                 key={row.tempId}
@@ -548,6 +703,14 @@ export function Import({ onImported }: ImportProps) {
                           ⚠ inferred
                         </span>
                       )}
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${labelClass(label.tone)}`}>
+                        {label.label}
+                      </span>
+                      {reviewReason && row.included && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded border border-amber-500/25 bg-amber-500/10 text-amber-300">
+                          {reviewReason}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
@@ -570,6 +733,14 @@ export function Import({ onImported }: ImportProps) {
                       <span className="text-xs bg-amber-500/20 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded-lg">
                         Review
                       </span>
+                    )}
+                    {canApproveSame && row.included && (
+                      <button
+                        onClick={() => approveSameNormalizedDescription(row.tempId)}
+                        className="text-xs px-2 py-1 rounded-lg border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                      >
+                        Approve same
+                      </button>
                     )}
                     <button
                       onClick={() => updateRow(row.tempId, { included: !row.included })}
@@ -656,6 +827,7 @@ export function Import({ onImported }: ImportProps) {
                   <div className="space-y-1">
                     {row.candidates.map((c, ci) => {
                       const isSelected = selectedIndices.includes(ci);
+                      const candidateLabel = confidenceLabel(row, c);
                       return (
                         <button
                           key={`${c.cptCode}-${c.modifier}-${ci}`}
@@ -697,16 +869,13 @@ export function Import({ onImported }: ImportProps) {
                           >
                             {Math.round(c.confidence * 100)}%
                           </span>
-                          {c.method === 'alias_match' && (
-                            <span className="ml-1.5 text-emerald-500/70 text-[10px] font-semibold uppercase tracking-wide">
-                              learned
-                            </span>
-                          )}
-                          {c.method === 'radiology_match' && c.confidence < 0.75 && (
-                            <span className="ml-1.5 text-amber-500/70 text-[10px] font-semibold uppercase tracking-wide">
-                              low conf
-                            </span>
-                          )}
+                          <span className={`ml-1.5 text-[10px] font-semibold uppercase tracking-wide ${
+                            candidateLabel.tone === 'green' ? 'text-emerald-500/70' :
+                            candidateLabel.tone === 'sky' ? 'text-sky-400/80' :
+                            candidateLabel.tone === 'amber' ? 'text-amber-500/70' : 'text-red-400/80'
+                          }`}>
+                            {candidateLabel.label}
+                          </span>
                           {isSelected && (
                             <span className="ml-1.5 text-sky-300 text-[10px] font-semibold uppercase tracking-wide">
                               selected
@@ -820,7 +989,7 @@ export function Import({ onImported }: ImportProps) {
           </span>
           {/* Tooltip on hover */}
           <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-left shadow-xl z-10">
-            Live PowerScribe sync is architecturally supported — the provider interface and pipeline are ready. Authentication and API integration coming soon.
+            Live PowerScribe sync is architecturally supported — the provider interface and pipeline are ready. Authentication and site configuration coming soon.
           </span>
         </button>
       </div>
