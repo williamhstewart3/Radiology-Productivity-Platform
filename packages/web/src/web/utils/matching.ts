@@ -4,7 +4,31 @@ import { combinedSimilarity, normalizeExamText } from './textMatching';
 import { normalizeForRadiology } from './examNormalizer';
 import { scoreRadiologyMatch, CONFIDENCE_THRESHOLD } from './examLibrary';
 
-const CPT_CODE_PATTERN = /^[0-9]{4,5}[A-Z]?$/i;
+const CPT_CODE_PATTERN = /^\d{5}$/;
+const EXAM_CONTEXT_PATTERN =
+  /\b(?:ct|cta|mri?|mra|x-?ray|xr|ultrasound|u\/s|us|nm|pet|fluoro|mammogram|mammo|angiogram|abdomen|pelvis|chest|head|neck|brain|spine|lumbar|thoracic|cervical|knee|shoulder|hip|ankle|wrist|contrast|with|without|w\/o|w\/)\b/i;
+const DATE_TIME_OR_IDENTIFIER_PATTERN =
+  /\b(?:\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?|dob|date of birth|age|mrn|medical record|accession|acc|patient(?:\s+id)?|account|acct|encounter|order|csn|fin|har)\b/i;
+
+interface FindMatchOptions {
+  /**
+   * OCR screenshots often contain isolated date/time/MRN/accession numbers.
+   * When true, a raw numeric string is not treated as a direct CPT unless
+   * the caller supplied surrounding exam/modality context.
+   */
+  requireExamContextForDirectCpt?: boolean;
+  directCptContext?: string;
+}
+
+function canUseDirectCptMatch(rawInput: string, options?: FindMatchOptions): boolean {
+  const trimmed = rawInput.trim();
+  if (!CPT_CODE_PATTERN.test(trimmed)) return false;
+  if (!options?.requireExamContextForDirectCpt) return true;
+
+  const context = options.directCptContext?.trim() || rawInput;
+  if (context.trim() === trimmed) return false;
+  return EXAM_CONTEXT_PATTERN.test(context) && !DATE_TIME_OR_IDENTIFIER_PATTERN.test(context);
+}
 
 function isProductivityRelevantModifier26(row: CptRvuRow): boolean {
   return row.modifier === '26' && (row.workRvu ?? 0) > 0;
@@ -72,13 +96,14 @@ export async function findMatchCandidates(
   rawInput: string,
   maxResults = 5,
   profileId?: string | null,
+  options?: FindMatchOptions,
 ): Promise<MatchCandidate[]> {
   const trimmed = rawInput.trim();
   if (!trimmed) return [];
 
   const candidates: MatchCandidate[] = [];
 
-  if (CPT_CODE_PATTERN.test(trimmed)) {
+  if (canUseDirectCptMatch(rawInput, options)) {
     const directMatches = await getModifier26Rows(trimmed);
     return directMatches
       .map((row) => rowToCandidate(row, 1.0, 'manual_cpt'))
