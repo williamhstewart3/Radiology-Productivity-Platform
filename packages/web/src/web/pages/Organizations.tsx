@@ -250,6 +250,7 @@ function RadiologistForm({
   const [fiscalMonth, setFiscalMonth] = useState(radiologist?.fiscalYearStartMonth ?? 10);
   const [workStart, setWorkStart] = useState(radiologist?.workdayStart ?? '07:00');
   const [workEnd, setWorkEnd] = useState(radiologist?.workdayEnd ?? '17:00');
+  const [isAdmin, setIsAdmin] = useState(radiologist?.isAdmin ?? false);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -267,6 +268,7 @@ function RadiologistForm({
       workdayStart: workStart,
       workdayEnd: workEnd,
       breakMinutes: radiologist?.breakMinutes ?? 0,
+      isAdmin,
       createdAt: radiologist?.createdAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     } as any);
@@ -290,6 +292,21 @@ function RadiologistForm({
           </select>
         </div>
       )}
+
+      <div className="rounded-xl border border-white/8 bg-white/3 p-3">
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={isAdmin}
+            onChange={(e) => setIsAdmin(e.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            <span className="block text-sm font-medium text-white">Admin access</span>
+            <span className="block text-xs text-slate-500">Allows access to admin-only analytics.</span>
+          </span>
+        </label>
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>

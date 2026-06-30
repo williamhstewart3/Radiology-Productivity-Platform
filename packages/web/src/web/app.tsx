@@ -10,6 +10,7 @@ import { MiniPaceWindow } from './components/MiniPaceWindow';
 import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
 import {
   Bell,
+  BarChart3,
   Camera,
   ChevronRight,
   ClipboardList,
@@ -35,11 +36,12 @@ import { Locations } from './pages/Locations';
 import { WatcherPage } from './pages/WatcherPage';
 import { CameraUploadPage } from './pages/CameraUploadPage';
 import { CptExplorer } from './pages/CptExplorer';
+import { CaseMixAnalytics } from './pages/CaseMixAnalytics';
 import { Profiles } from './pages/Profiles';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
-type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles' | 'camera' | 'explorer';
+type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles' | 'camera' | 'explorer' | 'case-mix';
 
 // ── Error boundary — catches crashes in page components ───────────────────────
 class PageErrorBoundary extends Component<
@@ -91,6 +93,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: ComponentType<{ className?: str
   { id: 'watcher',   label: 'Watcher',    icon: Watch },
   { id: 'camera',    label: 'Camera',     icon: Camera },
   { id: 'explorer',  label: 'CPT Explorer', icon: Search },
+  { id: 'case-mix',  label: 'Case Mix', icon: BarChart3 },
   { id: 'history',   label: 'History',    icon: HistoryIcon },
   { id: 'locations', label: 'Locations',  icon: MapPinned },
   { id: 'settings',  label: 'Settings',   icon: SettingsIcon },
@@ -165,6 +168,8 @@ function MainApp() {
   }
 
   const activeLocation = activePractice?.name ?? 'Current location';
+  const isAdmin = activeProfile?.isAdmin === true;
+  const visibleNavItems = NAV_ITEMS.filter((item) => item.id !== 'case-mix' || isAdmin);
 
   return (
     <div className={isDark ? 'dark' : ''}>
@@ -186,7 +191,7 @@ function MainApp() {
           </div>
 
           <nav className="mt-6 flex flex-1 flex-col gap-1">
-            {NAV_ITEMS.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;
               return (
@@ -262,13 +267,14 @@ function MainApp() {
                 {activeTab === 'watcher'       && <WatcherPage onNavigateToImport={() => setActiveTab('import')} />}
                 {activeTab === 'camera'        && <CameraUploadPage onImported={() => setActiveTab('pace')} />}
                 {activeTab === 'explorer'      && <CptExplorer onNavigate={(t) => setActiveTab(t as Tab)} />}
+                {activeTab === 'case-mix'      && <CaseMixAnalytics />}
                 {activeTab === 'profiles'      && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} initialEditId={activeProfile?.id ?? null} />}
               </PageErrorBoundary>
             </div>
           </main>
 
           <nav className="desktop-topbar sticky bottom-0 z-40 grid grid-cols-5 gap-1 px-2 py-2 lg:hidden">
-            {NAV_ITEMS.slice(0, 10).map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;
               return (

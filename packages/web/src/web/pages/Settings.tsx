@@ -219,6 +219,21 @@ export function Settings() {
             />
             <p className="text-[10px] text-slate-500 mt-1">Matches below this score flag for review</p>
           </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1.5">Low-Complexity Threshold</label>
+            <input
+              type="number"
+              value={merged.lowComplexityThreshold ?? 0.75}
+              onChange={(e) => update({ lowComplexityThreshold: Number(e.target.value) })}
+              min={0}
+              max={10}
+              step={0.05}
+              className="input w-full"
+            />
+            <p className="text-[10px] text-slate-500 mt-1">
+              Case Mix Analytics counts studies at or below this wRVU value as low-complexity.
+            </p>
+          </div>
         </div>
 
         <button

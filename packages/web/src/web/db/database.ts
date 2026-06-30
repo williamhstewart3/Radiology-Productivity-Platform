@@ -177,7 +177,14 @@ export const db = new RvuDatabase();
 /** Ensures a single user_settings row exists. */
 export async function ensureUserSettings(): Promise<UserSettings> {
   const existing = await db.userSettings.get('default');
-  if (existing) return existing;
+  if (existing) {
+    if (!('lowComplexityThreshold' in existing)) {
+      const patched = { ...existing, lowComplexityThreshold: 0.75, updatedAt: new Date().toISOString() };
+      await db.userSettings.put(patched);
+      return patched;
+    }
+    return existing;
+  }
 
   const defaults: UserSettings = {
     id: 'default',
@@ -197,6 +204,7 @@ export async function ensureUserSettings(): Promise<UserSettings> {
     watchFolderPath: null,
     autoDeleteProcessed: false,
     requireCropBeforeOcr: true,
+    lowComplexityThreshold: 0.75,
   };
   await db.userSettings.put(defaults);
   return defaults;
@@ -281,6 +289,19 @@ export async function ensureDefaultProfile(practiceId: string): Promise<Radiolog
   const allProfiles = await db.radiologistProfiles.toArray();
 
   if (allProfiles.length > 0) {
+    const missingAdminFlag = allProfiles.filter((p) => !('isAdmin' in p));
+    if (missingAdminFlag.length > 0) {
+      const hasAdmin = allProfiles.some((p) => (p as RadiologistProfile).isAdmin === true);
+      await db.transaction('rw', db.radiologistProfiles, async () => {
+        for (const [index, p] of missingAdminFlag.entries()) {
+          await db.radiologistProfiles.update(p.id, {
+            isAdmin: hasAdmin ? false : index === 0,
+            updatedAt: new Date().toISOString(),
+          } as Partial<RadiologistProfile>);
+        }
+      });
+    }
+
     // Migrate any legacy profiles that lack a practiceId
     const unattached = allProfiles.filter((p) => !p.practiceId);
     if (unattached.length > 0) {
@@ -314,6 +335,7 @@ export async function ensureDefaultProfile(practiceId: string): Promise<Radiolog
     initials: 'ME',
     color: 'indigo',
     active: true,
+    isAdmin: true,
     lastUsed: now,
     dailyRvuGoal: existingSettings?.dailyRvuGoal ?? 90,
     annualRvuGoal: existingSettings?.annualRvuGoal ?? 15000,

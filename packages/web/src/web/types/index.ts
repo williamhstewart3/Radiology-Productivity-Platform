@@ -247,6 +247,8 @@ export interface UserSettings {
    * camera-captured images. Disabling this triggers a PHI warning modal.
    */
   requireCropBeforeOcr: boolean;
+  /** Threshold used by Case Mix Analytics for neutral low-complexity grouping. */
+  lowComplexityThreshold: number;
 }
 
 /** Color accent for a radiologist profile, practice, or org. */
@@ -313,6 +315,8 @@ export interface RadiologistProfile {
   color: ProfileColor;
   /** Whether this is the currently active profile. Only one row has true. */
   active: boolean;
+  /** Grants access to admin-only modules such as Case Mix Analytics. */
+  isAdmin: boolean;
   /** ISO timestamp of last time this profile was the active one. */
   lastUsed: string;
 

@@ -42,6 +42,7 @@ interface ProfileFormData {
   workdayStart: string;
   workdayEnd: string;
   breakMinutes: number;
+  isAdmin: boolean;
 }
 
 const DEFAULT_FORM: ProfileFormData = {
@@ -54,6 +55,7 @@ const DEFAULT_FORM: ProfileFormData = {
   workdayStart: '08:00',
   workdayEnd: '17:00',
   breakMinutes: 0,
+  isAdmin: false,
 };
 
 function profileToForm(p: RadiologistProfile): ProfileFormData {
@@ -67,6 +69,7 @@ function profileToForm(p: RadiologistProfile): ProfileFormData {
     workdayStart: p.workdayStart,
     workdayEnd: p.workdayEnd,
     breakMinutes: p.breakMinutes,
+    isAdmin: p.isAdmin === true,
   };
 }
 
@@ -201,6 +204,24 @@ function ProfileForm({ initial, onSave, onCancel, saving, isNew }: ProfileFormPr
         </div>
       </div>
 
+      {/* Access */}
+      <div className="rounded-xl border border-white/8 bg-white/3 p-3">
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={form.isAdmin}
+            onChange={(e) => update({ isAdmin: e.target.checked })}
+            className="mt-1"
+          />
+          <span>
+            <span className="block text-sm font-medium text-white">Admin access</span>
+            <span className="block text-xs text-slate-500">
+              Allows access to admin-only modules such as Case Mix Analytics.
+            </span>
+          </span>
+        </label>
+      </div>
+
       {/* Schedule */}
       <div>
         <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">Daily Schedule</h3>
@@ -290,6 +311,7 @@ export function Profiles({ initialEditId }: ProfilesProps) {
         workdayStart: data.workdayStart,
         workdayEnd: data.workdayEnd,
         breakMinutes: data.breakMinutes,
+        isAdmin: data.isAdmin,
         powerScribeUsername: null,
         powerScribeLastSync: null,
       });
@@ -315,6 +337,7 @@ export function Profiles({ initialEditId }: ProfilesProps) {
         workdayStart: data.workdayStart,
         workdayEnd: data.workdayEnd,
         breakMinutes: data.breakMinutes,
+        isAdmin: data.isAdmin,
       });
       setEditing(null);
     } catch (e) {
