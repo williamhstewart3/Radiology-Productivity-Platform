@@ -2,6 +2,7 @@ import { findMatchCandidates, learnAlias } from '../utils/matching';
 import { checkBatchDuplicates, buildFingerprint } from '../utils/duplicateDetection';
 import { db } from '../db/database';
 import { supabasePersistence } from '../services/supabasePersistence';
+import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import type { MatchCandidate, StudyLog, DuplicateStatus } from '../types';
 import type { ImportedStudy, ImportSource } from '../types/importProvider';
 import type { StudyCandidate } from '../utils/duplicateDetection';
@@ -12,6 +13,7 @@ export interface PipelineReviewRow {
   candidates: MatchCandidate[];
   selectedCandidateIndex: number | null;
   selectedCandidateIndices: number[];
+  displayTitle: string;
   needsReview: boolean;
   duplicateStatus: DuplicateStatus;
   duplicateExistingLogId: string | null;
@@ -48,6 +50,10 @@ function selectedCandidatesForRow(row: PipelineReviewRow): MatchCandidate[] {
 
 function productivityRelevant(candidate: MatchCandidate): boolean {
   return candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0;
+}
+
+function cmsDescriptionsFor(candidates: MatchCandidate[]): string {
+  return candidates.map((candidate) => candidate.description).filter(Boolean).join(' + ');
 }
 
 export async function runImportPipeline(
@@ -110,6 +116,7 @@ export async function runImportPipeline(
       candidates,
       selectedCandidateIndex: selectedIndex,
       selectedCandidateIndices: selectedIndex === null ? [] : [selectedIndex],
+      displayTitle: study.examTitle,
       needsReview: !autoAccept && (candidates.length === 0 || !top || top.confidence < 0.75),
       duplicateStatus: dupStatus,
       duplicateExistingLogId: dupLogId,
@@ -146,6 +153,9 @@ export async function commitPipelineResults(
     if (selectedCandidates.length === 0) continue;
 
     const study = row.source;
+    const displayTitle = row.displayTitle.trim() || study.examTitle;
+    const normalizedTitle = normalizeRadiologyDescription(study.examTitle);
+    const cmsDescription = cmsDescriptionsFor(selectedCandidates) || null;
     const effectiveDate = study.studyDate || logDate;
     const rowSessionId = crypto.randomUUID();
     let rowCommitted = false;
@@ -181,6 +191,9 @@ export async function commitPipelineResults(
         dateTimeConfidence: study.dateTimeConfidence ?? 0,
         dateTimeSource: study.dateTimeSource ?? 'import_default',
         examNameRaw: study.examTitle,
+        examTitleNormalized: normalizedTitle,
+        examTitleDisplay: displayTitle,
+        cmsDescription: cand.description || cmsDescription,
         cptCode: cand.cptCode,
         modifier: '26',
         workRvu: cand.workRvu,
@@ -191,7 +204,7 @@ export async function commitPipelineResults(
         accessionNumber: study.accessionNumber,
         sessionId: rowSessionId,
         sourceImportId: importId,
-        notes: selectedCandidates.length > 1 ? 'Combined CPT study' : null,
+        notes: selectedCandidates.length > 1 ? `Combined CPT study: ${cmsDescription}` : null,
         studyFingerprint: fingerprint,
         createdAt: now,
         updatedAt: now,
@@ -206,7 +219,7 @@ export async function commitPipelineResults(
     if (rowCommitted) {
       await learnAlias({
         rawText: study.examTitle,
-        canonicalExamName: selectedCandidates.map((candidate) => candidate.description).join(' + '),
+        canonicalExamName: displayTitle,
         candidates: selectedCandidates.map((candidate) => ({
           cptCode: candidate.cptCode,
           modifier: '26',
