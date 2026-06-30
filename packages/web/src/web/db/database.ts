@@ -9,6 +9,7 @@ import type {
   Organization,
   Practice,
 } from '../types';
+import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 
 /**
  * Local-first database. Phase 1 uses IndexedDB via Dexie exclusively.
@@ -166,6 +167,30 @@ export class RvuDatabase extends Dexie {
       radiologistProfiles: 'id, practiceId, active, lastUsed',
       organizations: 'id',
       practices: 'id, organizationId',
+    });
+
+    // v10: adds non-indexed display/reference title fields to studyLogs.
+    this.version(10).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      return trans.table('studyLogs').toCollection().modify((log) => {
+        if (!('examTitleNormalized' in log) || log.examTitleNormalized == null) {
+          log.examTitleNormalized = normalizeRadiologyDescription(log.examNameRaw ?? '');
+        }
+        if (!('examTitleDisplay' in log) || log.examTitleDisplay == null) {
+          log.examTitleDisplay = log.examNameRaw ?? '';
+        }
+        if (!('cmsDescription' in log)) {
+          log.cmsDescription = null;
+        }
+      });
     });
   }
 }
