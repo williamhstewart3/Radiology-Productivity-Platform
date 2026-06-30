@@ -190,11 +190,11 @@ export interface StudyLog {
   /** Raw OCR/import exam title exactly as received. */
   examNameRaw: string;
   /** Stable normalized title used for grouping and alias matching. */
-  examTitleNormalized: string | null;
+  examTitleNormalized?: string | null;
   /** User-facing title approved/renamed locally; this is the primary display name. */
-  examTitleDisplay: string | null;
+  examTitleDisplay?: string | null;
   /** Official CMS description for the linked CPT row, kept as reference text. */
-  cmsDescription: string | null;
+  cmsDescription?: string | null;
   cptCode: string | null;
   modifier: string | null;
   workRvu: number | null; // SNAPSHOT — immutable even if RVU table updates later
