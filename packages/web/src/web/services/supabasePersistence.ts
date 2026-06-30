@@ -48,8 +48,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(`Supabase request failed (${response.status}): ${body || response.statusText}`);
   }
 
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  const body = await response.text();
+  if (!body) return undefined as T;
+  return JSON.parse(body) as T;
 }
 
 function toDbDataset(row: Record<string, any>): RvuDatasetMetadata {
