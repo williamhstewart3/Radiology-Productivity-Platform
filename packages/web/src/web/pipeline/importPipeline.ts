@@ -13,7 +13,7 @@ export interface PipelineReviewRow {
   candidates: MatchCandidate[];
   selectedCandidateIndex: number | null;
   selectedCandidateIndices: number[];
-  displayTitle: string;
+  displayTitle?: string;
   needsReview: boolean;
   duplicateStatus: DuplicateStatus;
   duplicateExistingLogId: string | null;
@@ -153,8 +153,8 @@ export async function commitPipelineResults(
     if (selectedCandidates.length === 0) continue;
 
     const study = row.source;
-    const displayTitle = row.displayTitle.trim() || study.examTitle;
-    const normalizedTitle = normalizeRadiologyDescription(study.examTitle);
+    const displayTitle = (row.displayTitle ?? study.examTitle).trim() || study.examTitle;
+    const normalizedTitle = normalizeRadiologyDescription(displayTitle || study.examTitle);
     const cmsDescription = cmsDescriptionsFor(selectedCandidates) || null;
     const effectiveDate = study.studyDate || logDate;
     const rowSessionId = crypto.randomUUID();
