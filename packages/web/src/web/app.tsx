@@ -13,6 +13,7 @@ import {
   Camera,
   ChevronRight,
   ClipboardList,
+  Database,
   Gauge,
   History as HistoryIcon,
   LayoutDashboard,
@@ -36,12 +37,12 @@ import { WatcherPage } from './pages/WatcherPage';
 import { CameraUploadPage } from './pages/CameraUploadPage';
 import { CptExplorer } from './pages/CptExplorer';
 import { Profiles } from './pages/Profiles';
+import { AdminData } from './pages/AdminData';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
-type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles' | 'camera' | 'explorer';
+type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles' | 'camera' | 'explorer' | 'admin';
 
-// ── Error boundary — catches crashes in page components ───────────────────────
 class PageErrorBoundary extends Component<
   { children: ReactNode; tab: string },
   { error: Error | null }
@@ -54,7 +55,6 @@ class PageErrorBoundary extends Component<
     return { error };
   }
   componentDidUpdate(prev: { tab: string }) {
-    // Clear error when tab changes so navigating away resets the boundary
     if (prev.tab !== this.props.tab && this.state.error) {
       this.setState({ error: null });
     }
@@ -94,6 +94,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: ComponentType<{ className?: str
   { id: 'history',   label: 'History',    icon: HistoryIcon },
   { id: 'locations', label: 'Locations',  icon: MapPinned },
   { id: 'settings',  label: 'Settings',   icon: SettingsIcon },
+  { id: 'admin',     label: 'Admin Data', icon: Database },
 ];
 
 function MainApp() {
@@ -103,31 +104,22 @@ function MainApp() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { activeProfile, activePractice } = useOrg();
 
-  // Inject theme tokens into CSS variables on mount
   useEffect(() => {
     injectTheme();
   }, []);
 
   useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    if (isDark) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
   }, [isDark]);
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center"
-        style={{ background: 'var(--theme-bg-base)' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--theme-bg-base)' }}>
         <div className="text-center space-y-4">
           <div className="text-4xl">⚠️</div>
-          <p className="font-semibold" style={{ color: 'var(--theme-behind)' }}>
-            Initialization failed
-          </p>
-          <p className="text-sm max-w-md" style={{ color: 'var(--theme-text-muted)' }}>
-            {error}
-          </p>
+          <p className="font-semibold" style={{ color: 'var(--theme-behind)' }}>Initialization failed</p>
+          <p className="text-sm max-w-md" style={{ color: 'var(--theme-text-muted)' }}>{error}</p>
         </div>
       </div>
     );
@@ -135,30 +127,20 @@ function MainApp() {
 
   if (!isReady) {
     return (
-      <div className="min-h-screen flex items-center justify-center"
-        style={{ background: 'var(--theme-bg-base)' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--theme-bg-base)' }}>
         <div className="text-center space-y-6">
-          {/* Branded splash */}
           <div className="flex flex-col items-center gap-4">
             <BaptistLogoMark size={52} />
             <div className="flex flex-col items-center gap-1">
-              <p className="font-bold text-lg tracking-tight" style={{ color: 'var(--theme-text-primary)' }}>
-                wRVU Tracker
-              </p>
-              <p className="text-xs font-medium tracking-widest uppercase"
-                style={{ color: 'var(--theme-accent)' }}>
-                Baptist Medical Group
-              </p>
+              <p className="font-bold text-lg tracking-tight" style={{ color: 'var(--theme-text-primary)' }}>wRVU Tracker</p>
+              <p className="text-xs font-medium tracking-widest uppercase" style={{ color: 'var(--theme-accent)' }}>Baptist Medical Group</p>
             </div>
           </div>
-          {/* Spinner */}
           <div
             className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin mx-auto"
             style={{ borderColor: `var(--theme-accent) transparent var(--theme-accent) var(--theme-accent)` }}
           />
-          <p className="text-sm" style={{ color: 'var(--theme-text-muted)' }}>
-            Loading…
-          </p>
+          <p className="text-sm" style={{ color: 'var(--theme-text-muted)' }}>Loading…</p>
         </div>
       </div>
     );
@@ -171,11 +153,7 @@ function MainApp() {
       <div className="app-shell flex min-h-screen">
         <aside className={`desktop-sidebar sticky top-0 hidden h-screen shrink-0 flex-col px-3 py-4 transition-[width] duration-200 lg:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[248px]'}`}>
           <div className="flex items-center justify-between gap-2 px-1">
-            {sidebarCollapsed ? (
-              <BaptistLogoMark size={34} />
-            ) : (
-              <BaptistLogoLockup size="sm" showTagline />
-            )}
+            {sidebarCollapsed ? <BaptistLogoMark size={34} /> : <BaptistLogoLockup size="sm" showTagline />}
             <button
               onClick={() => setSidebarCollapsed((v) => !v)}
               className="desk-icon !h-8 !w-8 shrink-0"
@@ -185,7 +163,7 @@ function MainApp() {
             </button>
           </div>
 
-          <nav className="mt-6 flex flex-1 flex-col gap-1">
+          <nav className="mt-6 flex flex-1 flex-col gap-1 overflow-y-auto pr-1">
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;
@@ -231,18 +209,9 @@ function MainApp() {
               </div>
 
               <div className="flex items-center gap-2">
-                <OrgSwitcher
-                  onManage={() => setActiveTab('locations')}
-                  onMyProfile={() => setActiveTab('profiles')}
-                />
-                <button className="desk-icon" title="Notifications">
-                  <Bell className="size-4" />
-                </button>
-                <button
-                  onClick={() => setIsDark(!isDark)}
-                  className="desk-icon"
-                  title="Toggle theme"
-                >
+                <OrgSwitcher onManage={() => setActiveTab('locations')} onMyProfile={() => setActiveTab('profiles')} />
+                <button className="desk-icon" title="Notifications"><Bell className="size-4" /></button>
+                <button onClick={() => setIsDark(!isDark)} className="desk-icon" title="Toggle theme">
                   {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
                 </button>
               </div>
@@ -263,6 +232,7 @@ function MainApp() {
                 {activeTab === 'camera'        && <CameraUploadPage onImported={() => setActiveTab('pace')} />}
                 {activeTab === 'explorer'      && <CptExplorer onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'profiles'      && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} initialEditId={activeProfile?.id ?? null} />}
+                {activeTab === 'admin'         && <AdminData />}
               </PageErrorBoundary>
             </div>
           </main>
@@ -302,17 +272,14 @@ export default function App() {
         </div>
       ) : (
         <Switch>
-        {/* Standalone mini window — no nav, no init guard */}
-        <Route path="/mini-pace">
-          <div className="min-h-screen" style={{ background: 'var(--theme-bg-deep)' }}>
-            <MiniPaceWindow />
-          </div>
-        </Route>
-
-        {/* Main app */}
-        <Route>
-          <MainApp />
-        </Route>
+          <Route path="/mini-pace">
+            <div className="min-h-screen" style={{ background: 'var(--theme-bg-deep)' }}>
+              <MiniPaceWindow />
+            </div>
+          </Route>
+          <Route>
+            <MainApp />
+          </Route>
         </Switch>
       )}
     </OrgProvider>
