@@ -5,6 +5,8 @@ import { db } from '../db/database';
 import { supabasePersistence } from '../services/supabasePersistence';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString, computePeriodTotals } from '../utils/calculations';
+import { learnAlias } from '../utils/matching';
+import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import type { StudyLog, Modality } from '../types';
 import { MODALITY_LABELS } from '../types';
 
@@ -25,6 +27,10 @@ function monthKey(dateString: string): string {
   return dateString.slice(0, 7);
 }
 
+function displayTitle(log: StudyLog): string {
+  return log.examTitleDisplay?.trim() || log.examNameRaw;
+}
+
 export function History() {
   const [range, setRange] = useState<Range>('30d');
   const [customStart, setCustomStart] = useState('');
@@ -33,6 +39,8 @@ export function History() {
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
 
   const { activeProfile } = useProfile();
   const profileId = activeProfile?.id ?? null;
@@ -67,7 +75,9 @@ export function History() {
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter((log) =>
+        displayTitle(log).toLowerCase().includes(q) ||
         log.examNameRaw.toLowerCase().includes(q) ||
+        (log.cmsDescription ?? '').toLowerCase().includes(q) ||
         (log.cptCode ?? '').includes(q) ||
         (log.notes ?? '').toLowerCase().includes(q),
       );
@@ -131,6 +141,54 @@ export function History() {
 
   function selectToday() {
     setSelectedIds(new Set(filtered.filter((log) => log.logDate === todayDateString()).map((log) => log.id)));
+  }
+
+  function startRename(log: StudyLog) {
+    setEditingLogId(log.id);
+    setEditingTitle(displayTitle(log));
+  }
+
+  async function saveRename(log: StudyLog) {
+    const title = editingTitle.trim();
+    if (!title) return;
+    const normalizedTitle = normalizeRadiologyDescription(title);
+    const relatedLogs = (logs ?? []).filter((candidate) =>
+      log.sessionId
+        ? candidate.sessionId === log.sessionId
+        : candidate.id === log.id,
+    );
+    const ids = relatedLogs.length > 0 ? relatedLogs.map((candidate) => candidate.id) : [log.id];
+    const now = new Date().toISOString();
+
+    await db.transaction('rw', db.studyLogs, async () => {
+      for (const id of ids) {
+        await db.studyLogs.update(id, {
+          examTitleDisplay: title,
+          examTitleNormalized: normalizedTitle,
+          updatedAt: now,
+        } as any);
+      }
+    });
+
+    await supabasePersistence.updateStudyLogDisplayTitle(ids, title, normalizedTitle);
+
+    const aliasCandidates = relatedLogs.length > 0 ? relatedLogs : [log];
+    await learnAlias({
+      rawText: log.examNameRaw,
+      canonicalExamName: title,
+      candidates: aliasCandidates
+        .filter((candidate) => candidate.cptCode && candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0)
+        .map((candidate) => ({
+          cptCode: candidate.cptCode!,
+          modifier: '26',
+          workRvu: candidate.workRvu,
+        })),
+      source: 'user',
+      profileId: activeProfile?.id ?? null,
+    });
+
+    setEditingLogId(null);
+    setEditingTitle('');
   }
 
   async function softDelete(ids: string[]) {
@@ -199,7 +257,7 @@ export function History() {
           </div>
         )}
 
-        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search exam names, CPT codes, notes…" className="input w-full" />
+        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search exam titles, CPT codes, CMS descriptions, notes..." className="input w-full" />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -239,6 +297,9 @@ export function History() {
                 <div className="space-y-2">
                   {dayLogs.map((log) => {
                     const notRelevant = (log.workRvu ?? 0) <= 0 || log.modifier !== '26';
+                    const title = displayTitle(log);
+                    const cmsDescription = log.cmsDescription && log.cmsDescription !== title ? log.cmsDescription : null;
+                    const isEditing = editingLogId === log.id;
                     return (
                       <div key={log.id} className={`card flex items-start gap-3 ${log.needsReview || notRelevant ? 'border-amber-500/30 bg-amber-500/5' : ''}`}>
                         <input
@@ -246,7 +307,7 @@ export function History() {
                           checked={selectedIds.has(log.id)}
                           onChange={() => toggleSelected(log.id)}
                           className="mt-1 h-4 w-4 shrink-0 rounded border-white/20 bg-white/5"
-                          aria-label={`Select ${log.examNameRaw}`}
+                          aria-label={`Select ${title}`}
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -256,7 +317,29 @@ export function History() {
                             {notRelevant && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">not productivity-relevant</span>}
                             {log.needsReview && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">Review</span>}
                           </div>
-                          <p className="text-sm text-white mt-0.5 line-clamp-1">{log.examNameRaw}</p>
+                          {isEditing ? (
+                            <div className="mt-1 flex gap-2">
+                              <input
+                                value={editingTitle}
+                                onChange={(e) => setEditingTitle(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') void saveRename(log);
+                                  if (e.key === 'Escape') {
+                                    setEditingLogId(null);
+                                    setEditingTitle('');
+                                  }
+                                }}
+                                className="input flex-1 text-sm py-1"
+                                autoFocus
+                              />
+                              <button onClick={() => saveRename(log)} className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">Save</button>
+                              <button onClick={() => { setEditingLogId(null); setEditingTitle(''); }} className="text-[10px] px-2 py-1 rounded-lg border border-white/12 text-slate-400">Cancel</button>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-white mt-0.5 line-clamp-1">{title}</p>
+                          )}
+                          {cmsDescription && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">CMS: {cmsDescription}</p>}
+                          {log.examNameRaw !== title && <p className="text-xs text-slate-600 mt-0.5 line-clamp-1">OCR: {log.examNameRaw}</p>}
                           {log.notes && <p className="text-xs text-slate-500 mt-0.5">{log.notes}</p>}
                         </div>
                         <div className="text-right shrink-0">
@@ -264,6 +347,9 @@ export function History() {
                           <p className="text-[10px] text-slate-400">wRVU</p>
                         </div>
                         <div className="flex flex-col gap-1.5 shrink-0">
+                          {!isEditing && (
+                            <button onClick={() => startRename(log)} className="text-[10px] px-2 py-1 rounded-lg border border-white/12 text-slate-400 hover:border-white/25 hover:text-white transition-colors">Rename</button>
+                          )}
                           {log.needsReview && (
                             <button onClick={() => markReviewed(log)} className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-colors whitespace-nowrap">OK</button>
                           )}
