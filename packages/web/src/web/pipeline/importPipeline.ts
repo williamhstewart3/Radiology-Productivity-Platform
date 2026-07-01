@@ -20,6 +20,9 @@ export interface PipelineReviewRow {
   duplicateReason: string | null;
   included: boolean;
   autoSkipped: boolean;
+  autoApproved: boolean;
+  autoApprovalLevel: 'silent' | 'learned' | null;
+  reviewReason: string | null;
 }
 
 export interface PipelineResult {
@@ -50,6 +53,16 @@ function selectedCandidatesForRow(row: PipelineReviewRow): MatchCandidate[] {
 
 function productivityRelevant(candidate: MatchCandidate): boolean {
   return candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0;
+}
+
+function reviewReasonFor(top: MatchCandidate | undefined, candidates: MatchCandidate[], duplicateStatus: DuplicateStatus): string | null {
+  if (!top) return 'New or unknown exam';
+  if (!productivityRelevant(top)) return 'Not modifier 26 productivity RVU';
+  if (duplicateStatus === 'possible') return 'Possible duplicate';
+  if (top.confidence < 0.95) return 'Low confidence match';
+  const plausible = candidates.filter((candidate) => productivityRelevant(candidate) && candidate.confidence >= 0.65);
+  if (plausible.length > 1 && top.method !== 'alias_match') return 'Multiple possible CPT matches';
+  return null;
 }
 
 function cmsDescriptionsFor(candidates: MatchCandidate[]): string {
@@ -102,10 +115,14 @@ export async function runImportPipeline(
         ? null
         : (dupeResult?.match?.existingLog.id ?? null);
 
-    const autoAccept =
-      top?.method === 'alias_match' &&
-      top?.confidence >= 0.95 &&
-      dupStatus === null;
+    const reviewReason = reviewReasonFor(top, candidates, dupStatus);
+    const autoApprovalLevel =
+      top?.method === 'alias_match' && top.confidence >= 0.99 && dupStatus === null
+        ? 'silent'
+        : top?.method === 'alias_match' && top.confidence >= 0.95 && dupStatus === null
+        ? 'learned'
+        : null;
+    const autoAccept = Boolean(autoApprovalLevel && !reviewReason);
 
     const selectedIndex =
       top && top.confidence >= 0.75 && productivityRelevant(top) ? 0 : null;
@@ -117,7 +134,10 @@ export async function runImportPipeline(
       selectedCandidateIndex: selectedIndex,
       selectedCandidateIndices: selectedIndex === null ? [] : [selectedIndex],
       displayTitle: study.examTitle,
-      needsReview: !autoAccept && (candidates.length === 0 || !top || top.confidence < 0.75),
+      needsReview: !autoAccept && Boolean(reviewReason ?? candidates.length === 0 || !top || top.confidence < 0.75),
+      autoApproved: autoAccept,
+      autoApprovalLevel,
+      reviewReason,
       duplicateStatus: dupStatus,
       duplicateExistingLogId: dupLogId,
       duplicateReason: dupReason,
@@ -224,9 +244,12 @@ export async function commitPipelineResults(
           cptCode: candidate.cptCode,
           modifier: '26',
           workRvu: candidate.workRvu,
+          description: candidate.description,
+          modality: candidate.modality,
         })),
         source: 'ocr_confirmed',
         profileId: profileId ?? null,
+        action: row.autoApproved ? 'confirm' : row.needsReview ? 'correct' : 'confirm',
       });
       importedCount++;
       if (rowNeedsReview) reviewNeededCount++;

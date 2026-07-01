@@ -6,7 +6,7 @@ import { importRvuFile } from '../utils/rvuFileImporter';
 import { buildSeedCptRows } from '../data/seedCptData';
 import { normalizeExamText } from '../utils/textMatching';
 import { isDesktop, getDesktopAPI } from '../lib/desktop';
-import type { UserSettings, ExamAlias } from '../types';
+import type { UserSettings, ExamAlias, ExamDictionaryEntry } from '../types';
 import type { ImportResult } from '../utils/rvuFileImporter';
 
 export function Settings() {
@@ -91,6 +91,10 @@ export function Settings() {
   // ── Learned Mappings ───────────────────────────────────────────────────────
   const learnedAliases = useLiveQuery<ExamAlias[]>(
     () => db.examAliases.orderBy('lastUsedAt').reverse().toArray(),
+    [],
+  );
+  const examDictionary = useLiveQuery<ExamDictionaryEntry[]>(
+    () => db.examDictionary.orderBy('canonicalDisplayName').toArray(),
     [],
   );
 
@@ -492,7 +496,8 @@ export function Settings() {
                   </span>
                 )}
                 <span className="text-[10px] text-slate-600 ml-auto">
-                  {sourceLabel(alias.source)} · {alias.timesUsed}× used
+                  {sourceLabel(alias.source)} · {Math.round((alias.matchConfidence ?? 0) * 100)}% · {alias.timesUsed}× used
+                  {(alias.corrections ?? 0) > 0 && ` · ${alias.corrections} corrections`}
                   {alias.lastUsedAt && ` · ${new Date(alias.lastUsedAt).toLocaleDateString()}`}
                 </span>
               </div>
@@ -511,6 +516,62 @@ export function Settings() {
           >
             Clear all learned mappings
           </button>
+        )}
+      </div>
+
+      {/* Radiology Exam Dictionary */}
+      <div className="card space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Radiology Exam Dictionary</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Canonical exams, local synonyms, PowerScribe names, CPT groups, and modifier 26 wRVUs.
+            </p>
+          </div>
+          <span className="text-xs text-slate-500 shrink-0">{examDictionary?.length ?? 0} exams</span>
+        </div>
+        {(examDictionary?.length ?? 0) === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-xs">
+            No dictionary entries yet. Approved OCR corrections will seed canonical entries over time.
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+            {(examDictionary ?? []).map((entry) => {
+              const aliases = [
+                ...entry.commonSynonyms,
+                ...entry.hospitalAliases,
+                ...entry.powerScribeNames,
+              ];
+              return (
+                <div key={entry.id} className="rounded-xl border border-white/8 bg-white/3 p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-white truncate">{entry.canonicalDisplayName}</p>
+                      {entry.cmsDescription && (
+                        <p className="text-[10px] text-slate-500 truncate">{entry.cmsDescription}</p>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-500 shrink-0">
+                      {entry.modality}{entry.bodyRegion ? ` · ${entry.bodyRegion}` : ''}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {entry.cptCodes.map((code) => (
+                      <span key={code} className="font-mono text-[10px] text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded">
+                        {code}
+                      </span>
+                    ))}
+                    {entry.modifier26Wrvu != null && (
+                      <span className="text-[10px] text-emerald-400">{entry.modifier26Wrvu.toFixed(2)} wRVU</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Aliases: {aliases.length ? aliases.join(' · ') : 'None yet'}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -613,6 +674,30 @@ export function Settings() {
             style={{ background: 'rgba(91,184,212,0.15)', color: theme.colors.accent, border: `1px solid rgba(91,184,212,0.25)` }}>
             PHI Protection
           </span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3">
+          {[
+            ['autoImportClipboardScreenshots', 'Automatically import screenshots from clipboard', 'When this app is focused, pasted PowerScribe screenshots can go directly into OCR.'],
+            ['alwaysProcessPowerScribeClipboard', 'Always process PowerScribe screenshots', 'Skip the Process/Ignore banner for future pasted screenshots.'],
+            ['clearClipboardAfterImport', 'Clear clipboard after import', 'Requested behavior for desktop wrapper support; browsers may block clipboard clearing.'],
+          ].map(([key, label, description]) => (
+            <label key={key} className="flex items-center justify-between gap-3 cursor-pointer select-none">
+              <div>
+                <p className="text-sm text-white font-medium">{label}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{description}</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={Boolean((settings as any)?.[key])}
+                onChange={async () => {
+                  const s = await ensureUserSettings();
+                  await db.userSettings.put({ ...s, [key]: !Boolean((s as any)[key]), updatedAt: new Date().toISOString() });
+                }}
+                className="h-4 w-4 accent-sky-500"
+              />
+            </label>
+          ))}
         </div>
         <p className="text-xs text-slate-400 leading-relaxed">
           When photographing the PowerScribe list from a phone, mandatory cropping

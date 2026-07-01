@@ -9,7 +9,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { ConfettiCanvas } from '../components/ConfettiCanvas';
 import { ProfileAvatar } from '../components/OrgSwitcher';
 import { theme } from '../lib/theme';
-import type { UserSettings, StudyLog, Modality, RadiologistProfile } from '../types';
+import type { UserSettings, StudyLog, Modality, RadiologistProfile, ActiveReviewSession } from '../types';
 import { MODALITY_LABELS } from '../types';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -191,6 +191,27 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     [profileId],
   );
 
+  const activeSession = useLiveQuery<ActiveReviewSession | undefined>(
+    async () => {
+      const sessions = await db.activeReviewSessions
+        .where('status')
+        .equals('active')
+        .reverse()
+        .sortBy('updatedAt');
+      return sessions.find((session) => session.profileId === profileId || session.profileId == null);
+    },
+    [profileId],
+  );
+
+  const learnedTodayCount = useLiveQuery<number>(
+    async () => {
+      const todayPrefix = today;
+      const aliases = await db.examAliases.toArray();
+      return aliases.filter((alias) => alias.createdAt?.slice(0, 10) === todayPrefix).length;
+    },
+    [today],
+  ) ?? 0;
+
   // ── Effective goal for current mode ──────────────────────────────────────
 
   const effectiveAnnualGoal = useMemo(() => {
@@ -217,6 +238,11 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const todayStats = useMemo(() => {
     return computeDailyStats(todayActiveLogs, null);
   }, [todayActiveLogs]);
+
+  const autoApprovedToday = todayActiveLogs.filter((log) => log.matchMethod === 'alias_match' && log.matchConfidence >= 0.95).length;
+  const ocrAccuracy = todayActiveLogs.length
+    ? ((todayActiveLogs.length - todayActiveLogs.filter((log) => log.needsReview).length) / todayActiveLogs.length) * 100
+    : 0;
 
   // Confetti on milestone (my mode only)
   useEffect(() => {
@@ -436,6 +462,71 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
             wRVU/workday needed
           </p>
+        </div>
+      </div>
+
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-white">Productivity Automation</p>
+            <p className="text-xs text-slate-500">
+              Confirmed totals are finalized logs. Projected totals include the active temporary review session.
+            </p>
+          </div>
+          {activeSession && (
+            <button
+              onClick={() => onNavigate('import')}
+              className="px-3 py-1.5 rounded-lg border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/10"
+            >
+              Review Unknowns
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          <div className="rounded-xl border border-white/8 bg-white/3 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Today's exams</p>
+            <p className="text-lg font-bold text-white">{todayStats?.studyCount ?? 0}</p>
+          </div>
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-emerald-500/80">Confirmed</p>
+            <p className="text-lg font-bold text-emerald-300">{fmt(todayStats?.totalWorkRvu ?? 0)}</p>
+          </div>
+          <div className="rounded-xl border border-sky-500/20 bg-sky-500/8 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-sky-500/80">Projected</p>
+            <p className="text-lg font-bold text-sky-300">
+              {fmt((todayStats?.totalWorkRvu ?? 0) + (activeSession?.projectedWrvu ?? 0))}
+            </p>
+          </div>
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-amber-500/80">Auto-approved</p>
+            <p className="text-lg font-bold text-amber-300">
+              {todayActiveLogs.length ? Math.round((autoApprovedToday / todayActiveLogs.length) * 100) : 0}%
+            </p>
+          </div>
+          <div className="rounded-xl border border-red-500/20 bg-red-500/8 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-red-400/80">Needs review</p>
+            <p className="text-lg font-bold text-red-300">{activeSession?.needsReviewCount ?? (reviewCount ?? 0)}</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="rounded-xl border border-white/8 bg-white/3 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">OCR accuracy</p>
+            <p className="text-base font-bold text-white">{ocrAccuracy.toFixed(0)}%</p>
+          </div>
+          <div className="rounded-xl border border-white/8 bg-white/3 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Avg wRVU/exam</p>
+            <p className="text-base font-bold text-white">
+              {todayStats?.studyCount ? fmt((todayStats.totalWorkRvu ?? 0) / todayStats.studyCount) : '0.0'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/8 bg-white/3 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Time saved est.</p>
+            <p className="text-base font-bold text-white">{Math.round(autoApprovedToday * 0.35)} min</p>
+          </div>
+          <div className="rounded-xl border border-white/8 bg-white/3 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">New mappings today</p>
+            <p className="text-base font-bold text-white">{learnedTodayCount}</p>
+          </div>
         </div>
       </div>
 

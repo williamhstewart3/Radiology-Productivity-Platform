@@ -22,6 +22,7 @@ import { searchExamLibrary, learnAlias } from '../utils/matching';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
+import { db, ensureUserSettings } from '../db/database';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
 
@@ -273,7 +274,36 @@ interface ImportProps {
 
 type Mode = 'paste' | 'ocr' | 'powerscribe';
 type Step = 'input' | 'review' | 'done';
+type ReviewMode = 'unknowns' | 'everything' | 'auto' | 'low';
 const WATCHER_REVIEW_KEY = 'wrvu_pending_watcher_review';
+type TimelineEvent = { id: string; at: string; label: string };
+
+function sessionRowKey(row: PipelineReviewRow): string {
+  return [
+    normalizedExamKey(row),
+    row.source.studyTime ?? '',
+    row.source.studyDate ?? '',
+    row.source.accessionNumber ?? '',
+  ].join('|');
+}
+
+function sessionSummary(rows: PipelineReviewRow[], skippedRows: PipelineReviewRow[]) {
+  const included = rows.filter((row) => row.included);
+  const confirmedWrvu = included
+    .filter((row) => !row.needsReview)
+    .reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
+  const estimatedPendingWrvu = included
+    .filter((row) => row.needsReview)
+    .reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
+  return {
+    totalExams: included.length,
+    confirmedWrvu,
+    estimatedPendingWrvu,
+    projectedWrvu: confirmedWrvu + estimatedPendingWrvu,
+    needsReviewCount: included.filter((row) => row.needsReview).length,
+    duplicateCount: skippedRows.length + rows.filter((row) => row.duplicateStatus === 'possible').length,
+  };
+}
 
 export function Import({ onImported }: ImportProps) {
   const { activeProfile } = useProfile();
@@ -292,6 +322,10 @@ export function Import({ onImported }: ImportProps) {
   const [error, setError]         = useState<string | null>(null);
   const [showSkipped, setShowSkipped]       = useState(false);
   const [searchPanelTempId, setSearchPanelTempId] = useState<string | null>(null);
+  const [reviewMode, setReviewMode] = useState<ReviewMode>('unknowns');
+  const [clipboardFile, setClipboardFile] = useState<File | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -310,7 +344,121 @@ export function Import({ onImported }: ImportProps) {
     }
   }, []);
 
+  useEffect(() => {
+    db.activeReviewSessions
+      .where('status')
+      .equals('active')
+      .reverse()
+      .sortBy('updatedAt')
+      .then((sessions) => {
+        const session = sessions.find((entry) => entry.profileId === (activeProfile?.id ?? null)) ?? sessions[0];
+        if (!session || reviewRows.length > 0) return;
+        try {
+          const rows = JSON.parse(session.rowsJson) as PipelineReviewRow[];
+          const skipped = JSON.parse(session.skippedRowsJson) as PipelineReviewRow[];
+          const events = JSON.parse(session.timelineJson) as TimelineEvent[];
+          setSessionId(session.id);
+          setReviewRows(Array.isArray(rows) ? rows : []);
+          setSkippedRows(Array.isArray(skipped) ? skipped : []);
+          setTimeline(Array.isArray(events) ? events : []);
+          setLogDate(session.readingDate);
+          setStep('review');
+        } catch {
+          // Ignore malformed legacy session payloads.
+        }
+      });
+  }, [activeProfile?.id]);
+
+  useEffect(() => {
+    if (step !== 'review' || reviewRows.length === 0) return;
+    const id = sessionId ?? crypto.randomUUID();
+    if (!sessionId) setSessionId(id);
+    const now = new Date().toISOString();
+    const summary = sessionSummary(reviewRows, skippedRows);
+    db.activeReviewSessions.put({
+      id,
+      profileId: activeProfile?.id ?? null,
+      readingDate: logDate,
+      status: 'active',
+      rowsJson: JSON.stringify(reviewRows),
+      skippedRowsJson: JSON.stringify(skippedRows),
+      timelineJson: JSON.stringify(timeline),
+      ...summary,
+      createdAt: now,
+      updatedAt: now,
+      finalizedAt: null,
+    });
+  }, [step, reviewRows, skippedRows, timeline, logDate, activeProfile?.id, sessionId]);
+
+  useEffect(() => {
+    db.userSettings.get('default').then((settings) => {
+      if (!settings) return;
+      if (settings.reviewOnlyLowConfidence) setReviewMode('low');
+      else if (settings.reviewAutoApprovedExams) setReviewMode('auto');
+      else if (settings.unknownsOnlyReview === false) setReviewMode('everything');
+      else setReviewMode('unknowns');
+    });
+  }, []);
+
+  useEffect(() => {
+    if (mode !== 'ocr') return;
+    function handlePaste(event: ClipboardEvent) {
+      const imageItem = Array.from(event.clipboardData?.items ?? []).find((item) => item.type.startsWith('image/'));
+      if (!imageItem) return;
+      const blob = imageItem.getAsFile();
+      if (!blob) return;
+      const file = new File([blob], `powerscribe-clipboard-${Date.now()}.png`, { type: blob.type || 'image/png' });
+      event.preventDefault();
+      setClipboardFile(file);
+      db.userSettings.get('default').then((settings) => {
+        if (settings?.autoImportClipboardScreenshots || settings?.alwaysProcessPowerScribeClipboard) {
+          setOcrFile(file);
+          setClipboardFile(null);
+        }
+      });
+    }
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [mode]);
+
   // ── Process helpers ───────────────────────────────────────────────────────
+
+  function addTimeline(label: string) {
+    setTimeline((events) => [
+      ...events,
+      { id: crypto.randomUUID(), at: new Date().toISOString(), label },
+    ]);
+  }
+
+  function appendPipelineRows(nextRows: PipelineReviewRow[], nextSkippedRows: PipelineReviewRow[], label: string) {
+    setReviewRows((currentRows) => {
+      const existingKeys = new Set(currentRows.map(sessionRowKey));
+      const appendRows: PipelineReviewRow[] = [];
+      const duplicateRows: PipelineReviewRow[] = [];
+      for (const row of nextRows) {
+        const key = sessionRowKey(row);
+        if (existingKeys.has(key)) {
+          duplicateRows.push({
+            ...row,
+            included: false,
+            autoSkipped: true,
+            duplicateStatus: row.duplicateStatus ?? 'very_likely',
+            duplicateReason: row.duplicateReason ?? 'Duplicate already exists in this active review session',
+          });
+        } else {
+          existingKeys.add(key);
+          appendRows.push(row);
+        }
+      }
+      if (duplicateRows.length > 0) {
+        setSkippedRows((skipped) => [...skipped, ...duplicateRows]);
+      }
+      return [...currentRows, ...appendRows];
+    });
+    setSkippedRows((currentSkipped) => [...currentSkipped, ...nextSkippedRows]);
+    addTimeline(label);
+    setStep('review');
+  }
 
   async function handlePasteProcess() {
     if (!pasteText.trim()) return;
@@ -320,9 +468,7 @@ export function Import({ onImported }: ImportProps) {
       const provider = new CSVImportProvider(pasteText, logDate);
       const studies  = await provider.importStudies();
       const result   = await runImportPipeline(studies, logDate, activeProfile?.id);
-      setReviewRows(result.reviewRows);
-      setSkippedRows(result.skippedRows);
-      setStep('review');
+      appendPipelineRows(result.reviewRows, result.skippedRows, `Text import processed (${studies.length} extracted)`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Processing failed');
     } finally {
@@ -338,14 +484,24 @@ export function Import({ onImported }: ImportProps) {
       const provider = new OCRImportProvider(ocrFile, logDate);
       const studies  = await provider.importStudies();
       const result   = await runImportPipeline(studies, logDate, activeProfile?.id);
-      setReviewRows(result.reviewRows);
-      setSkippedRows(result.skippedRows);
-      setStep('review');
+      appendPipelineRows(result.reviewRows, result.skippedRows, `Screenshot OCR completed (${studies.length} extracted)`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'OCR failed — try paste mode instead');
     } finally {
       setProcessing(false);
     }
+  }
+
+  async function alwaysProcessClipboard(file: File) {
+    const settings = await ensureUserSettings();
+    await db.userSettings.put({
+      ...settings,
+      autoImportClipboardScreenshots: true,
+      alwaysProcessPowerScribeClipboard: true,
+      updatedAt: new Date().toISOString(),
+    });
+    setOcrFile(file);
+    setClipboardFile(null);
   }
 
   // Restore a skipped row back into the review list
@@ -367,12 +523,38 @@ export function Import({ onImported }: ImportProps) {
       setImportedCount(result.importedCount);
       setSkippedCount(result.skippedCount);
       setReviewNeeded(result.reviewNeededCount);
+      if (sessionId) {
+        await db.activeReviewSessions.update(sessionId, {
+          status: 'finalized',
+          timelineJson: JSON.stringify([
+            ...timeline,
+            { id: crypto.randomUUID(), at: new Date().toISOString(), label: 'Finalized day' },
+          ]),
+          updatedAt: new Date().toISOString(),
+          finalizedAt: new Date().toISOString(),
+        });
+      }
       setStep('done');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Import failed');
     } finally {
       setImporting(false);
     }
+  }
+
+  async function discardSession() {
+    if (!confirm('Discard this active review session? No productivity history will be saved.')) return;
+    if (sessionId) {
+      await db.activeReviewSessions.update(sessionId, {
+        status: 'discarded',
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    setSessionId(null);
+    setReviewRows([]);
+    setSkippedRows([]);
+    setTimeline([]);
+    setStep('input');
   }
 
   function updateRow(tempId: string, patch: Partial<PipelineReviewRow>) {
@@ -468,9 +650,12 @@ export function Import({ onImported }: ImportProps) {
           cptCode: c.cptCode,
           modifier: c.modifier,
           workRvu: c.workRvu,
+          description: c.description,
+          modality: c.modality,
         })),
         source: 'user',
         profileId: activeProfile?.id ?? null,
+        action: 'correct',
       });
     }
 
@@ -487,6 +672,16 @@ export function Import({ onImported }: ImportProps) {
   ).length;
   const safeApprovalCount = reviewRows.filter(isSafeAutoApprovalRow).length;
   const priorMappingCount = reviewRows.filter(isPriorApprovedMappingRow).length;
+  const autoCodedCount = reviewRows.filter((row) => row.included && !row.needsReview).length;
+  const requiresReviewCount = reviewRows.filter((row) => row.included && row.needsReview).length;
+  const autoCodingPct = includedCount ? (autoCodedCount / includedCount) * 100 : 0;
+  const estimatedMinutesSaved = Math.round(autoCodedCount * 0.35);
+  const visibleReviewRows = reviewRows.filter((row) => {
+    if (reviewMode === 'everything') return true;
+    if (reviewMode === 'auto') return row.autoApproved || !row.needsReview;
+    if (reviewMode === 'low') return row.included && row.needsReview && (row.candidates[0]?.confidence ?? 0) < 0.95;
+    return row.included && row.needsReview;
+  });
 
   // ── Done screen ───────────────────────────────────────────────────────────
   if (step === 'done') {
@@ -574,6 +769,61 @@ export function Import({ onImported }: ImportProps) {
           />
         </div>
 
+        <div className="card space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white">Active Review Session</p>
+              <p className="text-xs text-slate-500">Temporary worklist. Nothing is saved to productivity history until Finalize Day.</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setStep('input')}
+                className="px-3 py-1.5 rounded-lg border border-white/12 text-xs text-slate-300 hover:text-white hover:border-white/25"
+              >
+                Continue Later / Add Screenshots
+              </button>
+              <button
+                onClick={discardSession}
+                className="px-3 py-1.5 rounded-lg border border-red-500/25 text-xs text-red-400 hover:bg-red-500/10"
+              >
+                Discard Session
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+            <div className="rounded-lg border border-white/8 bg-white/3 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">Total exams</p>
+              <p className="text-lg font-bold text-white">{includedCount}</p>
+            </div>
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-emerald-500/80">Confirmed</p>
+              <p className="text-lg font-bold text-emerald-300">
+                {reviewRows.filter((row) => row.included && !row.needsReview).reduce((sum, row) => sum + getSelectedWorkRvu(row), 0).toFixed(1)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-amber-500/80">Pending est.</p>
+              <p className="text-lg font-bold text-amber-300">
+                {reviewRows.filter((row) => row.included && row.needsReview).reduce((sum, row) => sum + getSelectedWorkRvu(row), 0).toFixed(1)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-sky-500/80">Projected</p>
+              <p className="text-lg font-bold text-sky-300">
+                {reviewRows.filter((row) => row.included).reduce((sum, row) => sum + getSelectedWorkRvu(row), 0).toFixed(1)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-red-400/80">Needs review</p>
+              <p className="text-lg font-bold text-red-300">{requiresReviewCount}</p>
+            </div>
+            <div className="rounded-lg border border-orange-500/20 bg-orange-500/8 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-orange-400/80">Duplicates</p>
+              <p className="text-lg font-bold text-orange-300">{skippedRows.length + possibleDupes}</p>
+            </div>
+          </div>
+        </div>
+
         <div className="card flex flex-wrap items-center gap-2">
           <button
             onClick={approveHighConfidence}
@@ -591,6 +841,61 @@ export function Import({ onImported }: ImportProps) {
           </button>
           <span className="text-xs text-slate-500 ml-auto">
             Low-confidence, ambiguous, procedure, 0.0 wRVU, and non-7xxxx rows stay in review.
+          </span>
+        </div>
+
+        {timeline.length > 0 && (
+          <div className="card space-y-2">
+            <p className="text-sm font-semibold text-white">Daily Timeline</p>
+            <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+              {timeline.slice(-8).map((event) => (
+                <div key={event.id} className="flex items-center gap-2 text-xs">
+                  <span className="font-mono text-slate-500 w-12">
+                    {new Date(event.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                  <span className="text-slate-300">{event.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          {[
+            ['Uploaded', includedCount.toLocaleString()],
+            ['Auto-coded', autoCodedCount.toLocaleString()],
+            ['Requires review', requiresReviewCount.toLocaleString()],
+            ['Auto-coding', `${autoCodingPct.toFixed(0)}%`],
+            ['Time saved', `${estimatedMinutesSaved} min`],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-xl border border-white/8 bg-white/3 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
+              <p className="text-lg font-bold text-white">{value}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="card flex flex-wrap items-center gap-2">
+          {[
+            ['unknowns', 'Unknowns Only'],
+            ['everything', 'Review Everything'],
+            ['auto', 'Review Auto-approved'],
+            ['low', 'Low-confidence Only'],
+          ].map(([modeId, label]) => (
+            <button
+              key={modeId}
+              onClick={() => setReviewMode(modeId as ReviewMode)}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+                reviewMode === modeId
+                  ? 'border-sky-500/40 bg-sky-500/15 text-sky-300'
+                  : 'border-white/10 text-slate-400 hover:border-white/25 hover:text-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          <span className="text-xs text-slate-500 ml-auto">
+            Showing {visibleReviewRows.length} of {reviewRows.length} rows.
           </span>
         </div>
 
@@ -653,7 +958,7 @@ export function Import({ onImported }: ImportProps) {
 
         {/* ── Review rows ───────────────────────────────────────────────── */}
         <div className="space-y-3">
-          {reviewRows.map((row, i) => {
+          {visibleReviewRows.map((row, i) => {
             const isPossibleDupe = row.duplicateStatus === 'possible';
             const selectedIndices = getSelectedCandidateIndices(row);
             const selected = getSelectedCandidates(row);
@@ -772,29 +1077,41 @@ export function Import({ onImported }: ImportProps) {
                         {selectedTotal.toFixed(2)} wRVU total
                       </span>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {selected.map((candidate) => (
-                        <span
-                          key={candidateKey(candidate)}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-white/12 bg-white/5 px-2 py-1 text-xs text-slate-200"
-                        >
-                          <span className="font-mono font-bold text-white">{candidate.cptCode}</span>
-                          {candidate.modifier && <span className="text-slate-400">mod {candidate.modifier}</span>}
-                          <span className="text-slate-400">{candidate.workRvu?.toFixed(2)} wRVU</span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setSelectedCandidates(
-                                row,
-                                selectedIndices.filter((index) => candidateKey(row.candidates[index]) !== candidateKey(candidate)),
-                              )
-                            }
-                            className="ml-1 text-slate-500 hover:text-red-300 transition-colors"
-                            title="Remove CPT from this study"
-                          >
-                            x
-                          </button>
-                        </span>
+                    <div className="flex flex-wrap items-stretch gap-2">
+                      {selected.map((candidate, candidateIndex) => (
+                        <div key={candidateKey(candidate)} className="contents">
+                          {candidateIndex > 0 && (
+                            <span className="self-center text-sky-300 text-sm font-bold px-0.5">+</span>
+                          )}
+                          <div className="min-w-[11rem] max-w-full flex-1 sm:flex-none rounded-xl border border-white/12 bg-white/5 px-3 py-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-xs font-medium text-white truncate">
+                                  {candidate.description.slice(0, 52)}
+                                  {candidate.description.length > 52 ? '...' : ''}
+                                </p>
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                  <span className="font-mono text-[11px] font-bold text-sky-300">{candidate.cptCode}</span>
+                                  {candidate.modifier && <span className="text-[10px] text-slate-400">mod {candidate.modifier}</span>}
+                                  <span className="text-[10px] text-emerald-400">{candidate.workRvu?.toFixed(2)} wRVU</span>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedCandidates(
+                                    row,
+                                    selectedIndices.filter((index) => candidateKey(row.candidates[index]) !== candidateKey(candidate)),
+                                  )
+                                }
+                                className="text-slate-500 hover:text-red-300 transition-colors"
+                                title="Remove this study bubble"
+                              >
+                                x
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -944,7 +1261,7 @@ export function Import({ onImported }: ImportProps) {
               ? 'Saving…'
               : reviewRows.length === 0
               ? 'All Duplicates — Nothing to Import'
-              : `Save ${matchedCount} ${matchedCount === 1 ? 'Study' : 'Studies'} (${selectedCodeCount} CPT${selectedCodeCount === 1 ? '' : 's'})`}
+              : `Finalize Day: ${matchedCount} ${matchedCount === 1 ? 'Study' : 'Studies'} (${selectedCodeCount} CPT${selectedCodeCount === 1 ? '' : 's'})`}
           </button>
         </div>
       </div>
@@ -1038,6 +1355,35 @@ export function Import({ onImported }: ImportProps) {
 
       {mode === 'ocr' && (
         <div className="card space-y-4">
+          {clipboardFile && (
+            <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-3">
+              <p className="text-sm font-semibold text-sky-300">PowerScribe screenshot detected - Process?</p>
+              <p className="text-xs text-slate-400">
+                The pasted image will be processed in memory for OCR, then discarded. Only parsed exam/CPT productivity data is stored.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => { setOcrFile(clipboardFile); setClipboardFile(null); }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                  style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
+                >
+                  Process
+                </button>
+                <button
+                  onClick={() => setClipboardFile(null)}
+                  className="px-3 py-1.5 rounded-lg border border-white/12 text-xs text-slate-400 hover:text-white"
+                >
+                  Ignore
+                </button>
+                <button
+                  onClick={() => alwaysProcessClipboard(clipboardFile)}
+                  className="px-3 py-1.5 rounded-lg border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/10"
+                >
+                  Always process PowerScribe screenshots
+                </button>
+              </div>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
               Upload PowerScribe screenshot
@@ -1069,8 +1415,8 @@ export function Import({ onImported }: ImportProps) {
               ) : (
                 <div>
                   <p className="text-4xl mb-3">📸</p>
-                  <p className="text-slate-300 text-sm font-medium">Drop or click to upload</p>
-                  <p className="text-slate-500 text-xs mt-1">PNG, JPG, HEIC — any screenshot</p>
+                  <p className="text-slate-300 text-sm font-medium">Paste, drop, or click to upload</p>
+                  <p className="text-slate-500 text-xs mt-1">Alt+Print Screen, then paste here. Images are not stored.</p>
                 </div>
               )}
             </div>

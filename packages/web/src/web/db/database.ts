@@ -8,6 +8,11 @@ import type {
   RadiologistProfile,
   Organization,
   Practice,
+  ExamDictionaryEntry,
+  ActiveReviewSession,
+  AuditLogEntry,
+  HospitalComparisonReport,
+  MemorySuggestion,
 } from '../types';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 
@@ -26,6 +31,11 @@ export class RvuDatabase extends Dexie {
   radiologistProfiles!: Table<RadiologistProfile, string>;
   organizations!: Table<Organization, string>;
   practices!: Table<Practice, string>;
+  examDictionary!: Table<ExamDictionaryEntry, string>;
+  activeReviewSessions!: Table<ActiveReviewSession, string>;
+  auditLogEntries!: Table<AuditLogEntry, string>;
+  hospitalComparisonReports!: Table<HospitalComparisonReport, string>;
+  memorySuggestions!: Table<MemorySuggestion, string>;
 
   constructor() {
     super('rvu_tracker_db');
@@ -192,6 +202,71 @@ export class RvuDatabase extends Dexie {
         }
       });
     });
+
+    // v11: adds learning counters/settings and the radiology exam dictionary.
+    this.version(11).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      trans.table('examAliases').toCollection().modify((alias) => {
+        if (!('confirmations' in alias)) alias.confirmations = alias.timesUsed ?? 1;
+        if (!('corrections' in alias)) alias.corrections = 0;
+        if (!('rejections' in alias)) alias.rejections = 0;
+        if (!('autoApprovedCount' in alias)) alias.autoApprovedCount = 0;
+        if (!('lastAdjustedAt' in alias)) alias.lastAdjustedAt = alias.lastUsedAt ?? null;
+      });
+      return trans.table('userSettings').toCollection().modify((settings) => {
+        if (!('unknownsOnlyReview' in settings)) settings.unknownsOnlyReview = true;
+        if (!('reviewAutoApprovedExams' in settings)) settings.reviewAutoApprovedExams = false;
+        if (!('reviewOnlyLowConfidence' in settings)) settings.reviewOnlyLowConfidence = false;
+        if (!('autoImportClipboardScreenshots' in settings)) settings.autoImportClipboardScreenshots = false;
+        if (!('alwaysProcessPowerScribeClipboard' in settings)) settings.alwaysProcessPowerScribeClipboard = false;
+        if (!('clearClipboardAfterImport' in settings)) settings.clearClipboardAfterImport = false;
+        if (!('savedPowerScribeCropRegions' in settings)) settings.savedPowerScribeCropRegions = {};
+      });
+    });
+
+    // v12: temporary active-day OCR review sessions before final commit.
+    this.version(12).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      activeReviewSessions: 'id, profileId, readingDate, status, updatedAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    });
+
+    // v13: audit/comparison/memory-assistant persistence.
+    this.version(13).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      activeReviewSessions: 'id, profileId, readingDate, status, updatedAt',
+      auditLogEntries: 'id, profileId, sessionId, logDate, action, createdAt',
+      hospitalComparisonReports: 'id, profileId, reportDate, createdAt',
+      memorySuggestions: 'id, profileId, siteId, normalizedKey, status, createdAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      return trans.table('userSettings').toCollection().modify((settings) => {
+        if (!('estimatedCompPerWrvu' in settings)) settings.estimatedCompPerWrvu = null;
+      });
+    });
   }
 }
 
@@ -216,12 +291,20 @@ export async function ensureUserSettings(): Promise<UserSettings> {
     theme: 'system',
     updatedAt: new Date().toISOString(),
     dailyRvuGoal: 90,
+    estimatedCompPerWrvu: null,
     workdayStart: '08:00',
     workdayEnd: '17:00',
     breakMinutes: 0,
     watchFolderPath: null,
     autoDeleteProcessed: false,
     requireCropBeforeOcr: true,
+    unknownsOnlyReview: true,
+    reviewAutoApprovedExams: false,
+    reviewOnlyLowConfidence: false,
+    autoImportClipboardScreenshots: false,
+    alwaysProcessPowerScribeClipboard: false,
+    clearClipboardAfterImport: false,
+    savedPowerScribeCropRegions: {},
   };
   await db.userSettings.put(defaults);
   return defaults;

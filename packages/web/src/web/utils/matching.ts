@@ -58,6 +58,16 @@ function serializeCandidateKey(candidate: Pick<MatchCandidate, 'cptCode' | 'modi
   return candidate.modifier ? `${candidate.cptCode}-${candidate.modifier}` : candidate.cptCode;
 }
 
+function aliasConfidence(alias: ExamAlias): number {
+  const confirmations = alias.confirmations ?? alias.timesUsed ?? 1;
+  const corrections = alias.corrections ?? 0;
+  const rejections = alias.rejections ?? 0;
+  const base = alias.matchConfidence ?? 0.90;
+  const confirmationBoost = Math.min(0.09, Math.log10(confirmations + 1) * 0.035);
+  const penalty = Math.min(0.25, corrections * 0.06 + rejections * 0.10);
+  return Math.min(1, Math.max(0.5, base + confirmationBoost - penalty));
+}
+
 function parseAliasCode(serialized: string): { cptCode: string; modifier: string | null } {
   const [cptCode, modifier] = serialized.split('-');
   return { cptCode, modifier: modifier ?? null };
@@ -68,7 +78,7 @@ async function getModifier26Rows(cptCode: string): Promise<CptRvuRow[]> {
   return rows.filter(isProductivityRelevantModifier26);
 }
 
-async function candidatesForAlias(alias: ExamAlias, confidence: number): Promise<MatchCandidate[]> {
+async function candidatesForAlias(alias: ExamAlias, confidence?: number): Promise<MatchCandidate[]> {
   const serializedCodes = alias.cptCodes?.length
     ? alias.cptCodes
     : [alias.modifier ? `${alias.cptCode}-${alias.modifier}` : alias.cptCode];
@@ -78,8 +88,32 @@ async function candidatesForAlias(alias: ExamAlias, confidence: number): Promise
     const { cptCode } = parseAliasCode(serialized);
     const rows = await getModifier26Rows(cptCode);
     for (const row of rows) {
-      candidates.push(rowToCandidate(row, confidence, 'alias_match'));
+      candidates.push(rowToCandidate(row, confidence ?? aliasConfidence(alias), 'alias_match'));
     }
+  }
+  return candidates;
+}
+
+async function candidatesForDictionary(rawInput: string, maxResults: number): Promise<MatchCandidate[]> {
+  const normalized = normalizeRadiologyDescription(rawInput);
+  const entries = await db.examDictionary.toArray();
+  const exactEntry = entries.find((entry) => {
+    const knownNames = [
+      entry.canonicalDisplayName,
+      ...entry.commonSynonyms,
+      ...entry.hospitalAliases,
+      ...entry.powerScribeNames,
+    ];
+    return knownNames.some((name) => normalizeRadiologyDescription(name) === normalized);
+  });
+  if (!exactEntry) return [];
+
+  const candidates: MatchCandidate[] = [];
+  for (const serialized of exactEntry.cptCodes) {
+    const { cptCode } = parseAliasCode(serialized);
+    const rows = await getModifier26Rows(cptCode);
+    for (const row of rows) candidates.push(rowToCandidate(row, 0.94, 'radiology_match'));
+    if (dedupeCandidates(candidates).length >= maxResults) break;
   }
   return candidates;
 }
@@ -156,7 +190,11 @@ export async function findMatchCandidates(
   )[0];
 
   if (exactAlias) {
-    candidates.push(...await candidatesForAlias(exactAlias, 0.98));
+    candidates.push(...await candidatesForAlias(exactAlias));
+  }
+
+  if (candidates.length < maxResults) {
+    candidates.push(...await candidatesForDictionary(trimmed, maxResults));
   }
 
   if (candidates.length < maxResults) {
@@ -192,7 +230,7 @@ export async function findMatchCandidates(
       .slice(0, maxResults);
 
     for (const { alias, score } of fuzzyAliasScored) {
-      candidates.push(...await candidatesForAlias(alias, score * 0.9));
+      candidates.push(...await candidatesForAlias(alias, Math.min(aliasConfidence(alias), score * 0.9)));
     }
   }
 
@@ -288,9 +326,63 @@ export async function searchExamLibrary(
 export interface LearnAliasPayload {
   rawText: string;
   canonicalExamName: string | null;
-  candidates: Array<{ cptCode: string; modifier: string | null; workRvu: number | null }>;
+  candidates: Array<{
+    cptCode: string;
+    modifier: string | null;
+    workRvu: number | null;
+    description?: string | null;
+    modality?: CptRvuRow['modality'] | null;
+  }>;
   source: ExamAlias['source'];
   profileId?: string | null;
+  action?: 'confirm' | 'correct' | 'reject' | 'manual_add';
+}
+
+async function upsertDictionaryEntry(payload: LearnAliasPayload, normalized: string): Promise<void> {
+  const candidates = payload.candidates.filter((candidate) => candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0);
+  if (!candidates.length) return;
+  const cptCodes = candidates.map((candidate) => `${candidate.cptCode}-26`);
+  const canonicalDisplayName = payload.canonicalExamName ?? payload.rawText;
+  const existing = (await db.examDictionary.toArray()).find((entry) =>
+    entry.normalizedKey === normalized ||
+    entry.cptCodes.sort().join('|') === [...cptCodes].sort().join('|'),
+  );
+  const now = new Date().toISOString();
+  const synonym = payload.rawText.trim();
+  if (existing) {
+    const nextPowerScribeNames = new Set(existing.powerScribeNames ?? []);
+    const nextCommonSynonyms = new Set(existing.commonSynonyms ?? []);
+    if (payload.source === 'ocr_confirmed') nextPowerScribeNames.add(synonym);
+    else nextCommonSynonyms.add(synonym);
+    await db.examDictionary.update(existing.id, {
+      canonicalDisplayName: existing.canonicalDisplayName || canonicalDisplayName,
+      commonSynonyms: Array.from(nextCommonSynonyms),
+      powerScribeNames: Array.from(nextPowerScribeNames),
+      cmsDescription: existing.cmsDescription ?? candidates.map((c) => c.description).filter(Boolean).join(' + ') || null,
+      modifier26Wrvu: candidates.reduce((sum, c) => sum + (c.workRvu ?? 0), 0),
+      modality: candidates[0].modality ?? existing.modality,
+      timesUsed: (existing.timesUsed ?? 0) + 1,
+      updatedAt: now,
+    });
+    return;
+  }
+  await db.examDictionary.add({
+    id: crypto.randomUUID(),
+    canonicalDisplayName,
+    normalizedKey: normalized,
+    commonSynonyms: payload.source === 'ocr_confirmed' ? [] : [synonym],
+    hospitalAliases: [],
+    powerScribeNames: payload.source === 'ocr_confirmed' ? [synonym] : [],
+    cmsDescription: candidates.map((c) => c.description).filter(Boolean).join(' + ') || null,
+    cptCodes,
+    modifier26Wrvu: candidates.reduce((sum, c) => sum + (c.workRvu ?? 0), 0),
+    modality: candidates[0].modality ?? 'OTHER',
+    bodyRegion: null,
+    typicalCombinations: cptCodes.length > 1 ? [cptCodes.join(' + ')] : [],
+    timesUsed: 1,
+    createdAt: now,
+    updatedAt: now,
+  });
 }
 
 export async function learnAlias(payload: LearnAliasPayload): Promise<void>;
@@ -336,8 +428,23 @@ export async function learnAlias(
   const cptCodes = candidates.map((c) => `${c.cptCode}-26`);
   const totalWorkRvu = candidates.reduce((sum, c) => sum + (c.workRvu ?? 0), 0) || null;
   const now = new Date().toISOString();
+  const action = payload.action ?? (payload.source === 'ocr_confirmed' ? 'confirm' : 'manual_add');
 
   if (existing) {
+    const existingCodes = existing.cptCodes?.length
+      ? existing.cptCodes
+      : [existing.modifier ? `${existing.cptCode}-${existing.modifier}` : existing.cptCode];
+    const changedMapping = existingCodes.sort().join('|') !== [...cptCodes].sort().join('|');
+    const confirmations = (existing.confirmations ?? existing.timesUsed ?? 0) + (action === 'reject' ? 0 : 1);
+    const corrections = (existing.corrections ?? 0) + (changedMapping || action === 'correct' ? 1 : 0);
+    const rejections = (existing.rejections ?? 0) + (action === 'reject' ? 1 : 0);
+    const nextConfidence = Math.min(
+      1,
+      Math.max(
+        0.5,
+        aliasConfidence({ ...existing, confirmations, corrections, rejections }) + (changedMapping ? -0.08 : 0.015),
+      ),
+    );
     await db.examAliases.update(existing.id, {
       aliasText: normalized,
       cptCode: primary.cptCode,
@@ -346,9 +453,14 @@ export async function learnAlias(
       totalWorkRvu,
       canonicalExamName: canonicalExamName ?? existing.canonicalExamName,
       timesUsed: existing.timesUsed + 1,
+      confirmations,
+      corrections,
+      rejections,
       lastUsedAt: now,
-      matchConfidence: Math.min(1, existing.matchConfidence + 0.02),
+      lastAdjustedAt: now,
+      matchConfidence: nextConfidence,
     });
+    await upsertDictionaryEntry(payload, normalized);
     return;
   }
 
@@ -362,10 +474,16 @@ export async function learnAlias(
     modifier: '26',
     cptCodes,
     totalWorkRvu,
-    matchConfidence: 0.90,
+    matchConfidence: action === 'manual_add' || action === 'correct' ? 0.95 : 0.90,
+    confirmations: 1,
+    corrections: action === 'correct' ? 1 : 0,
+    rejections: action === 'reject' ? 1 : 0,
+    autoApprovedCount: 0,
+    lastAdjustedAt: now,
     source: payload.source,
     timesUsed: 1,
     lastUsedAt: now,
     createdAt: now,
   });
+  await upsertDictionaryEntry(payload, normalized);
 }

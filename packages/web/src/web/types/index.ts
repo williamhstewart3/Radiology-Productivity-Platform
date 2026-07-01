@@ -145,10 +145,90 @@ export interface ExamAlias {
   /** Sum of work RVUs for all professional-component CPTs in cptCodes. */
   totalWorkRvu: number | null;
   matchConfidence: number;
+  confirmations: number;
+  corrections: number;
+  rejections: number;
+  autoApprovedCount: number;
+  lastAdjustedAt: string | null;
   source: 'manual' | 'manual_name_match' | 'ocr_confirmed' | 'seed' | 'user';
   timesUsed: number;
   lastUsedAt: string | null;
   createdAt: string;
+}
+
+export interface ExamDictionaryEntry {
+  id: string;
+  canonicalDisplayName: string;
+  normalizedKey: string;
+  commonSynonyms: string[];
+  hospitalAliases: string[];
+  powerScribeNames: string[];
+  cmsDescription: string | null;
+  cptCodes: string[];
+  modifier26Wrvu: number | null;
+  modality: Modality;
+  bodyRegion: string | null;
+  typicalCombinations: string[];
+  timesUsed: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ActiveReviewSession {
+  id: string;
+  profileId: string | null;
+  readingDate: string;
+  status: 'active' | 'finalized' | 'discarded';
+  rowsJson: string;
+  skippedRowsJson: string;
+  timelineJson: string;
+  totalExams: number;
+  confirmedWrvu: number;
+  estimatedPendingWrvu: number;
+  projectedWrvu: number;
+  needsReviewCount: number;
+  duplicateCount: number;
+  createdAt: string;
+  updatedAt: string;
+  finalizedAt: string | null;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  profileId: string | null;
+  sessionId: string | null;
+  logDate: string;
+  action: 'screenshot_imported' | 'ocr_completed' | 'auto_approved' | 'cpt_changed' | 'exam_deleted' | 'duplicate_skipped' | 'alias_learned' | 'day_finalized' | 'day_reopened' | 'manual_entry' | 'exported' | 'hospital_report_imported';
+  summary: string;
+  detailsJson: string;
+  createdAt: string;
+}
+
+export interface HospitalComparisonReport {
+  id: string;
+  profileId: string | null;
+  reportDate: string;
+  filename: string;
+  hospitalTotalWrvu: number;
+  localTotalWrvu: number;
+  hospitalExamCount: number;
+  localExamCount: number;
+  discrepanciesJson: string;
+  createdAt: string;
+}
+
+export interface MemorySuggestion {
+  id: string;
+  profileId: string | null;
+  siteId: string | null;
+  suggestionType: 'alias' | 'site_alias' | 'combo' | 'default_mapping';
+  prompt: string;
+  normalizedKey: string;
+  cptCodes: string[];
+  occurrences: number;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type MatchMethod =
@@ -242,6 +322,7 @@ export interface UserSettings {
   updatedAt: string;
   // Daily Pace settings
   dailyRvuGoal: number;
+  estimatedCompPerWrvu?: number | null;
   workdayStart: string;  // "HH:MM" 24-hr
   workdayEnd: string;    // "HH:MM" 24-hr
   breakMinutes: number;
@@ -254,6 +335,13 @@ export interface UserSettings {
    * camera-captured images. Disabling this triggers a PHI warning modal.
    */
   requireCropBeforeOcr: boolean;
+  unknownsOnlyReview: boolean;
+  reviewAutoApprovedExams: boolean;
+  reviewOnlyLowConfidence: boolean;
+  autoImportClipboardScreenshots: boolean;
+  alwaysProcessPowerScribeClipboard: boolean;
+  clearClipboardAfterImport: boolean;
+  savedPowerScribeCropRegions: Record<string, { x: number; y: number; width: number; height: number }>;
 }
 
 /** Color accent for a radiologist profile, practice, or org. */
