@@ -39,10 +39,13 @@ function isProductivityRelevantModifier26(row: CptRvuRow): boolean {
 }
 
 function rowToCandidate(
+  rawInput: string,
   row: CptRvuRow,
   confidence: number,
   method: MatchCandidate['method'],
+  source = 'CMS RVU table',
 ): MatchCandidate {
+  const normalizedText = normalizeRadiologyDescription(rawInput);
   return {
     cptCode: row.cptCode,
     modifier: row.modifier,
@@ -51,6 +54,12 @@ function rowToCandidate(
     modality: row.modality,
     confidence: Math.min(1, Math.max(0, confidence)),
     method,
+    explanation: {
+      rawText: rawInput,
+      normalizedText,
+      source,
+      detail: `${row.cptCode}${row.modifier ? `-${row.modifier}` : ''} from ${source}; CMS description: ${row.description}`,
+    },
   };
 }
 
@@ -88,7 +97,7 @@ async function candidatesForAlias(alias: ExamAlias, confidence?: number): Promis
     const { cptCode } = parseAliasCode(serialized);
     const rows = await getModifier26Rows(cptCode);
     for (const row of rows) {
-      candidates.push(rowToCandidate(row, confidence ?? aliasConfidence(alias), 'alias_match'));
+      candidates.push(rowToCandidate(alias.aliasTextRaw, row, confidence ?? aliasConfidence(alias), 'alias_match', alias.siteId ? 'site alias' : 'learned alias'));
     }
   }
   return candidates;
@@ -112,7 +121,7 @@ async function candidatesForDictionary(rawInput: string, maxResults: number): Pr
   for (const serialized of exactEntry.cptCodes) {
     const { cptCode } = parseAliasCode(serialized);
     const rows = await getModifier26Rows(cptCode);
-    for (const row of rows) candidates.push(rowToCandidate(row, 0.94, 'radiology_match'));
+    for (const row of rows) candidates.push(rowToCandidate(rawInput, row, 0.94, 'radiology_match', 'exam dictionary'));
     if (dedupeCandidates(candidates).length >= maxResults) break;
   }
   return candidates;
@@ -123,7 +132,7 @@ async function candidatesForCommonRadiologyMapping(rawInput: string): Promise<Ma
   for (const cptCode of getCommonRadiologyMappingCodes(rawInput)) {
     const rows = await getModifier26Rows(cptCode);
     for (const row of rows) {
-      candidates.push(rowToCandidate(row, 0.99, 'radiology_match'));
+      candidates.push(rowToCandidate(rawInput, row, 0.99, 'radiology_match', 'common radiology mapping'));
     }
   }
   return candidates;
@@ -164,7 +173,7 @@ export async function findMatchCandidates(
   if (canUseDirectCptMatch(rawInput, options)) {
     const directMatches = await getModifier26Rows(trimmed);
     return directMatches
-      .map((row) => rowToCandidate(row, 1.0, 'manual_cpt'))
+      .map((row) => rowToCandidate(rawInput, row, 1.0, 'manual_cpt', 'direct CPT'))
       .slice(0, maxResults);
   }
 
@@ -175,14 +184,19 @@ export async function findMatchCandidates(
   const exactKeys = new Set([normalizedInput, radiologyNormalizedKey, radiologyDescriptionKey].filter(Boolean));
 
   const allAliases = await db.examAliases.toArray();
+  const activeProfile = profileId ? await db.radiologistProfiles.get(profileId) : null;
+  const activeSiteId = activeProfile?.practiceId ?? null;
   const scopedAliases = allAliases.filter(
-    (a) => a.profileId === (profileId ?? null) || a.profileId == null,
+    (a) =>
+      (a.profileId === (profileId ?? null) || a.profileId == null) &&
+      ((a.siteId ?? null) === activeSiteId || a.siteId == null),
   );
   const sortByScope = (aliases: ExamAlias[]) =>
     [...aliases].sort((a, b) => {
-      const aOwn = a.profileId === (profileId ?? null) ? 0 : 1;
-      const bOwn = b.profileId === (profileId ?? null) ? 0 : 1;
-      return aOwn - bOwn;
+      const score = (alias: ExamAlias) =>
+        (alias.profileId === (profileId ?? null) ? 0 : 4) +
+        ((alias.siteId ?? null) === activeSiteId ? 0 : alias.siteId == null ? 2 : 6);
+      return score(a) - score(b);
     });
 
   const exactAlias = sortByScope(
@@ -211,7 +225,7 @@ export async function findMatchCandidates(
       .filter((row) => normalizeRadiologyDescription(row.description) === radiologyDescriptionKey);
 
     for (const row of exactDescriptionRows) {
-      candidates.push(rowToCandidate(row, 0.96, 'radiology_match'));
+      candidates.push(rowToCandidate(trimmed, row, 0.96, 'radiology_match', 'exact CMS description'));
       if (dedupeCandidates(candidates).length >= maxResults) break;
     }
   }
@@ -249,7 +263,7 @@ export async function findMatchCandidates(
       .slice(0, maxResults * 3);
 
     for (const { row, score } of descScored) {
-      candidates.push(rowToCandidate(row, score, 'radiology_match'));
+      candidates.push(rowToCandidate(trimmed, row, score, 'radiology_match', 'CMS fuzzy match'));
       if (dedupeCandidates(candidates).length >= maxResults) break;
     }
   }
@@ -280,7 +294,7 @@ export async function searchExamLibrary(
 
   if (CPT_CODE_PATTERN.test(trimmed)) {
     const rows = await getModifier26Rows(trimmed);
-    return rows.map((row) => rowToCandidate(row, 1, 'manual_cpt')).slice(0, maxResults);
+    return rows.map((row) => rowToCandidate(trimmed, row, 1, 'manual_cpt', 'direct CPT')).slice(0, maxResults);
   }
 
   const radiologyDescriptionKey = normalizeRadiologyDescription(trimmed);
@@ -294,7 +308,7 @@ export async function searchExamLibrary(
   const exactDescriptionCandidates = allCpt
     .filter(isProductivityRelevantModifier26)
     .filter((row) => normalizeRadiologyDescription(row.description) === radiologyDescriptionKey)
-    .map((row) => rowToCandidate(row, 0.96, 'radiology_match'));
+    .map((row) => rowToCandidate(trimmed, row, 0.96, 'radiology_match', 'exact CMS description'));
 
   const tokenCount = trimmed.split(/\s+/).length;
   const fuzzyCandidates = allCpt
@@ -317,7 +331,7 @@ export async function searchExamLibrary(
       return (b.row.workRvu ?? 0) - (a.row.workRvu ?? 0);
     })
     .slice(0, maxResults * 2)
-    .map(({ row, score }) => rowToCandidate(row, score, 'radiology_match'));
+    .map(({ row, score }) => rowToCandidate(trimmed, row, score, 'radiology_match', 'CMS fuzzy match'));
 
   return dedupeCandidates([...commonCandidates, ...exactDescriptionCandidates, ...fuzzyCandidates])
     .slice(0, maxResults);
@@ -335,6 +349,7 @@ export interface LearnAliasPayload {
   }>;
   source: ExamAlias['source'];
   profileId?: string | null;
+  siteId?: string | null;
   action?: 'confirm' | 'correct' | 'reject' | 'manual_add';
 }
 
@@ -416,12 +431,15 @@ export async function learnAlias(
   if (!candidates.length) return;
 
   const { rawText, canonicalExamName, profileId = null } = payload;
+  const profile = profileId ? await db.radiologistProfiles.get(profileId) : null;
+  const siteId = payload.siteId ?? profile?.practiceId ?? null;
   const primary = candidates[0];
   const normalized = normalizeRadiologyDescription(rawText);
   const legacyNormalized = normalizeExamText(rawText);
   const existing = (await db.examAliases.toArray())
     .find((a) => (
       a.profileId === profileId &&
+      (a.siteId ?? null) === siteId &&
       (a.aliasText === normalized || a.aliasText === legacyNormalized || normalizeRadiologyDescription(a.aliasTextRaw) === normalized)
     ));
 
@@ -447,6 +465,7 @@ export async function learnAlias(
     );
     await db.examAliases.update(existing.id, {
       aliasText: normalized,
+      siteId,
       cptCode: primary.cptCode,
       modifier: '26',
       cptCodes,
@@ -467,6 +486,7 @@ export async function learnAlias(
   await db.examAliases.add({
     id: crypto.randomUUID(),
     profileId,
+    siteId,
     aliasText: normalized,
     aliasTextRaw: rawText,
     canonicalExamName: canonicalExamName ?? null,

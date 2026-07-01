@@ -23,6 +23,7 @@ import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNorm
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import { db, ensureUserSettings } from '../db/database';
+import { recordAuditEvent } from '../utils/audit';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
 
@@ -125,6 +126,12 @@ function ExamSearchPanel({ initialQuery, onSelect, onClose }: ExamSearchPanelPro
 
 function candidateKey(candidate: MatchCandidate): string {
   return `${candidate.cptCode}-${candidate.modifier ?? ''}`;
+}
+
+function candidateExplanationText(candidate: MatchCandidate, rawText: string): string {
+  const normalized = candidate.explanation?.normalizedText ?? normalizeRadiologyDescription(rawText);
+  const source = candidate.explanation?.source ?? candidate.method.replace(/_/g, ' ');
+  return `Raw: ${rawText} | Normalized: ${normalized} | Source: ${source} | Method: ${candidate.method} | CMS: ${candidate.description}`;
 }
 
 function getSelectedCandidateIndices(row: PipelineReviewRow): number[] {
@@ -306,7 +313,7 @@ function sessionSummary(rows: PipelineReviewRow[], skippedRows: PipelineReviewRo
 }
 
 export function Import({ onImported }: ImportProps) {
-  const { activeProfile } = useProfile();
+  const { activeProfile, activePractice } = useProfile();
   const [mode, setMode]           = useState<Mode>('paste');
   const [step, setStep]           = useState<Step>('input');
   const [pasteText, setPasteText] = useState('');
@@ -469,6 +476,15 @@ export function Import({ onImported }: ImportProps) {
       const studies  = await provider.importStudies();
       const result   = await runImportPipeline(studies, logDate, activeProfile?.id);
       appendPipelineRows(result.reviewRows, result.skippedRows, `Text import processed (${studies.length} extracted)`);
+      await recordAuditEvent({
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+        action: 'ocr_completed',
+        summary: `Text/CSV import processed ${studies.length} extracted studies`,
+        detailsJson: JSON.stringify({ source: 'csv', reviewRows: result.reviewRows.length, skippedRows: result.skippedRows.length }),
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Processing failed');
     } finally {
@@ -483,8 +499,26 @@ export function Import({ onImported }: ImportProps) {
     try {
       const provider = new OCRImportProvider(ocrFile, logDate);
       const studies  = await provider.importStudies();
+      await recordAuditEvent({
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+        action: 'screenshot_imported',
+        summary: `Screenshot imported: ${ocrFile.name}`,
+        detailsJson: JSON.stringify({ filename: ocrFile.name, size: ocrFile.size }),
+      });
       const result   = await runImportPipeline(studies, logDate, activeProfile?.id);
       appendPipelineRows(result.reviewRows, result.skippedRows, `Screenshot OCR completed (${studies.length} extracted)`);
+      await recordAuditEvent({
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+        action: 'ocr_completed',
+        summary: `OCR completed ${studies.length} extracted studies`,
+        detailsJson: JSON.stringify({ reviewRows: result.reviewRows.length, skippedRows: result.skippedRows.length }),
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'OCR failed — try paste mode instead');
     } finally {
@@ -534,6 +568,15 @@ export function Import({ onImported }: ImportProps) {
           finalizedAt: new Date().toISOString(),
         });
       }
+      await recordAuditEvent({
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+        action: 'day_finalized',
+        summary: `Finalized ${result.importedCount} studies; ${result.reviewNeededCount} still marked for review`,
+        detailsJson: JSON.stringify({ imported: result.importedCount, skipped: result.skippedCount, reviewNeeded: result.reviewNeededCount }),
+      });
       setStep('done');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Import failed');
@@ -548,6 +591,15 @@ export function Import({ onImported }: ImportProps) {
       await db.activeReviewSessions.update(sessionId, {
         status: 'discarded',
         updatedAt: new Date().toISOString(),
+      });
+      await recordAuditEvent({
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+        action: 'day_reopened',
+        summary: 'Discarded active review session',
+        detailsJson: JSON.stringify({ reviewRows: reviewRows.length, skippedRows: skippedRows.length }),
       });
     }
     setSessionId(null);
@@ -655,7 +707,17 @@ export function Import({ onImported }: ImportProps) {
         })),
         source: 'user',
         profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
         action: 'correct',
+      });
+      await recordAuditEvent({
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+        action: 'cpt_changed',
+        summary: `Corrected ${aliasRow.source.examTitle} to ${selectedForAlias.map((c) => c.cptCode).join(' + ')}`,
+        detailsJson: JSON.stringify({ rawText: aliasRow.source.examTitle, selected: selectedForAlias }),
       });
     }
 
@@ -1196,6 +1258,14 @@ export function Import({ onImported }: ImportProps) {
                           {isSelected && (
                             <span className="ml-1.5 text-sky-300 text-[10px] font-semibold uppercase tracking-wide">
                               selected
+                            </span>
+                          )}
+                          <span className="mt-1 block text-[10px] leading-snug text-slate-500">
+                            {candidateExplanationText(c, row.source.examTitle)}
+                          </span>
+                          {c.confidence < 0.75 && row.candidates.length > 1 && (
+                            <span className="mt-0.5 block text-[10px] text-amber-300/80">
+                              Alternatives: {row.candidates.filter((alt, altIndex) => altIndex !== ci).slice(0, 3).map((alt) => `${alt.cptCode}${alt.modifier ? `-${alt.modifier}` : ''} ${Math.round(alt.confidence * 100)}%`).join(' | ')}
                             </span>
                           )}
                         </button>

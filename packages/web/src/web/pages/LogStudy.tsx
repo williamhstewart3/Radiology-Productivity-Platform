@@ -19,6 +19,8 @@ import { learnAlias } from '../utils/matching';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import { ManualImportProvider } from '../providers/ManualImportProvider';
+import { recordAuditEvent } from '../utils/audit';
+import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import type { MatchCandidate, StudyLog } from '../types';
 import { MODALITY_LABELS } from '../types';
 import type { DuplicateMatch, StudyCandidate } from '../utils/duplicateDetection';
@@ -28,7 +30,7 @@ interface LogStudyProps {
 }
 
 export function LogStudy({ onSaved }: LogStudyProps) {
-  const { activeProfile } = useProfile();
+  const { activeProfile, activePractice } = useProfile();
   const [examInput, setExamInput] = useState('');
   const [logDate, setLogDate] = useState(todayDateString());
   const [candidates, setCandidates] = useState<MatchCandidate[]>([]);
@@ -137,6 +139,16 @@ export function LogStudy({ onSaved }: LogStudyProps) {
         candidates: [{ cptCode: selected.cptCode, modifier: selected.modifier, workRvu: selected.workRvu }],
         source: 'manual_name_match',
         profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+      });
+      await recordAuditEvent({
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId: null,
+        logDate,
+        action: 'manual_entry',
+        summary: `Manual entry ${examInput.trim()} -> ${selected.cptCode}${selected.modifier ? `-${selected.modifier}` : ''}`,
+        detailsJson: JSON.stringify({ candidate: selected, notes: notes.trim() || null }),
       });
 
       setDupeWarning(null);
@@ -168,6 +180,12 @@ export function LogStudy({ onSaved }: LogStudyProps) {
     if (c >= 0.85) return 'bg-emerald-500/10 border-emerald-500/40';
     if (c >= 0.65) return 'bg-amber-500/10 border-amber-500/40';
     return 'bg-red-500/10 border-red-500/40';
+  };
+
+  const matchExplanationText = (candidate: MatchCandidate) => {
+    const normalized = candidate.explanation?.normalizedText ?? normalizeRadiologyDescription(examInput);
+    const source = candidate.explanation?.source ?? candidate.method.replace(/_/g, ' ');
+    return `Raw: ${examInput} | Normalized: ${normalized} | Source: ${source} | Method: ${candidate.method} | CMS: ${candidate.description}`;
   };
 
   return (
@@ -242,6 +260,12 @@ export function LogStudy({ onSaved }: LogStudyProps) {
                           )}
                         </div>
                         <p className="text-slate-300 text-xs mt-0.5 line-clamp-2">{c.description}</p>
+                        <p className="text-[10px] text-slate-500 mt-1 leading-snug">{matchExplanationText(c)}</p>
+                        {c.confidence < 0.75 && candidates.length > 1 && (
+                          <p className="text-[10px] text-amber-300/80 mt-0.5">
+                            Alternatives: {candidates.filter((alt) => alt !== c).slice(0, 3).map((alt) => `${alt.cptCode}${alt.modifier ? `-${alt.modifier}` : ''} ${Math.round(alt.confidence * 100)}%`).join(' | ')}
+                          </p>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-white font-bold text-sm">{c.workRvu?.toFixed(2) ?? 'N/A'}</p>

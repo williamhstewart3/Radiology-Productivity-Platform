@@ -10,6 +10,7 @@ import { MiniPaceWindow } from './components/MiniPaceWindow';
 import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
 import {
   Bell,
+  Bot,
   Camera,
   ChevronRight,
   ClipboardList,
@@ -38,10 +39,11 @@ import { CameraUploadPage } from './pages/CameraUploadPage';
 import { CptExplorer } from './pages/CptExplorer';
 import { Profiles } from './pages/Profiles';
 import { AdminData } from './pages/AdminData';
+import { Automation } from './pages/Automation';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
-type Tab = 'pace' | 'dashboard' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles' | 'camera' | 'explorer' | 'admin';
+type Tab = 'pace' | 'dashboard' | 'automation' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles' | 'camera' | 'explorer' | 'admin';
 
 class PageErrorBoundary extends Component<
   { children: ReactNode; tab: string },
@@ -85,6 +87,7 @@ class PageErrorBoundary extends Component<
 
 const NAV_ITEMS: { id: Tab; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'automation', label: 'Automation', icon: Bot },
   { id: 'pace',      label: 'Daily Pace', icon: Gauge },
   { id: 'log',       label: 'Log Study',  icon: ClipboardList },
   { id: 'import',    label: 'Import',     icon: UploadCloud },
@@ -223,6 +226,7 @@ function MainApp() {
               <PageErrorBoundary tab={activeTab}>
                 {activeTab === 'pace'          && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'dashboard'     && <Dashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
+                {activeTab === 'automation'    && <Automation />}
                 {activeTab === 'log'           && <LogStudy onSaved={() => setActiveTab('pace')} />}
                 {activeTab === 'import'        && <Import onImported={() => setActiveTab('pace')} />}
                 {activeTab === 'history'       && <History />}

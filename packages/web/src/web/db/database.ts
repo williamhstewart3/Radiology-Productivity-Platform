@@ -267,6 +267,33 @@ export class RvuDatabase extends Dexie {
         if (!('estimatedCompPerWrvu' in settings)) settings.estimatedCompPerWrvu = null;
       });
     });
+
+    // v14: site-scoped learning/audit metadata. Existing rows remain generic.
+    this.version(14).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, siteId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      activeReviewSessions: 'id, profileId, readingDate, status, updatedAt',
+      auditLogEntries: 'id, profileId, siteId, sessionId, logDate, action, createdAt',
+      hospitalComparisonReports: 'id, profileId, siteId, reportDate, createdAt',
+      memorySuggestions: 'id, profileId, siteId, normalizedKey, status, createdAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      trans.table('examAliases').toCollection().modify((alias) => {
+        if (!('siteId' in alias)) alias.siteId = null;
+      });
+      trans.table('auditLogEntries').toCollection().modify((entry) => {
+        if (!('siteId' in entry)) entry.siteId = null;
+      });
+      return trans.table('hospitalComparisonReports').toCollection().modify((report) => {
+        if (!('siteId' in report)) report.siteId = null;
+      });
+    });
   }
 }
 

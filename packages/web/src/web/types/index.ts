@@ -123,6 +123,8 @@ export interface ExamAlias {
   id: string;
   /** Profile this alias belongs to. null = legacy row (treated as default profile). */
   profileId: string | null;
+  /** Practice/site this alias belongs to. null = generic mapping. */
+  siteId?: string | null;
   aliasText: string;
   aliasTextRaw: string;
   /**
@@ -196,6 +198,7 @@ export interface ActiveReviewSession {
 export interface AuditLogEntry {
   id: string;
   profileId: string | null;
+  siteId?: string | null;
   sessionId: string | null;
   logDate: string;
   action: 'screenshot_imported' | 'ocr_completed' | 'auto_approved' | 'cpt_changed' | 'exam_deleted' | 'duplicate_skipped' | 'alias_learned' | 'day_finalized' | 'day_reopened' | 'manual_entry' | 'exported' | 'hospital_report_imported';
@@ -207,6 +210,7 @@ export interface AuditLogEntry {
 export interface HospitalComparisonReport {
   id: string;
   profileId: string | null;
+  siteId?: string | null;
   reportDate: string;
   filename: string;
   hospitalTotalWrvu: number;
@@ -436,6 +440,12 @@ export interface MatchCandidate {
   modality: Modality;
   confidence: number;
   method: MatchMethod;
+  explanation?: {
+    rawText: string;
+    normalizedText: string;
+    source: string;
+    detail: string;
+  };
 }
 
 export type DuplicateStatus = 'exact' | 'very_likely' | 'possible' | null;
