@@ -66,6 +66,27 @@ function isMetadataOnlyLine(text: string): boolean {
   return !hasExamContext(text) || withoutNoise.length < 3;
 }
 
+function isLikelyExamLine(text: string): boolean {
+  if (!hasExamContext(text)) return false;
+
+  const lower = text.toLowerCase();
+
+  const obviousUiNoise =
+    /\b(?:search|filter|refresh|logout|settings|preferences|dashboard|inbox|outbox|worklist|folder|sort|ascending|descending|click|button|menu|home)\b/i;
+
+  if (
+    obviousUiNoise.test(lower) &&
+    !/\b(?:ct|cta|mri?|mra|xr|x-?ray|us|ultrasound|nm|pet|fluoro|mammo|mammogram)\b/i.test(lower)
+  ) {
+    return false;
+  }
+
+  const letterCount = (text.match(/[a-z]/gi) ?? []).length;
+  if (letterCount < 3) return false;
+
+  return true;
+}
+
 export function parseOcrLines(lines: string[]): ParsedLine[] {
   return lines.map((line) => parseSingleLine(line)).filter((p): p is ParsedLine => p !== null);
 }
@@ -75,6 +96,9 @@ function parseSingleLine(rawLine: string): ParsedLine | null {
   if (trimmed.length < 3) return null;
 
   if (isMetadataOnlyLine(trimmed)) {
+    return null;
+  }
+  if (!isLikelyExamLine(trimmed)) {
     return null;
   }
 
