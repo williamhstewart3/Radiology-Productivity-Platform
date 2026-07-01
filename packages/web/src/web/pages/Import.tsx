@@ -18,7 +18,7 @@ import { theme } from '../lib/theme';
 import { OCRImportProvider } from '../providers/OCRImportProvider';
 import { CSVImportProvider } from '../providers/CSVImportProvider';
 import { runImportPipeline } from '../pipeline/importPipeline';
-import { searchExamLibrary, learnAlias } from '../utils/matching';
+import { searchExamLibrary } from '../utils/matching';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
@@ -37,6 +37,7 @@ import {
   persistActiveReviewSession,
   type TimelineEvent,
 } from '../services/reviewSessionService';
+import { rememberCorrectedExam } from '../services/memoryLearningService';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
 
@@ -598,9 +599,8 @@ export function Import({ onImported }: ImportProps) {
       const selectedForAlias = patch ? getCandidatesFromPatch(patch) : [];
       if (!selectedForAlias.length) continue;
 
-      await learnAlias({
+      await rememberCorrectedExam({
         rawText: aliasRow.source.examTitle,
-        canonicalExamName: selectedForAlias.map((c) => c.description).join(' + '),
         candidates: selectedForAlias.map((c) => ({
           cptCode: c.cptCode,
           modifier: c.modifier,
@@ -608,19 +608,10 @@ export function Import({ onImported }: ImportProps) {
           description: c.description,
           modality: c.modality,
         })),
-        source: 'user',
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        action: 'correct',
-      });
-      await recordAuditEvent({
         profileId: activeProfile?.id ?? null,
         siteId: activePractice?.id ?? null,
         sessionId,
         logDate,
-        action: 'cpt_changed',
-        summary: `Corrected ${aliasRow.source.examTitle} to ${selectedForAlias.map((c) => c.cptCode).join(' + ')}`,
-        detailsJson: JSON.stringify({ rawText: aliasRow.source.examTitle, selected: selectedForAlias }),
       });
     }
 

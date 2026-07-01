@@ -5,7 +5,7 @@ import { db } from '../db/database';
 import { supabasePersistence } from '../services/supabasePersistence';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString, computePeriodTotals } from '../utils/calculations';
-import { learnAlias } from '../utils/matching';
+import { rememberExamMapping } from '../services/memoryLearningService';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import type { StudyLog, Modality } from '../types';
 import { MODALITY_LABELS } from '../types';
@@ -173,7 +173,7 @@ export function History() {
     await supabasePersistence.updateStudyLogDisplayTitle(ids, title, normalizedTitle);
 
     const aliasCandidates = relatedLogs.length > 0 ? relatedLogs : [log];
-    await learnAlias({
+    await rememberExamMapping({
       rawText: log.examNameRaw,
       canonicalExamName: title,
       candidates: aliasCandidates
@@ -185,6 +185,15 @@ export function History() {
         })),
       source: 'user',
       profileId: activeProfile?.id ?? null,
+      siteId: null,
+      sessionId: log.sessionId,
+      logDate: log.logDate,
+      action: 'correct',
+      audit: {
+        action: 'cpt_changed',
+        summary: `Renamed ${log.examNameRaw} to ${title}`,
+        details: { logIds: ids, normalizedTitle },
+      },
     });
 
     setEditingLogId(null);

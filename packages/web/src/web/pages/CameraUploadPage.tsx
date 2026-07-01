@@ -22,11 +22,12 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { theme } from '../lib/theme';
 import { OCRImportProvider } from '../providers/OCRImportProvider';
 import { runImportPipeline, commitPipelineResults } from '../pipeline/importPipeline';
-import { searchExamLibrary, learnAlias } from '../utils/matching';
+import { searchExamLibrary } from '../utils/matching';
 import { useProfile } from '../hooks/useProfile';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { todayDateString } from '../utils/calculations';
 import { db } from '../db/database';
+import { rememberCorrectedExam } from '../services/memoryLearningService';
 import type { UserSettings } from '../types';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
@@ -487,12 +488,13 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
       (c) => !(c.cptCode === candidate.cptCode && c.modifier === candidate.modifier),
     )];
     updateRow(tempId, { candidates: updated, selectedCandidateIndex: 0, needsReview: false });
-    await learnAlias({
+    await rememberCorrectedExam({
       rawText: row.source.examTitle,
-      canonicalExamName: candidate.description,
-      candidates: [{ cptCode: candidate.cptCode, modifier: candidate.modifier, workRvu: candidate.workRvu }],
-      source: 'user',
+      candidates: [candidate],
       profileId: activeProfile?.id ?? null,
+      siteId: null,
+      sessionId: null,
+      logDate,
     });
     setSearchPanelTempId(null);
   }

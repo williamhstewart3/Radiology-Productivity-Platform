@@ -4,8 +4,9 @@ import { db } from '../db/database';
 import { useOrg } from '../hooks/useOrg';
 import { todayDateString } from '../utils/calculations';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
-import { learnAlias, searchExamLibrary } from '../utils/matching';
+import { searchExamLibrary } from '../utils/matching';
 import { recordAuditEvent } from '../utils/audit';
+import { rememberBulkCorrection, rememberMemorySuggestionDecision } from '../services/memoryLearningService';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { AuditLogEntry, HospitalComparisonReport, MemorySuggestion, StudyLog, UserSettings } from '../types';
 
@@ -297,32 +298,31 @@ export function Automation() {
 
   async function resolveSuggestion(suggestion: MemorySuggestion, status: 'approved' | 'rejected') {
     await db.memorySuggestions.update(suggestion.id, { status, updatedAt: new Date().toISOString() });
+    let rawText: string | null = null;
+    let canonicalExamName: string | null = null;
+    let candidates: Array<{ cptCode: string; modifier: string | null; workRvu: number | null; description?: string | null; modality?: StudyLog['modality'] | null }> = [];
     if (status === 'approved') {
       const sourceLog = logs.find((log) => normalizeRadiologyDescription(localTitle(log)) === suggestion.normalizedKey);
       if (sourceLog) {
-        await learnAlias({
-          rawText: sourceLog.examNameRaw,
-          canonicalExamName: localTitle(sourceLog),
-          candidates: suggestion.cptCodes.map((serialized) => {
-            const [cptCode, modifier] = serialized.split('-');
-            const matchingLog = logs.find((log) => log.cptCode === cptCode);
-            return { cptCode, modifier: modifier ?? '26', workRvu: matchingLog?.workRvu ?? null, description: matchingLog?.cmsDescription, modality: matchingLog?.modality };
-          }),
-          source: 'user',
-          profileId,
-          siteId,
-          action: 'confirm',
+        rawText = sourceLog.examNameRaw;
+        canonicalExamName = localTitle(sourceLog);
+        candidates = suggestion.cptCodes.map((serialized) => {
+          const [cptCode, modifier] = serialized.split('-');
+          const matchingLog = logs.find((log) => log.cptCode === cptCode);
+          return { cptCode, modifier: modifier ?? '26', workRvu: matchingLog?.workRvu ?? null, description: matchingLog?.cmsDescription, modality: matchingLog?.modality };
         });
       }
     }
-    await recordAuditEvent({
+    await rememberMemorySuggestionDecision({
       profileId,
       siteId,
       sessionId: null,
       logDate: compareDate,
-      action: status === 'approved' ? 'alias_learned' : 'cpt_changed',
-      summary: `${status === 'approved' ? 'Approved' : 'Rejected'} memory suggestion: ${suggestion.prompt}`,
-      detailsJson: JSON.stringify(suggestion),
+      suggestion,
+      status,
+      rawText,
+      canonicalExamName,
+      candidates,
     });
   }
 
@@ -357,23 +357,17 @@ export function Automation() {
 
     const targetRows = activeRows.filter((row) => normalizeRadiologyDescription(row.source.examTitle) === key);
     const scope = correction?.scope ?? 'site';
-    await learnAlias({
+    await rememberBulkCorrection({
       rawText: targetRows[0]?.source.examTitle ?? key,
-      canonicalExamName: selected.description,
-      candidates: [{ cptCode: selected.cptCode, modifier: selected.modifier ?? '26', workRvu: selected.workRvu ?? null, description: selected.description, modality: selected.modality }],
-      source: 'user',
+      candidate: selected,
+      occurrenceCount: targetRows.length,
+      normalizedKey: key,
+      scope,
+      rowIds: targetRows.map((row) => row.tempId),
       profileId: scope === 'future' ? null : profileId,
       siteId: scope === 'site' ? siteId : null,
-      action: 'correct',
-    });
-    await recordAuditEvent({
-      profileId,
-      siteId,
       sessionId: activeSession.id,
       logDate: activeSession.readingDate,
-      action: 'alias_learned',
-      summary: `Bulk corrected ${targetRows.length} repeated OCR rows to ${selected.cptCode}${selected.modifier ? `-${selected.modifier}` : ''}`,
-      detailsJson: JSON.stringify({ normalizedKey: key, scope, selected, rows: targetRows.map((row) => row.tempId) }),
     });
   }
 

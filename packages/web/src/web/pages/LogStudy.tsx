@@ -15,11 +15,10 @@ import { theme } from '../lib/theme';
 import { findMatchCandidates } from '../utils/matching';
 import { checkOneDuplicate, buildFingerprint } from '../utils/duplicateDetection';
 import { db } from '../db/database';
-import { learnAlias } from '../utils/matching';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import { ManualImportProvider } from '../providers/ManualImportProvider';
-import { recordAuditEvent } from '../utils/audit';
+import { rememberManualEntry } from '../services/memoryLearningService';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import type { MatchCandidate, StudyLog } from '../types';
 import { MODALITY_LABELS } from '../types';
@@ -133,22 +132,14 @@ export function LogStudy({ onSaved }: LogStudyProps) {
       };
 
       await db.studyLogs.add(log);
-      await learnAlias({
+      await rememberManualEntry({
         rawText: examInput.trim(),
-        canonicalExamName: selected.description,
-        candidates: [{ cptCode: selected.cptCode, modifier: selected.modifier, workRvu: selected.workRvu }],
-        source: 'manual_name_match',
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-      });
-      await recordAuditEvent({
+        candidate: selected,
+        notes: notes.trim() || null,
         profileId: activeProfile?.id ?? null,
         siteId: activePractice?.id ?? null,
         sessionId: null,
         logDate,
-        action: 'manual_entry',
-        summary: `Manual entry ${examInput.trim()} -> ${selected.cptCode}${selected.modifier ? `-${selected.modifier}` : ''}`,
-        detailsJson: JSON.stringify({ candidate: selected, notes: notes.trim() || null }),
       });
 
       setDupeWarning(null);
