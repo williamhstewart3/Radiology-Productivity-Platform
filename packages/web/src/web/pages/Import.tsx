@@ -300,7 +300,7 @@ export function Import({ onImported }: ImportProps) {
       if (Array.isArray(rows) && rows.length > 0) {
         setReviewRows(rows);
         setSkippedRows([]);
-        setLogDate(rows[0]?.source.studyDate ?? todayDateString());
+        setLogDate(rows[0]?.source.modifiedDate ?? rows[0]?.source.studyDate ?? todayDateString());
         setStep('review');
       }
     } finally {
@@ -907,9 +907,9 @@ export function Import({ onImported }: ImportProps) {
                     )}
                     {/* Date/time row with source confidence indicator */}
                     <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                      {row.source.studyTime ? (
+                      {row.source.modifiedDateTime || row.source.studyTime ? (
                         <span className="text-xs font-mono text-slate-300">
-                          {new Date(row.source.studyTime).toLocaleString('en-US', {
+                          Read {new Date(row.source.modifiedDateTime ?? row.source.studyTime ?? '').toLocaleString('en-US', {
                             month: 'numeric', day: 'numeric',
                             hour: 'numeric', minute: '2-digit', hour12: true,
                           })}
@@ -921,6 +921,13 @@ export function Import({ onImported }: ImportProps) {
                           })}
                         </span>
                       ) : null}
+                      {row.source.studyDate && row.source.studyDate !== (row.source.modifiedDate ?? row.source.modifiedDateTime?.slice(0, 10)) && (
+                        <span className="text-xs font-mono text-slate-500">
+                          Exam {new Date(row.source.studyDate + 'T12:00:00').toLocaleDateString('en-US', {
+                            month: 'numeric', day: 'numeric', year: 'numeric',
+                          })}
+                        </span>
+                      )}
                       {/* Source confidence badge */}
                       {row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) >= 1.0 ? (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 font-medium">

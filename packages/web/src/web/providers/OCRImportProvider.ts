@@ -15,7 +15,13 @@
 
 import { parseOcrLines } from '../utils/powerScribeParser';
 import { getDefaultOcrProvider } from '../utils/ocrProvider';
+import { cropImageBlob, DEFAULT_POWERSCRIBE_STUDY_LIST_CROP, type RelativeCropRect } from '../utils/imageCrop';
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
+
+export interface OCRImportOptions {
+  cropBeforeOcr?: boolean;
+  cropRegion?: RelativeCropRect | null;
+}
 
 export class OCRImportProvider implements ImportProvider {
   readonly name = 'OCR Screenshot';
@@ -23,30 +29,35 @@ export class OCRImportProvider implements ImportProvider {
 
   private file: File | Blob;
   private studyDate: string;
+  private options: OCRImportOptions;
 
-  constructor(file: File | Blob, studyDate: string) {
+  constructor(file: File | Blob, studyDate: string, options: OCRImportOptions = {}) {
     this.file = file;
     this.studyDate = studyDate;
+    this.options = options;
   }
 
   async importStudies(): Promise<ImportedStudy[]> {
     const provider = getDefaultOcrProvider();
-    const result = await provider.extractText(this.file);
+    const imageForOcr = this.options.cropBeforeOcr === false
+      ? this.file
+      : await cropImageBlob(this.file, this.options.cropRegion ?? DEFAULT_POWERSCRIBE_STUDY_LIST_CROP);
+    const result = await provider.extractText(imageForOcr);
     const parsed = parseOcrLines(result.lines);
     const now = new Date().toISOString();
 
     return parsed.map((p) => {
-      // If OCR found a date in this line, use it as the effective study date.
-      // Otherwise fall back to the user-selected date passed to the constructor.
-      const effectiveDate = p.studyDate ?? this.studyDate;
+      const productivityDate = p.modifiedDate ?? p.studyDate ?? this.studyDate;
 
       return {
         examTitle: p.examName,
         canonicalExam: null,
         cpt: null,
         workRvu: null,
-        studyDate: effectiveDate,
-        studyTime: p.studyDateTime,
+        studyDate: p.studyDate ?? productivityDate,
+        studyTime: p.modifiedDateTime ?? p.studyDateTime,
+        modifiedDate: p.modifiedDate ?? productivityDate,
+        modifiedDateTime: p.modifiedDateTime ?? p.studyDateTime,
         modality: null,
         accessionNumber: p.accessionNumber,
         patientMRN: null,

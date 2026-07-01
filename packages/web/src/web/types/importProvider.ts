@@ -67,14 +67,26 @@ export interface ImportedStudy {
    */
   workRvu: number | null;
 
-  /** ISO date string (YYYY-MM-DD) for the calendar day the study was read. */
+  /** ISO date string (YYYY-MM-DD) for the performed exam date. */
   studyDate: string;
 
   /**
-   * Full ISO 8601 datetime if the source provides study time.
-   * Used for time-bucket duplicate detection.
+   * Full ISO 8601 datetime for the performed exam if the source provides it.
+   * OCR often only provides the date, so this may be null.
    */
   studyTime: string | null;
+
+  /**
+   * ISO date string (YYYY-MM-DD) for when the exam was read/signed/modified.
+   * This is the productivity date; if omitted, the pipeline falls back to studyDate.
+   */
+  modifiedDate?: string | null;
+
+  /**
+   * Full ISO 8601 datetime for when the exam was read/signed/modified.
+   * Used for productivity timestamping and preferred duplicate detection.
+   */
+  modifiedDateTime?: string | null;
 
   /**
    * Modality if known from the source. If null, the pipeline infers from

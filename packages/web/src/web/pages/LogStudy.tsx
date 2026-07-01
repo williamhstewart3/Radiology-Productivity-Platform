@@ -77,6 +77,7 @@ export function LogStudy({ onSaved }: LogStudyProps) {
           modifier: selected.modifier,
           logDate,
           studyDateTime: null,
+          studyDate: logDate,
           accessionNumber: null,
           modality: selected.modality,
         };

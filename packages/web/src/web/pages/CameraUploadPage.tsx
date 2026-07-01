@@ -427,7 +427,7 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
         siteId: null,
         sessionId: null,
         logDate,
-      });
+      }, { cropAlreadyApplied: Boolean(previewUrl) });
       setReviewRows(processed.result.reviewRows);
       setSkippedRows(processed.result.skippedRows);
 

@@ -50,6 +50,7 @@ export interface StudyCandidate {
   modifier: string | null;
   logDate: string;              // YYYY-MM-DD
   studyDateTime: string | null; // ISO 8601 or null
+  studyDate: string | null;
   accessionNumber: string | null;
   modality: string | null;
 }
@@ -128,6 +129,15 @@ function isoToMinutes(iso: string | null): number | null {
   }
 }
 
+function isoToDate(iso: string | null): string | null {
+  return iso?.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
+}
+
+function sameMinute(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  return isoToDate(a) === isoToDate(b) && isoToMinuteBucket(a) === isoToMinuteBucket(b);
+}
+
 // ─── Core duplicate check ────────────────────────────────────────────────────
 
 /**
@@ -184,6 +194,25 @@ export async function checkOneDuplicate(
       };
     }
 
+    const normLog = normalizeExamText(log.examNameRaw);
+    if (normCandidate && normLog === normCandidate) {
+      if (sameMinute(candidate.studyDateTime, log.studyDateTime)) {
+        return {
+          confidence: 'exact',
+          existingLog: log,
+          reason: 'Same exam title and modified timestamp',
+        };
+      }
+
+      if (candidate.studyDate && log.studyDate && candidate.studyDate === log.studyDate) {
+        return {
+          confidence: 'possible',
+          existingLog: log,
+          reason: 'Same exam title and performed exam date',
+        };
+      }
+    }
+
     // ── Tiers 2 & 3: require same CPT and same date ────────────────────
     if (!candidate.cptCode || log.cptCode !== candidate.cptCode) continue;
     if (log.logDate !== candidate.logDate) continue;
@@ -213,7 +242,6 @@ export async function checkOneDuplicate(
 
     // ── Tier 3: possible — similar exam name + same CPT, no time ──────
     if (!candidateMinutes || !logMinutes) {
-      const normLog = normalizeExamText(log.examNameRaw);
       // Simple token overlap check — heavy fuzzy match not needed here,
       // we already know CPT matches
       const tokensC = new Set(normCandidate.split(' ').filter(Boolean));
@@ -246,7 +274,13 @@ export async function checkBatchDuplicates(
   candidates: StudyCandidate[],
   logDate: string,
 ): Promise<DuplicateCheckResult[]> {
-  const candidateDates = [...new Set(candidates.map((c) => c.logDate || logDate))];
+  const candidateDates = [
+    ...new Set(
+      candidates
+        .flatMap((c) => [c.logDate || logDate, c.studyDate])
+        .filter((date): date is string => Boolean(date)),
+    ),
+  ];
   const logsByDate = new Map<string, StudyLog[]>();
   for (const date of candidateDates) {
     logsByDate.set(
@@ -286,7 +320,7 @@ export async function checkBatchDuplicates(
             cptCode: batchPrior.cptCode,
             logDate: batchPrior.logDate,
             studyDateTime: batchPrior.studyDateTime,
-            studyDate: batchPrior.logDate,
+            studyDate: batchPrior.studyDate ?? batchPrior.logDate,
             dateTimeConfidence: batchPrior.studyDateTime ? 1 : 0,
             dateTimeSource: batchPrior.studyDateTime ? 'ocr' : 'import_default',
             accessionNumber: batchPrior.accessionNumber,
@@ -312,10 +346,15 @@ export async function checkBatchDuplicates(
 
     batchSeen.set(fp, candidate);
 
-    const match = await checkOneDuplicate(
-      candidate,
-      logsByDate.get(candidate.logDate || logDate) ?? [],
-    );
+    const candidateLogDate = candidate.logDate || logDate;
+    const existingLogs = [
+      ...(logsByDate.get(candidateLogDate) ?? []),
+      ...(candidate.studyDate && candidate.studyDate !== candidateLogDate
+        ? logsByDate.get(candidate.studyDate) ?? []
+        : []),
+    ];
+
+    const match = await checkOneDuplicate(candidate, existingLogs);
     results.push({ candidate, match });
   }
 

@@ -94,8 +94,9 @@ export async function runImportPipeline(
     examNameRaw: study.examTitle,
     cptCode: study.cpt ?? candidates[0]?.cptCode ?? null,
     modifier: candidates[0]?.modifier ?? null,
-    logDate: study.studyDate || logDate,
-    studyDateTime: study.studyTime,
+    logDate: study.modifiedDate ?? study.modifiedDateTime?.slice(0, 10) ?? study.studyDate ?? logDate,
+    studyDateTime: study.modifiedDateTime ?? study.studyTime,
+    studyDate: study.studyDate ?? null,
     accessionNumber: study.accessionNumber,
     modality: study.modality ?? candidates[0]?.modality ?? null,
   }));
@@ -176,7 +177,9 @@ export async function commitPipelineResults(
     const displayTitle = (row.displayTitle ?? study.examTitle).trim() || study.examTitle;
     const normalizedTitle = normalizeRadiologyDescription(displayTitle || study.examTitle);
     const cmsDescription = cmsDescriptionsFor(selectedCandidates) || null;
-    const effectiveDate = study.studyDate || logDate;
+    const performedDate = study.studyDate || logDate;
+    const modifiedDateTime = study.modifiedDateTime ?? study.studyTime;
+    const productivityDate = study.modifiedDate ?? modifiedDateTime?.slice(0, 10) ?? performedDate;
     const rowSessionId = crypto.randomUUID();
     let rowCommitted = false;
     let rowNeedsReview = false;
@@ -185,8 +188,8 @@ export async function commitPipelineResults(
       const fingerprint = buildFingerprint(
         study.examTitle,
         cand.cptCode,
-        effectiveDate,
-        study.studyTime,
+        productivityDate,
+        modifiedDateTime,
         study.accessionNumber,
         cand.modality,
       );
@@ -199,14 +202,14 @@ export async function commitPipelineResults(
         row.needsReview ||
         row.duplicateStatus === 'possible';
 
-      const studyDate = study.studyDate || effectiveDate;
-      const logDateFinal = (study.dateTimeConfidence ?? 0) > 0 ? studyDate : effectiveDate;
+      const studyDate = performedDate;
+      const logDateFinal = productivityDate;
 
       const log: StudyLog = {
         id: crypto.randomUUID(),
         profileId: profileId ?? null,
         logDate: logDateFinal,
-        studyDateTime: study.studyTime,
+        studyDateTime: modifiedDateTime,
         studyDate,
         dateTimeConfidence: study.dateTimeConfidence ?? 0,
         dateTimeSource: study.dateTimeSource ?? 'import_default',

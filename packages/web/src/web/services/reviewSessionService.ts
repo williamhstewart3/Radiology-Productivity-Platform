@@ -42,7 +42,8 @@ export function normalizedExamKey(row: PipelineReviewRow): string {
 export function reviewSessionRowKey(row: PipelineReviewRow): string {
   return [
     normalizedExamKey(row),
-    row.source.studyTime ?? '',
+    row.source.modifiedDateTime ?? row.source.studyTime ?? '',
+    row.source.modifiedDate ?? '',
     row.source.studyDate ?? '',
     row.source.accessionNumber ?? '',
   ].join('|');

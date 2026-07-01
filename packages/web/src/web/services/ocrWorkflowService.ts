@@ -2,6 +2,7 @@ import { CSVImportProvider } from '../providers/CSVImportProvider';
 import { OCRImportProvider } from '../providers/OCRImportProvider';
 import { runImportPipeline, type PipelineResult } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
+import { ensureUserSettings } from '../db/database';
 import type { ImportProvider } from '../types/importProvider';
 
 interface WorkflowContext {
@@ -59,8 +60,10 @@ export async function processTextImport(
 export async function processOcrImport(
   source: Blob,
   context: WorkflowContext,
-  metadata?: { filename?: string; size?: number | null },
+  metadata?: { filename?: string; size?: number | null; cropAlreadyApplied?: boolean },
 ): Promise<ProcessedImportResult> {
+  const settings = await ensureUserSettings();
+  const savedCrop = settings.savedPowerScribeCropRegions?.default ?? null;
   if (metadata?.filename) {
     await recordAuditEvent({
       profileId: context.profileId,
@@ -74,7 +77,17 @@ export async function processOcrImport(
   }
 
   const processed = await processProvider(
-    new OCRImportProvider(source, context.logDate),
+    new OCRImportProvider(source, context.logDate, {
+      cropBeforeOcr: !metadata?.cropAlreadyApplied && settings.requireCropBeforeOcr !== false,
+      cropRegion: savedCrop
+        ? {
+            x: savedCrop.x,
+            y: savedCrop.y,
+            width: savedCrop.width,
+            height: savedCrop.height,
+          }
+        : null,
+    }),
     context,
     (count) => `Screenshot OCR completed (${count} extracted)`,
   );

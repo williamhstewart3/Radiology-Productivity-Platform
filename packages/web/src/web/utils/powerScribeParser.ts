@@ -6,13 +6,15 @@
  * saved (see the review table requirement).
  */
 
-import { parseDateTimeFromOcr } from './studyDateParser';
+import { parseDateTimeFromOcr, parseDateTimeMatchesFromOcr } from './studyDateParser';
 
 export interface ParsedLine {
   rawText: string;
   examName: string;
   studyDateTime: string | null;
   studyDate: string | null;
+  modifiedDateTime: string | null;
+  modifiedDate: string | null;
   accessionNumber: string | null;
   /** 0.0–1.0 confidence in the extracted date/time */
   dateTimeConfidence: number;
@@ -105,10 +107,17 @@ function parseSingleLine(rawLine: string): ParsedLine | null {
   let working = trimmed;
 
   // ── Extract date/time using the dedicated parser ──────────────────────────
-  const dtResult = parseDateTimeFromOcr(working);
+  const dateMatches = parseDateTimeMatchesFromOcr(working);
+  const dtResult = dateMatches[0] ?? parseDateTimeFromOcr(working);
+  const modifiedResult =
+    [...dateMatches].reverse().find((match) => Boolean(match.studyDateTime)) ??
+    dateMatches[dateMatches.length - 1] ??
+    dtResult;
   const studyDateTime = dtResult?.studyDateTime ?? null;
   const studyDate = dtResult?.studyDate ?? null;
-  const dateTimeConfidence = dtResult?.confidence ?? 0;
+  const modifiedDateTime = modifiedResult?.studyDateTime ?? null;
+  const modifiedDate = modifiedResult?.studyDate ?? null;
+  const dateTimeConfidence = modifiedResult?.confidence ?? dtResult?.confidence ?? 0;
 
   // Strip all date/time tokens from the working string so they don't land
   // in the exam name
@@ -138,5 +147,14 @@ function parseSingleLine(rawLine: string): ParsedLine | null {
   const examName = working.replace(/\s{2,}/g, ' ').trim();
   if (examName.length < 2) return null;
 
-  return { rawText: trimmed, examName, studyDateTime, studyDate, accessionNumber, dateTimeConfidence };
+  return {
+    rawText: trimmed,
+    examName,
+    studyDateTime,
+    studyDate,
+    modifiedDateTime,
+    modifiedDate,
+    accessionNumber,
+    dateTimeConfidence,
+  };
 }

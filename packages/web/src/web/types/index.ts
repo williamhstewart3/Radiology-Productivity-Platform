@@ -251,8 +251,8 @@ export interface StudyLog {
   id: string;
   /** Profile this log belongs to. null = legacy row (treated as default profile). */
   profileId: string | null;
-  logDate: string; // YYYY-MM-DD, local calendar day (= studyDate when OCR-confirmed)
-  studyDateTime: string | null; // Full ISO 8601 datetime if known, else null
+  logDate: string; // YYYY-MM-DD productivity day, based on Modified/read date when known
+  studyDateTime: string | null; // Modified/read ISO 8601 datetime if known, else null
   /**
    * YYYY-MM-DD extracted from OCR or source data — distinct from logDate so
    * we can show it was OCR-confirmed vs just the import day.

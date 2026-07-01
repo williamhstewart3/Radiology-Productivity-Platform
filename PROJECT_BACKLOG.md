@@ -7,6 +7,8 @@
 - [x] Extract review session service
 - [x] Extract memory learning service
 - [x] Improve PowerScribe OCR line filtering
+- [x] Auto-crop PowerScribe screenshots before OCR
+- [x] Use Modified Date/Time as OCR productivity timestamp while preserving Exam Date
 
 ---
 
@@ -14,9 +16,9 @@
 
 ## High Priority
 
-- [ ] Auto-crop PowerScribe screenshots before OCR
-- [ ] Restrict OCR to the PowerScribe study list region
-- [ ] Ignore dates, timestamps, and UI text before parsing
+- [x] Auto-crop PowerScribe screenshots before OCR
+- [x] Restrict OCR to the PowerScribe study list region
+- [x] Ignore dates, timestamps, and UI text before parsing
 - [ ] Save OCR confidence per study
 - [ ] Bulk approve high-confidence studies
 - [ ] Unknowns-only review mode

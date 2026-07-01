@@ -36,6 +36,12 @@ export interface ParsedDateTime {
   matchedPattern: string;
 }
 
+export interface ParsedDateTimeMatch extends ParsedDateTime {
+  text: string;
+  index: number;
+  endIndex: number;
+}
+
 // ─── Pattern registry ────────────────────────────────────────────────────────
 
 // M/D/YY or MM/DD/YYYY with optional H:MM or HH:MM and AM/PM
@@ -52,6 +58,53 @@ const ISO_DATE_ONLY = /\b(\d{4})-(\d{2})-(\d{2})\b/;
 const ABBREV_MONTH = /\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:,?\s+(\d{4}))?\b/i;
 // "Today" / "Yesterday" relative markers
 const RELATIVE_DATE = /\b(Today|Yesterday)\b/i;
+
+const ORDERED_DATE_PATTERNS: Array<{ pattern: RegExp; parse: (match: RegExpMatchArray) => ParsedDateTime | null }> = [
+  {
+    pattern: /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|am|pm)?\b/g,
+    parse: (match) => {
+      const [, mStr, dStr, yStr, hStr, minStr, ampm] = match;
+      const parsed = buildUsDateTime(mStr, dStr, yStr, hStr, minStr, ampm ?? null);
+      return parsed ? { ...parsed, matchedPattern: 'US_DATE_TIME' } : null;
+    },
+  },
+  {
+    pattern: /\b(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::\d{2})?\b/g,
+    parse: (match) => {
+      const [, yStr, mStr, dStr, hStr, minStr] = match;
+      const parsed = buildIsoDateTime(yStr, mStr, dStr, hStr, minStr);
+      return parsed ? { ...parsed, matchedPattern: 'ISO_DATE_TIME' } : null;
+    },
+  },
+  {
+    pattern: /\b(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|am|pm)?\b/g,
+    parse: (match) => {
+      const [, mStr, dStr, yStr, hStr, minStr, ampm] = match;
+      const parsed = buildUsDateTime(mStr, dStr, yStr, hStr, minStr, ampm ?? null);
+      return parsed ? { ...parsed, matchedPattern: 'US_DASH_DATE_TIME' } : null;
+    },
+  },
+  {
+    pattern: /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/g,
+    parse: (match) => {
+      const [, mStr, dStr, yStr] = match;
+      const studyDate = buildUsDate(mStr, dStr, yStr);
+      return studyDate
+        ? { studyDateTime: null, studyDate, studyTime: null, confidence: 0.85, matchedPattern: 'US_DATE_ONLY' }
+        : null;
+    },
+  },
+  {
+    pattern: /\b(\d{4})-(\d{2})-(\d{2})\b/g,
+    parse: (match) => {
+      const [, yStr, mStr, dStr] = match;
+      const studyDate = buildIsoDate(yStr, mStr, dStr);
+      return studyDate
+        ? { studyDateTime: null, studyDate, studyTime: null, confidence: 0.85, matchedPattern: 'ISO_DATE_ONLY' }
+        : null;
+    },
+  },
+];
 
 // ─── Core parser ──────────────────────────────────────────────────────────────
 
@@ -149,6 +202,36 @@ export function parseDateTimeFromOcr(text: string): ParsedDateTime | null {
   }
 
   return null;
+}
+
+function overlapsExisting(match: ParsedDateTimeMatch, matches: ParsedDateTimeMatch[]): boolean {
+  return matches.some((existing) => match.index < existing.endIndex && match.endIndex > existing.index);
+}
+
+export function parseDateTimeMatchesFromOcr(text: string): ParsedDateTimeMatch[] {
+  if (!text || text.trim().length < 3) return [];
+
+  const matches: ParsedDateTimeMatch[] = [];
+
+  for (const { pattern, parse } of ORDERED_DATE_PATTERNS) {
+    pattern.lastIndex = 0;
+    for (const match of text.matchAll(pattern)) {
+      const index = match.index ?? 0;
+      const candidate = parse(match);
+      if (!candidate) continue;
+      const withRange = {
+        ...candidate,
+        text: match[0],
+        index,
+        endIndex: index + match[0].length,
+      };
+      if (!overlapsExisting(withRange, matches)) {
+        matches.push(withRange);
+      }
+    }
+  }
+
+  return matches.sort((a, b) => a.index - b.index);
 }
 
 /**
