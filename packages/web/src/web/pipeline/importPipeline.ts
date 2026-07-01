@@ -134,7 +134,7 @@ export async function runImportPipeline(
       selectedCandidateIndex: selectedIndex,
       selectedCandidateIndices: selectedIndex === null ? [] : [selectedIndex],
       displayTitle: study.examTitle,
-      needsReview: !autoAccept && Boolean(reviewReason ?? candidates.length === 0 || !top || top.confidence < 0.75),
+      needsReview: !autoAccept && Boolean(reviewReason ?? (candidates.length === 0 || !top || top.confidence < 0.75)),
       autoApproved: autoAccept,
       autoApprovalLevel,
       reviewReason,

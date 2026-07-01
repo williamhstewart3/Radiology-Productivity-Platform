@@ -358,7 +358,7 @@ async function upsertDictionaryEntry(payload: LearnAliasPayload, normalized: str
       canonicalDisplayName: existing.canonicalDisplayName || canonicalDisplayName,
       commonSynonyms: Array.from(nextCommonSynonyms),
       powerScribeNames: Array.from(nextPowerScribeNames),
-      cmsDescription: existing.cmsDescription ?? candidates.map((c) => c.description).filter(Boolean).join(' + ') || null,
+      cmsDescription: existing.cmsDescription ?? (candidates.map((c) => c.description).filter(Boolean).join(' + ') || null),
       modifier26Wrvu: candidates.reduce((sum, c) => sum + (c.workRvu ?? 0), 0),
       modality: candidates[0].modality ?? existing.modality,
       timesUsed: (existing.timesUsed ?? 0) + 1,
