@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { db } from '../db/database';
 import { buildSeedCptRows } from '../data/seedCptData';
+import { ensureCuratedRadiologyDictionarySeed } from '../data/radiologyExamDictionarySeed';
 import { persistence } from '../services/persistence';
 import { supabasePersistence } from '../services/supabasePersistence';
 
@@ -33,6 +34,8 @@ export function useAppInitialization() {
           const seedRows = buildSeedCptRows();
           await db.cptRvuTable.bulkPut(seedRows);
         }
+
+        await ensureCuratedRadiologyDictionarySeed();
 
         if (mounted) setIsReady(true);
       } catch (err) {
