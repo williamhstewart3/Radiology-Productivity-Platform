@@ -17,13 +17,26 @@ import { useState, useRef, useEffect } from 'react';
 import { theme } from '../lib/theme';
 import { OCRImportProvider } from '../providers/OCRImportProvider';
 import { CSVImportProvider } from '../providers/CSVImportProvider';
-import { runImportPipeline, commitPipelineResults } from '../pipeline/importPipeline';
+import { runImportPipeline } from '../pipeline/importPipeline';
 import { searchExamLibrary, learnAlias } from '../utils/matching';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import { db, ensureUserSettings } from '../db/database';
 import { recordAuditEvent } from '../utils/audit';
+import {
+  createTimelineEvent,
+  discardActiveReviewSession,
+  finalizeReviewSession,
+  getSelectedCandidateIndices,
+  getSelectedCandidates,
+  getSelectedWorkRvu,
+  loadActiveReviewSession,
+  mergeReviewSessionRows,
+  normalizedExamKey,
+  persistActiveReviewSession,
+  type TimelineEvent,
+} from '../services/reviewSessionService';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
 
@@ -132,27 +145,6 @@ function candidateExplanationText(candidate: MatchCandidate, rawText: string): s
   const normalized = candidate.explanation?.normalizedText ?? normalizeRadiologyDescription(rawText);
   const source = candidate.explanation?.source ?? candidate.method.replace(/_/g, ' ');
   return `Raw: ${rawText} | Normalized: ${normalized} | Source: ${source} | Method: ${candidate.method} | CMS: ${candidate.description}`;
-}
-
-function getSelectedCandidateIndices(row: PipelineReviewRow): number[] {
-  if (row.selectedCandidateIndices?.length) {
-    return row.selectedCandidateIndices.filter((index) => Boolean(row.candidates[index]));
-  }
-  return row.selectedCandidateIndex === null ? [] : [row.selectedCandidateIndex];
-}
-
-function getSelectedCandidates(row: PipelineReviewRow): MatchCandidate[] {
-  return getSelectedCandidateIndices(row)
-    .map((index) => row.candidates[index])
-    .filter(Boolean);
-}
-
-function getSelectedWorkRvu(row: PipelineReviewRow): number {
-  return getSelectedCandidates(row).reduce((sum, candidate) => sum + (candidate.workRvu ?? 0), 0);
-}
-
-function normalizedExamKey(row: PipelineReviewRow): string {
-  return normalizeRadiologyDescription(row.source.examTitle);
 }
 
 function isRadiologyCpt(candidate: MatchCandidate): boolean {
@@ -283,34 +275,6 @@ type Mode = 'paste' | 'ocr' | 'powerscribe';
 type Step = 'input' | 'review' | 'done';
 type ReviewMode = 'unknowns' | 'everything' | 'auto' | 'low';
 const WATCHER_REVIEW_KEY = 'wrvu_pending_watcher_review';
-type TimelineEvent = { id: string; at: string; label: string };
-
-function sessionRowKey(row: PipelineReviewRow): string {
-  return [
-    normalizedExamKey(row),
-    row.source.studyTime ?? '',
-    row.source.studyDate ?? '',
-    row.source.accessionNumber ?? '',
-  ].join('|');
-}
-
-function sessionSummary(rows: PipelineReviewRow[], skippedRows: PipelineReviewRow[]) {
-  const included = rows.filter((row) => row.included);
-  const confirmedWrvu = included
-    .filter((row) => !row.needsReview)
-    .reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
-  const estimatedPendingWrvu = included
-    .filter((row) => row.needsReview)
-    .reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
-  return {
-    totalExams: included.length,
-    confirmedWrvu,
-    estimatedPendingWrvu,
-    projectedWrvu: confirmedWrvu + estimatedPendingWrvu,
-    needsReviewCount: included.filter((row) => row.needsReview).length,
-    duplicateCount: skippedRows.length + rows.filter((row) => row.duplicateStatus === 'possible').length,
-  };
-}
 
 export function Import({ onImported }: ImportProps) {
   const { activeProfile, activePractice } = useProfile();
@@ -352,48 +316,28 @@ export function Import({ onImported }: ImportProps) {
   }, []);
 
   useEffect(() => {
-    db.activeReviewSessions
-      .where('status')
-      .equals('active')
-      .reverse()
-      .sortBy('updatedAt')
-      .then((sessions) => {
-        const session = sessions.find((entry) => entry.profileId === (activeProfile?.id ?? null)) ?? sessions[0];
-        if (!session || reviewRows.length > 0) return;
-        try {
-          const rows = JSON.parse(session.rowsJson) as PipelineReviewRow[];
-          const skipped = JSON.parse(session.skippedRowsJson) as PipelineReviewRow[];
-          const events = JSON.parse(session.timelineJson) as TimelineEvent[];
-          setSessionId(session.id);
-          setReviewRows(Array.isArray(rows) ? rows : []);
-          setSkippedRows(Array.isArray(skipped) ? skipped : []);
-          setTimeline(Array.isArray(events) ? events : []);
-          setLogDate(session.readingDate);
-          setStep('review');
-        } catch {
-          // Ignore malformed legacy session payloads.
-        }
-      });
+    loadActiveReviewSession(activeProfile?.id ?? null).then((session) => {
+      if (!session || reviewRows.length > 0) return;
+      setSessionId(session.sessionId);
+      setReviewRows(session.rows);
+      setSkippedRows(session.skippedRows);
+      setTimeline(session.timeline);
+      setLogDate(session.readingDate);
+      setStep('review');
+    });
   }, [activeProfile?.id]);
 
   useEffect(() => {
     if (step !== 'review' || reviewRows.length === 0) return;
     const id = sessionId ?? crypto.randomUUID();
     if (!sessionId) setSessionId(id);
-    const now = new Date().toISOString();
-    const summary = sessionSummary(reviewRows, skippedRows);
-    db.activeReviewSessions.put({
-      id,
+    void persistActiveReviewSession({
+      sessionId: id,
       profileId: activeProfile?.id ?? null,
       readingDate: logDate,
-      status: 'active',
-      rowsJson: JSON.stringify(reviewRows),
-      skippedRowsJson: JSON.stringify(skippedRows),
-      timelineJson: JSON.stringify(timeline),
-      ...summary,
-      createdAt: now,
-      updatedAt: now,
-      finalizedAt: null,
+      rows: reviewRows,
+      skippedRows,
+      timeline,
     });
   }, [step, reviewRows, skippedRows, timeline, logDate, activeProfile?.id, sessionId]);
 
@@ -433,36 +377,14 @@ export function Import({ onImported }: ImportProps) {
   function addTimeline(label: string) {
     setTimeline((events) => [
       ...events,
-      { id: crypto.randomUUID(), at: new Date().toISOString(), label },
+      createTimelineEvent(label),
     ]);
   }
 
   function appendPipelineRows(nextRows: PipelineReviewRow[], nextSkippedRows: PipelineReviewRow[], label: string) {
-    setReviewRows((currentRows) => {
-      const existingKeys = new Set(currentRows.map(sessionRowKey));
-      const appendRows: PipelineReviewRow[] = [];
-      const duplicateRows: PipelineReviewRow[] = [];
-      for (const row of nextRows) {
-        const key = sessionRowKey(row);
-        if (existingKeys.has(key)) {
-          duplicateRows.push({
-            ...row,
-            included: false,
-            autoSkipped: true,
-            duplicateStatus: row.duplicateStatus ?? 'very_likely',
-            duplicateReason: row.duplicateReason ?? 'Duplicate already exists in this active review session',
-          });
-        } else {
-          existingKeys.add(key);
-          appendRows.push(row);
-        }
-      }
-      if (duplicateRows.length > 0) {
-        setSkippedRows((skipped) => [...skipped, ...duplicateRows]);
-      }
-      return [...currentRows, ...appendRows];
-    });
-    setSkippedRows((currentSkipped) => [...currentSkipped, ...nextSkippedRows]);
+    const merged = mergeReviewSessionRows(reviewRows, skippedRows, nextRows, nextSkippedRows);
+    setReviewRows(merged.reviewRows);
+    setSkippedRows(merged.skippedRows);
     addTimeline(label);
     setStep('review');
   }
@@ -553,30 +475,18 @@ export function Import({ onImported }: ImportProps) {
     setImporting(true);
     setError(null);
     try {
-      const result = await commitPipelineResults(reviewRows, logDate, skippedRows.length, activeProfile?.id);
+      const result = await finalizeReviewSession({
+        sessionId,
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        logDate,
+        rows: reviewRows,
+        skippedRows,
+        timeline,
+      });
       setImportedCount(result.importedCount);
       setSkippedCount(result.skippedCount);
       setReviewNeeded(result.reviewNeededCount);
-      if (sessionId) {
-        await db.activeReviewSessions.update(sessionId, {
-          status: 'finalized',
-          timelineJson: JSON.stringify([
-            ...timeline,
-            { id: crypto.randomUUID(), at: new Date().toISOString(), label: 'Finalized day' },
-          ]),
-          updatedAt: new Date().toISOString(),
-          finalizedAt: new Date().toISOString(),
-        });
-      }
-      await recordAuditEvent({
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-        action: 'day_finalized',
-        summary: `Finalized ${result.importedCount} studies; ${result.reviewNeededCount} still marked for review`,
-        detailsJson: JSON.stringify({ imported: result.importedCount, skipped: result.skippedCount, reviewNeeded: result.reviewNeededCount }),
-      });
       setStep('done');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Import failed');
@@ -587,21 +497,14 @@ export function Import({ onImported }: ImportProps) {
 
   async function discardSession() {
     if (!confirm('Discard this active review session? No productivity history will be saved.')) return;
-    if (sessionId) {
-      await db.activeReviewSessions.update(sessionId, {
-        status: 'discarded',
-        updatedAt: new Date().toISOString(),
-      });
-      await recordAuditEvent({
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-        action: 'day_reopened',
-        summary: 'Discarded active review session',
-        detailsJson: JSON.stringify({ reviewRows: reviewRows.length, skippedRows: skippedRows.length }),
-      });
-    }
+    await discardActiveReviewSession({
+      sessionId,
+      profileId: activeProfile?.id ?? null,
+      siteId: activePractice?.id ?? null,
+      logDate,
+      reviewRowCount: reviewRows.length,
+      skippedRowCount: skippedRows.length,
+    });
     setSessionId(null);
     setReviewRows([]);
     setSkippedRows([]);
