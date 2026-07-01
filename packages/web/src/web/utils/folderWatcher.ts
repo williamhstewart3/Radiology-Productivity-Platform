@@ -7,8 +7,7 @@
  * Flow per file:
  *   1. main.ts detects new PNG/JPG → sends "watcher:new-file" with full path
  *   2. This hook receives the path, reads it as base64 via fs:readBuffer
- *   3. Converts base64 → Blob → feeds to OCRImportProvider
- *   4. Runs runImportPipeline()
+ *   3. Converts base64 → Blob → feeds the shared OCR workflow service
  *   5. Studies with needsReview=false → auto-committed via commitPipelineResults()
  *   6. Studies needing review → added to pendingReview queue (shown in WatcherPage)
  *   7. Moves file to {watchFolder}/processed/ (or deletes) on success,
@@ -19,8 +18,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getDesktopAPI } from '../lib/desktop';
-import { OCRImportProvider } from '../providers/OCRImportProvider';
-import { runImportPipeline, commitPipelineResults } from '../pipeline/importPipeline';
+import { commitPipelineResults } from '../pipeline/importPipeline';
+import { processOcrImport } from '../services/ocrWorkflowService';
 import { todayDateString } from './calculations';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 
@@ -121,10 +120,15 @@ export function useFolderWatcher(
 
       // 2. OCR + import pipeline
       const logDate = todayDateString();
-      const provider = new OCRImportProvider(blob as File, logDate);
-      const studies  = await provider.importStudies();
+      const processed = await processOcrImport(blob, {
+        profileId: profileIdRef.current ?? null,
+        siteId: null,
+        sessionId: null,
+        logDate,
+      }, { filename: fileName, size: blob.size });
+      const result = processed.result;
 
-      if (studies.length === 0) {
+      if (processed.extractedCount === 0) {
         updateEntry({
           status: 'skipped',
           message: 'No studies found in image',
@@ -133,8 +137,6 @@ export function useFolderWatcher(
         await routeFile(api, filePath, watchFolder, 'processed', autoDeleteRef.current);
         return;
       }
-
-      const result = await runImportPipeline(studies, logDate, profileIdRef.current);
 
       // 3. Auto-commit rows that don't need review
       const autoRows = result.reviewRows.filter((r) => !r.needsReview && r.included);

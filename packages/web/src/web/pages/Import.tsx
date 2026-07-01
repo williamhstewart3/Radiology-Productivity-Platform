@@ -1,13 +1,8 @@
 /**
  * Import.tsx
  *
- * Import screen — routes each import mode through its provider and the
- * shared importPipeline. Adding a new source (e.g. PowerScribe live sync)
- * requires only: instantiate the provider, call runImportPipeline(), done.
- *
- * Active providers:
- *   paste  → CSVImportProvider (single-column / paste-style)
- *   ocr    → OCRImportProvider
+ * Import screen — routes each import mode through the shared OCR workflow
+ * service, then merges the returned rows into the active review session.
  *
  * Architecture placeholder:
  *   powerscribe → PowerScribeImportProvider (disabled, "Coming Soon")
@@ -15,15 +10,11 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { theme } from '../lib/theme';
-import { OCRImportProvider } from '../providers/OCRImportProvider';
-import { CSVImportProvider } from '../providers/CSVImportProvider';
-import { runImportPipeline } from '../pipeline/importPipeline';
 import { searchExamLibrary } from '../utils/matching';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import { db, ensureUserSettings } from '../db/database';
-import { recordAuditEvent } from '../utils/audit';
 import {
   createTimelineEvent,
   discardActiveReviewSession,
@@ -38,6 +29,7 @@ import {
   type TimelineEvent,
 } from '../services/reviewSessionService';
 import { rememberCorrectedExam } from '../services/memoryLearningService';
+import { processOcrImport, processTextImport } from '../services/ocrWorkflowService';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
 
@@ -395,19 +387,13 @@ export function Import({ onImported }: ImportProps) {
     setProcessing(true);
     setError(null);
     try {
-      const provider = new CSVImportProvider(pasteText, logDate);
-      const studies  = await provider.importStudies();
-      const result   = await runImportPipeline(studies, logDate, activeProfile?.id);
-      appendPipelineRows(result.reviewRows, result.skippedRows, `Text import processed (${studies.length} extracted)`);
-      await recordAuditEvent({
+      const processed = await processTextImport(pasteText, {
         profileId: activeProfile?.id ?? null,
         siteId: activePractice?.id ?? null,
         sessionId,
         logDate,
-        action: 'ocr_completed',
-        summary: `Text/CSV import processed ${studies.length} extracted studies`,
-        detailsJson: JSON.stringify({ source: 'csv', reviewRows: result.reviewRows.length, skippedRows: result.skippedRows.length }),
       });
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Processing failed');
     } finally {
@@ -420,28 +406,13 @@ export function Import({ onImported }: ImportProps) {
     setProcessing(true);
     setError(null);
     try {
-      const provider = new OCRImportProvider(ocrFile, logDate);
-      const studies  = await provider.importStudies();
-      await recordAuditEvent({
+      const processed = await processOcrImport(ocrFile, {
         profileId: activeProfile?.id ?? null,
         siteId: activePractice?.id ?? null,
         sessionId,
         logDate,
-        action: 'screenshot_imported',
-        summary: `Screenshot imported: ${ocrFile.name}`,
-        detailsJson: JSON.stringify({ filename: ocrFile.name, size: ocrFile.size }),
-      });
-      const result   = await runImportPipeline(studies, logDate, activeProfile?.id);
-      appendPipelineRows(result.reviewRows, result.skippedRows, `Screenshot OCR completed (${studies.length} extracted)`);
-      await recordAuditEvent({
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-        action: 'ocr_completed',
-        summary: `OCR completed ${studies.length} extracted studies`,
-        detailsJson: JSON.stringify({ reviewRows: result.reviewRows.length, skippedRows: result.skippedRows.length }),
-      });
+      }, { filename: ocrFile.name, size: ocrFile.size });
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'OCR failed — try paste mode instead');
     } finally {

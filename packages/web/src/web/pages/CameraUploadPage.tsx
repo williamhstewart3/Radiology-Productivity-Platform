@@ -20,14 +20,14 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { theme } from '../lib/theme';
-import { OCRImportProvider } from '../providers/OCRImportProvider';
-import { runImportPipeline, commitPipelineResults } from '../pipeline/importPipeline';
+import { commitPipelineResults } from '../pipeline/importPipeline';
 import { searchExamLibrary } from '../utils/matching';
 import { useProfile } from '../hooks/useProfile';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { todayDateString } from '../utils/calculations';
 import { db } from '../db/database';
 import { rememberCorrectedExam } from '../services/memoryLearningService';
+import { processOcrImport } from '../services/ocrWorkflowService';
 import type { UserSettings } from '../types';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
@@ -422,11 +422,14 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
   async function processBlob(blob: Blob, previewUrl?: string) {
     setStep('processing');
     try {
-      const provider = new OCRImportProvider(blob, logDate);
-      const studies  = await provider.importStudies();
-      const result   = await runImportPipeline(studies, logDate, activeProfile?.id);
-      setReviewRows(result.reviewRows);
-      setSkippedRows(result.skippedRows);
+      const processed = await processOcrImport(blob, {
+        profileId: activeProfile?.id ?? null,
+        siteId: null,
+        sessionId: null,
+        logDate,
+      });
+      setReviewRows(processed.result.reviewRows);
+      setSkippedRows(processed.result.skippedRows);
 
       // Revoke cropped image after OCR is done — not needed anymore
       if (previewUrl) URL.revokeObjectURL(previewUrl);
