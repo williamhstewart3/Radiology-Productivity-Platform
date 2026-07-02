@@ -82,10 +82,10 @@ export async function runImportPipeline(
   const matched: Array<{ study: ImportedStudy; candidates: MatchCandidate[] }> = [];
 
   for (const study of studies) {
-    const query = study.cpt ?? study.examTitle;
+    const query = study.cpt ?? study.cleanedExamName ?? study.examTitle;
     const candidates = (await findMatchCandidates(query, 6, profileId, {
       requireExamContextForDirectCpt: study.source === 'ocr' && !study.cpt,
-      directCptContext: study.examTitle,
+      directCptContext: study.cleanedExamName ?? study.examTitle,
     })).filter(productivityRelevant);
     matched.push({ study, candidates });
   }
@@ -117,11 +117,15 @@ export async function runImportPipeline(
         ? null
         : (dupeResult?.match?.existingLog.id ?? null);
 
-    const reviewReason = reviewReasonFor(top, candidates, dupStatus);
+    const parserNeedsReview =
+      Boolean(study.parserNeedsReview) ||
+      (study.extractionConfidence != null && study.extractionConfidence < 0.75);
+    const matchReviewReason = reviewReasonFor(top, candidates, dupStatus);
+    const reviewReason = study.parserReviewReason ?? matchReviewReason;
     const autoApprovalLevel =
-      top?.method === 'alias_match' && top.confidence >= 0.99 && dupStatus === null
+      !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= 0.99 && dupStatus === null
         ? 'silent'
-        : top?.method === 'alias_match' && top.confidence >= 0.95 && dupStatus === null
+        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= 0.95 && dupStatus === null
         ? 'learned'
         : null;
     const autoAccept = Boolean(autoApprovalLevel && !reviewReason);
@@ -136,7 +140,7 @@ export async function runImportPipeline(
       selectedCandidateIndex: selectedIndex,
       selectedCandidateIndices: selectedIndex === null ? [] : [selectedIndex],
       displayTitle: study.examTitle,
-      needsReview: !autoAccept && Boolean(reviewReason ?? (candidates.length === 0 || !top || top.confidence < 0.75)),
+      needsReview: parserNeedsReview || (!autoAccept && Boolean(reviewReason ?? (candidates.length === 0 || !top || top.confidence < 0.75))),
       autoApproved: autoAccept,
       autoApprovalLevel,
       reviewReason,

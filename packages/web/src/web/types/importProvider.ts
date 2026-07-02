@@ -106,6 +106,21 @@ export interface ImportedStudy {
   /** Optional visible row/index number from the source table, when OCR captures it. */
   rowIndex?: string | null;
 
+  /** OCR/parser-cleaned exam name before CPT matching, when available. */
+  cleanedExamName?: string | null;
+
+  /** Confidence that OCR table row/procedure extraction was clean. */
+  extractionConfidence?: number | null;
+
+  /** Provider/parser-level review flag, before CPT matching. */
+  parserNeedsReview?: boolean | null;
+
+  /** Provider/parser-level explanation for why review is needed. */
+  parserReviewReason?: string | null;
+
+  /** Original OCR table row text, when different from examTitle. */
+  parserRawLine?: string | null;
+
   /**
    * OCR engine confidence for the source image/text when this came from OCR.
    * Current Tesseract provider reports image-level confidence, so each parsed

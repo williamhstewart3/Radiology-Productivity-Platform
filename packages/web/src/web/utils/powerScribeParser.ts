@@ -1,24 +1,20 @@
-/**
- * Parses raw OCR'd lines from a PowerScribe completed-studies screenshot
- * into structured fields. PowerScribe list layouts vary by site/version,
- * so this uses permissive regex heuristics rather than a fixed column
- * format — the user always gets a chance to correct results before they're
- * saved (see the review table requirement).
- */
-
+import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
 import { parseDateTimeFromOcr, parseDateTimeMatchesFromOcr } from './studyDateParser';
 
 export interface ParsedLine {
   rawText: string;
   examName: string;
+  cleanedExamName: string;
   studyDateTime: string | null;
   studyDate: string | null;
   modifiedDateTime: string | null;
   modifiedDate: string | null;
   accessionNumber: string | null;
   rowIndex: string | null;
-  /** 0.0–1.0 confidence in the extracted date/time */
   dateTimeConfidence: number;
+  extractionConfidence: number;
+  needsReview: boolean;
+  reviewReason: string | null;
 }
 
 const ACCESSION_PATTERN = /\b(?:ACC|ACCESSION)[#:\s]*([A-Z0-9-]{5,})\b/i;
@@ -32,6 +28,8 @@ const HEADER_FOOTER_PATTERN =
   /^(?:page \d+|status|completed|study list|procedure|exam date|modified|patient name|patient id|mrn|dob|date of birth|age|accession|account|encounter|order|signed|finalized|dictated|performed|provider|radiologist|facility)\b/i;
 const UI_NOISE_PATTERN =
   /\b(?:reset\s+filters?|browse|search|filter|filters|refresh|logout|settings|preferences|dashboard|inbox|outbox|worklist|folder|sort|ascending|descending|click|button|menu|home|apply|clear|cancel|save|export|print|status\s+bar|tabs?)\b/i;
+const LEFT_STATUS_PATTERN =
+  /^\s*(?:(?:[|/\\_\-#>*]+|[voxlit]|[0-9]{1,4}|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread)\s+){1,10}/i;
 
 const UI_TEXT_STRIP_PATTERNS = [
   /\breset\s+filters?\b/gi,
@@ -49,8 +47,6 @@ const UI_TEXT_STRIP_PATTERNS = [
   /\btabs?\b/gi,
 ];
 
-// Date patterns to strip from exam name after extraction (so they don't
-// contaminate the exam name text). Match the same patterns as studyDateParser.
 const DATE_STRIP_PATTERNS = [
   /\d{1,2}\/\d{1,2}\/\d{2,4}\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?/gi,
   /\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2})?/gi,
@@ -70,8 +66,20 @@ function hasExamContext(text: string): boolean {
   return EXAM_CONTEXT_PATTERN.test(text);
 }
 
+function stripUiText(text: string): string {
+  let cleaned = text;
+  for (const pattern of UI_TEXT_STRIP_PATTERNS) {
+    cleaned = cleaned.replace(pattern, ' ');
+  }
+  return cleaned
+    .replace(/[|•·]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function isMetadataOnlyLine(text: string): boolean {
   if (HEADER_FOOTER_PATTERN.test(text) && !hasExamContext(text)) return true;
+  if (UI_NOISE_PATTERN.test(text) && !hasExamContext(text)) return true;
   if (!METADATA_LABEL_PATTERN.test(text)) return false;
 
   let withoutNoise = text;
@@ -88,97 +96,37 @@ function isMetadataOnlyLine(text: string): boolean {
   return !hasExamContext(text) || withoutNoise.length < 3;
 }
 
-function isLikelyExamLine(text: string): boolean {
-  if (!hasExamContext(text)) return false;
-
-  const lower = text.toLowerCase();
-
-  if (
-    UI_NOISE_PATTERN.test(lower) &&
-    !/\b(?:ct|cta|mri?|mra|xr|x-?ray|us|ultrasound|nm|pet|fluoro|mammo|mammogram)\b/i.test(lower)
-  ) {
-    return false;
-  }
-
-  const letterCount = (text.match(/[a-z]/gi) ?? []).length;
-  if (letterCount < 3) return false;
-
-  return true;
-}
-
 function stripLeadingRowIndex(text: string): { rowIndex: string; text: string } | null {
   const rowIndexMatch = text.match(LEADING_ROW_INDEX_PATTERN);
   if (!rowIndexMatch) return null;
 
   const [, rowIndex, rest] = rowIndexMatch;
-  const cleanedRest = rest.trim();
-  if (!hasExamContext(cleanedRest)) return null;
-
   return {
     rowIndex,
-    text: cleanedRest,
+    text: rest.trim(),
   };
 }
 
-function stripUiText(text: string): string {
-  let cleaned = text;
-  for (const pattern of UI_TEXT_STRIP_PATTERNS) {
-    cleaned = cleaned.replace(pattern, ' ');
-  }
-  return cleaned
-    .replace(/[|•]+/g, ' ')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
-export function parseOcrLines(lines: string[]): ParsedLine[] {
-  return lines.map((line) => parseSingleLine(line)).filter((p): p is ParsedLine => p !== null);
-}
-
-function parseSingleLine(rawLine: string): ParsedLine | null {
-  const trimmed = rawLine.trim();
-  if (trimmed.length < 3) return null;
-
-  if (isMetadataOnlyLine(trimmed)) {
-    return null;
-  }
-  if (!isLikelyExamLine(trimmed)) {
-    return null;
-  }
-
-  let working = trimmed;
+function stripLeftTableJunk(text: string): { rowIndex: string | null; text: string } {
+  let working = stripUiText(text).replace(LEFT_STATUS_PATTERN, '').trim();
   let rowIndex: string | null = null;
+
   const rowIndexResult = stripLeadingRowIndex(working);
   if (rowIndexResult) {
     rowIndex = rowIndexResult.rowIndex;
     working = rowIndexResult.text;
   }
 
-  // ── Extract date/time using the dedicated parser ──────────────────────────
-  const dateMatches = parseDateTimeMatchesFromOcr(working);
-  const dtResult = dateMatches[0] ?? parseDateTimeFromOcr(working);
-  const modifiedResult =
-    [...dateMatches].reverse().find((match) => Boolean(match.studyDateTime)) ??
-    dateMatches[dateMatches.length - 1] ??
-    dtResult;
-  const studyDateTime = dtResult?.studyDateTime ?? null;
-  const studyDate = dtResult?.studyDate ?? null;
-  const modifiedDateTime = modifiedResult?.studyDateTime ?? null;
-  const modifiedDate = modifiedResult?.studyDate ?? null;
-  const dateTimeConfidence = modifiedResult?.confidence ?? dtResult?.confidence ?? 0;
+  working = normalizeOcrExamTextForMatching(working);
+  return { rowIndex, text: working };
+}
 
-  // Strip all date/time tokens from the working string so they don't land
-  // in the exam name
-  for (const pattern of DATE_STRIP_PATTERNS) {
-    working = working.replace(pattern, ' ');
-  }
-  for (const pattern of TIME_STRIP_PATTERNS) {
-    working = working.replace(pattern, ' ');
-  }
+function stripDatesAndIdentifiers(text: string): { text: string; accessionNumber: string | null } {
+  let working = text;
+  for (const pattern of DATE_STRIP_PATTERNS) working = working.replace(pattern, ' ');
+  for (const pattern of TIME_STRIP_PATTERNS) working = working.replace(pattern, ' ');
 
-  // ── Extract accession number ───────────────────────────────────────────────
   let accessionNumber: string | null = null;
-
   const accMatch = working.match(ACCESSION_PATTERN);
   if (accMatch) {
     accessionNumber = accMatch[1];
@@ -191,19 +139,92 @@ function parseSingleLine(rawLine: string): ParsedLine | null {
     }
   }
 
-  // ── Clean up exam name ────────────────────────────────────────────────────
-  const examName = stripUiText(working);
-  if (examName.length < 2) return null;
+  return { text: stripUiText(working), accessionNumber };
+}
+
+function shouldStartNewRow(line: string): boolean {
+  if (parseDateTimeMatchesFromOcr(line).length > 0) return true;
+  if (LEADING_ROW_INDEX_PATTERN.test(line)) return true;
+  if (hasExamContext(line)) return true;
+  return false;
+}
+
+function reconstructTableRows(lines: string[]): string[] {
+  const rows: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = stripUiText(rawLine.trim());
+    if (line.length < 2 || isMetadataOnlyLine(line)) continue;
+
+    if (rows.length === 0 || shouldStartNewRow(line)) {
+      rows.push(line);
+    } else {
+      rows[rows.length - 1] = `${rows[rows.length - 1]} ${line}`.replace(/\s{2,}/g, ' ').trim();
+    }
+  }
+
+  return rows;
+}
+
+export function parseOcrLines(lines: string[]): ParsedLine[] {
+  return reconstructTableRows(lines)
+    .map((line) => parseSingleRow(line))
+    .filter((p): p is ParsedLine => p !== null);
+}
+
+function parseSingleRow(rawRow: string): ParsedLine | null {
+  const trimmed = rawRow.trim();
+  if (trimmed.length < 3 || isMetadataOnlyLine(trimmed)) return null;
+
+  const { rowIndex, text: rowWithoutLeftJunk } = stripLeftTableJunk(trimmed);
+  const dateMatches = parseDateTimeMatchesFromOcr(rowWithoutLeftJunk);
+  const firstDate = dateMatches[0] ?? parseDateTimeFromOcr(rowWithoutLeftJunk);
+  const lastDate =
+    [...dateMatches].reverse().find((match) => Boolean(match.studyDateTime)) ??
+    dateMatches[dateMatches.length - 1] ??
+    firstDate;
+
+  const stripped = stripDatesAndIdentifiers(rowWithoutLeftJunk);
+  const cleanedExamNameRaw = normalizeOcrExamTextForMatching(stripped.text);
+  const cleanedExamName = cleanedExamNameRaw.length >= 2
+    ? cleanedExamNameRaw
+    : dateMatches.length > 0
+      ? 'UNCLEAR POWERSCRIBE ROW'
+      : '';
+  if (cleanedExamName.length < 2) return null;
+
+  const studyDateTime = firstDate?.studyDateTime ?? null;
+  const studyDate = firstDate?.studyDate ?? null;
+  const modifiedDateTime = lastDate?.studyDateTime ?? null;
+  const modifiedDate = lastDate?.studyDate ?? null;
+  const dateTimeConfidence = lastDate?.confidence ?? firstDate?.confidence ?? 0;
+  const hasContext = hasExamContext(cleanedExamName);
+  const hasDateColumns = dateMatches.length > 0;
+  const extractionConfidence =
+    hasContext && hasDateColumns ? 0.92 :
+    hasContext ? 0.72 :
+    hasDateColumns ? 0.38 :
+    0.2;
+  const needsReview = extractionConfidence < 0.75 || dateTimeConfidence < 0.5 || !hasContext;
+  const reviewReason =
+    !hasContext ? 'Low-confidence PowerScribe row text' :
+    dateTimeConfidence < 0.5 ? 'Missing or unclear PowerScribe date columns' :
+    extractionConfidence < 0.75 ? 'PowerScribe row needs review' :
+    null;
 
   return {
     rawText: trimmed,
-    examName,
+    examName: cleanedExamName,
+    cleanedExamName,
     studyDateTime,
     studyDate,
     modifiedDateTime,
     modifiedDate,
-    accessionNumber,
+    accessionNumber: stripped.accessionNumber,
     rowIndex,
     dateTimeConfidence,
+    extractionConfidence,
+    needsReview,
+    reviewReason,
   };
 }

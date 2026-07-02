@@ -1,6 +1,6 @@
 import { CSVImportProvider } from '../providers/CSVImportProvider';
 import { OCRImportProvider, type OCRImportDebugInfo } from '../providers/OCRImportProvider';
-import { runImportPipeline, type PipelineResult } from '../pipeline/importPipeline';
+import { runImportPipeline, type PipelineResult, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
 import { ensureUserSettings } from '../db/database';
 import type { ImportProvider } from '../types/importProvider';
@@ -30,6 +30,45 @@ async function processProvider(
     result,
     extractedCount: studies.length,
     timelineLabel: timelineLabel(studies.length),
+  };
+}
+
+function attachOcrMatchDebug(debugInfo: OCRImportDebugInfo | null, result: PipelineResult): OCRImportDebugInfo | null {
+  if (!debugInfo) return null;
+
+  const rowsByRawLine = new Map<string, PipelineReviewRow>();
+  for (const row of [...result.reviewRows, ...result.skippedRows]) {
+    const rawLine = row.source.parserRawLine;
+    if (rawLine && !rowsByRawLine.has(rawLine)) rowsByRawLine.set(rawLine, row);
+  }
+
+  return {
+    ...debugInfo,
+    detectedRows: debugInfo.detectedRows.map((row) => {
+      const matched = rowsByRawLine.get(row.rawText);
+      if (!matched) return row;
+
+      const selectedIndices = matched.selectedCandidateIndices.length
+        ? matched.selectedCandidateIndices
+        : matched.selectedCandidateIndex == null
+          ? []
+          : [matched.selectedCandidateIndex];
+      const selected = selectedIndices
+        .map((index) => matched.candidates[index])
+        .filter(Boolean);
+      const top = matched.candidates[0] ?? null;
+
+      return {
+        ...row,
+        matchResult: {
+          selectedCpts: selected.map((candidate) => `${candidate.cptCode}${candidate.modifier ? `-${candidate.modifier}` : ''}`),
+          topCandidate: top ? `${top.cptCode}${top.modifier ? `-${top.modifier}` : ''}` : null,
+          confidence: top?.confidence ?? null,
+          needsReview: matched.needsReview,
+          reviewReason: matched.reviewReason,
+        },
+      };
+    }),
   };
 }
 
@@ -105,5 +144,5 @@ export async function processOcrImport(
       skippedRows: processed.result.skippedRows.length,
     }),
   });
-  return { ...processed, ocrDebug: provider.getDebugInfo() };
+  return { ...processed, ocrDebug: attachOcrMatchDebug(provider.getDebugInfo(), processed.result) };
 }

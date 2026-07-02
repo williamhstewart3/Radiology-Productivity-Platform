@@ -157,9 +157,13 @@ function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) 
             ) : (
               debug.detectedRows.map((row, index) => (
                 <p key={`${row.rawText}-${index}`} className="font-mono text-[11px] text-slate-400">
-                  {index + 1}. {row.examName}
+                  {index + 1}. {row.cleanedExamName ?? row.examName}
                   {row.modifiedDateTime ? ` | modified ${row.modifiedDateTime}` : ''}
                   {row.studyDate ? ` | exam ${row.studyDate}` : ''}
+                  {` | parser ${Math.round((row.extractionConfidence ?? 0) * 100)}%`}
+                  {row.matchResult?.topCandidate ? ` | match ${row.matchResult.topCandidate}` : ' | no match'}
+                  {row.matchResult?.confidence != null ? ` ${Math.round(row.matchResult.confidence * 100)}%` : ''}
+                  {row.reviewReason ?? row.matchResult?.reviewReason ? ` | review: ${row.reviewReason ?? row.matchResult?.reviewReason}` : ''}
                 </p>
               ))
             )}

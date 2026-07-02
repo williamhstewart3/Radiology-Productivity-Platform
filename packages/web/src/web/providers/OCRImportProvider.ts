@@ -30,11 +30,21 @@ export interface OCRImportOptions {
   autoDetectPowerScribeTable?: boolean;
 }
 
+export interface OCRImportDebugRow extends ParsedLine {
+  matchResult?: {
+    selectedCpts: string[];
+    topCandidate: string | null;
+    confidence: number | null;
+    needsReview: boolean;
+    reviewReason: string | null;
+  };
+}
+
 export interface OCRImportDebugInfo {
   crop: DetectedCrop | null;
   ocrText: string;
   ocrLines: string[];
-  detectedRows: ParsedLine[];
+  detectedRows: OCRImportDebugRow[];
   ocrConfidence: number;
 }
 
@@ -92,6 +102,11 @@ export class OCRImportProvider implements ImportProvider {
         accessionNumber: p.accessionNumber,
         patientMRN: null,
         rowIndex: p.rowIndex,
+        cleanedExamName: p.cleanedExamName,
+        extractionConfidence: p.extractionConfidence,
+        parserNeedsReview: p.needsReview,
+        parserReviewReason: p.reviewReason,
+        parserRawLine: p.rawText,
         ocrConfidence: result.confidence,
         source: 'ocr' as const,
         importedAt: now,
