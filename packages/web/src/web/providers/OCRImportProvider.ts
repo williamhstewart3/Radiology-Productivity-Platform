@@ -68,6 +68,7 @@ export class OCRImportProvider implements ImportProvider {
         accessionNumber: p.accessionNumber,
         patientMRN: null,
         rowIndex: p.rowIndex,
+        ocrConfidence: result.confidence,
         source: 'ocr' as const,
         importedAt: now,
         dateTimeConfidence: p.dateTimeConfidence,

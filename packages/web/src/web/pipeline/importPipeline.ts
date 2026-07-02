@@ -227,6 +227,7 @@ export async function commitPipelineResults(
         needsReview: isReview,
         accessionNumber: study.accessionNumber,
         rowIndex: study.rowIndex ?? null,
+        ocrConfidence: study.ocrConfidence ?? null,
         sessionId: rowSessionId,
         sourceImportId: importId,
         notes: selectedCandidates.length > 1 ? `Combined CPT study: ${cmsDescription}` : null,

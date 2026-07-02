@@ -294,6 +294,28 @@ export class RvuDatabase extends Dexie {
         if (!('siteId' in report)) report.siteId = null;
       });
     });
+
+    // v15: stores OCR engine confidence per study log. Existing rows are
+    // left null because no OCR score was captured for them.
+    this.version(15).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, siteId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      activeReviewSessions: 'id, profileId, readingDate, status, updatedAt',
+      auditLogEntries: 'id, profileId, siteId, sessionId, logDate, action, createdAt',
+      hospitalComparisonReports: 'id, profileId, siteId, reportDate, createdAt',
+      memorySuggestions: 'id, profileId, siteId, normalizedKey, status, createdAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      return trans.table('studyLogs').toCollection().modify((log) => {
+        if (!('ocrConfidence' in log)) log.ocrConfidence = null;
+      });
+    });
   }
 }
 

@@ -140,6 +140,7 @@ function toRemoteStudyLog(log: StudyLog, uploadDayId: string | null): Record<str
     modifier_26_wrvu: log.modifier === '26' && (log.workRvu ?? 0) > 0 ? log.workRvu : 0,
     match_method: log.matchMethod,
     match_confidence: log.matchConfidence,
+    ocr_confidence: log.ocrConfidence ?? null,
     not_productivity_relevant: (log.workRvu ?? 0) <= 0 || log.modifier !== '26',
     notes: log.notes,
     deleted_at: (log as any).deletedAt ?? null,

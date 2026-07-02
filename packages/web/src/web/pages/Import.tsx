@@ -928,6 +928,11 @@ export function Import({ onImported }: ImportProps) {
                           ⚠ inferred
                         </span>
                       )}
+                      {row.source.ocrConfidence != null && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300 font-medium">
+                          OCR text {Math.round(row.source.ocrConfidence * 100)}%
+                        </span>
+                      )}
                       <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${labelClass(label.tone)}`}>
                         {label.label}
                       </span>

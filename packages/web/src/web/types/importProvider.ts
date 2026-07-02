@@ -106,6 +106,13 @@ export interface ImportedStudy {
   /** Optional visible row/index number from the source table, when OCR captures it. */
   rowIndex?: string | null;
 
+  /**
+   * OCR engine confidence for the source image/text when this came from OCR.
+   * Current Tesseract provider reports image-level confidence, so each parsed
+   * study from the same screenshot receives the same score.
+   */
+  ocrConfidence?: number | null;
+
   /** Which provider emitted this study. Set by the provider itself. */
   source: ImportSource;
 

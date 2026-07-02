@@ -27,7 +27,7 @@
 - [x] Capture visible PowerScribe row/index metadata when OCR provides it
 - [x] Treat Modified Date/Time as productivity date while preserving Exam Date
 - [x] Use existing exam dictionary first, then Orbit CME seed mappings, before CMS/fuzzy OCR matching
-- [ ] Save OCR confidence per study
+- [x] Save OCR confidence per study
 - [ ] Bulk approve high-confidence studies
 - [ ] Unknowns-only review mode
 - [ ] Review later workflow

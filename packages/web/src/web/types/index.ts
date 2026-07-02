@@ -288,6 +288,11 @@ export interface StudyLog {
   needsReview: boolean;
   accessionNumber: string | null;
   rowIndex?: string | null;
+  /**
+   * OCR engine confidence for the source image/text. For current screenshot OCR,
+   * this is the Tesseract image-level confidence copied onto each parsed study.
+   */
+  ocrConfidence?: number | null;
   sessionId: string | null;
   sourceImportId: string | null;
   notes: string | null;
