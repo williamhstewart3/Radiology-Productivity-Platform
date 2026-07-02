@@ -356,9 +356,9 @@ export async function preprocessPowerScribeColumnsForOcr(
       ? { rect: normalizeCrop(cropRect), confidence: 1, method: 'fallback' }
       : detectPowerScribeStudyListCropFromBitmap(bitmap);
     const columnDefinitions: Array<{ name: PowerScribeColumnName; rect: RelativeCropRect }> = [
-      { name: 'procedure', rect: childRect(tableCrop.rect, { x: 0.08, y: 0, width: 0.52, height: 1 }) },
-      { name: 'examDate', rect: childRect(tableCrop.rect, { x: 0.60, y: 0, width: 0.18, height: 1 }) },
-      { name: 'modifiedDate', rect: childRect(tableCrop.rect, { x: 0.78, y: 0, width: 0.22, height: 1 }) },
+      { name: 'procedure', rect: childRect(tableCrop.rect, { x: 0.13, y: 0, width: 0.43, height: 1 }) },
+      { name: 'examDate', rect: childRect(tableCrop.rect, { x: 0.59, y: 0, width: 0.17, height: 1 }) },
+      { name: 'modifiedDate', rect: childRect(tableCrop.rect, { x: 0.78, y: 0, width: 0.21, height: 1 }) },
     ];
     const columns: PowerScribeColumnCrop[] = [];
     for (const column of columnDefinitions) {

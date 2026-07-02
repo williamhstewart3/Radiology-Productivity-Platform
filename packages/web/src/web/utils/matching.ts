@@ -1,5 +1,5 @@
 import { db } from '../db/database';
-import type { CptRvuRow, ExamAlias, MatchCandidate, OcrLearningEntry } from '../types';
+import type { CptRvuRow, ExamAlias, MatchCandidate, Modality, OcrLearningEntry } from '../types';
 import { combinedSimilarity, normalizeExamText } from './textMatching';
 import { normalizeForRadiology } from './examNormalizer';
 import { scoreRadiologyMatch, CONFIDENCE_THRESHOLD } from './examLibrary';
@@ -7,6 +7,7 @@ import {
   getCommonRadiologyMappingCodes,
   normalizeRadiologyDescription,
 } from './radiologyDescriptionNormalization';
+import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
 import { findOrbitCmeSeedMapping } from '../data/orbitCmeSeedMappings';
 
 const CPT_CODE_PATTERN = /^\d{5}$/;
@@ -37,6 +38,42 @@ function canUseDirectCptMatch(rawInput: string, options?: FindMatchOptions): boo
 
 function isProductivityRelevantModifier26(row: CptRvuRow): boolean {
   return row.modifier === '26' && (row.workRvu ?? 0) > 0;
+}
+
+type ModalityLane = Modality | 'CTA' | 'MRA';
+
+function detectModalityLane(rawInput: string): ModalityLane | null {
+  const normalized = normalizeOcrExamTextForMatching(rawInput).toUpperCase();
+  if (/\b(?:CTA|CT ANGIO(?:GRAM|GRAPHY)?)\b/.test(normalized)) return 'CTA';
+  if (/\b(?:MRA|MR ANGIO(?:GRAM|GRAPHY)?)\b/.test(normalized)) return 'MRA';
+  if (/\bCT\b/.test(normalized)) return 'CT';
+  if (/\bMRI?\b|\bMR\b/.test(normalized)) return 'MRI';
+  if (/\b(?:XR|X RAY|X-RAY|RADIOGRAPH)\b/.test(normalized)) return 'XR';
+  if (/\b(?:US|U\/S|ULTRASOUND|SONOGRAM)\b/.test(normalized)) return 'US';
+  if (/\b(?:NM|NUCLEAR|PET)\b/.test(normalized)) return 'NM_PET';
+  return null;
+}
+
+function rowMatchesModalityLane(row: CptRvuRow, lane: ModalityLane | null): boolean {
+  if (!lane) return true;
+  const description = `${row.description} ${row.modality}`.toUpperCase();
+  const isAngio = /\b(?:ANGIO|ANGIOGRAPHY|CTA|MRA)\b/.test(description);
+  if (lane === 'CTA') return row.modality === 'CT' && /\b(?:ANGIO|ANGIOGRAPHY|CTA)\b/.test(description);
+  if (lane === 'MRA') return row.modality === 'MRI' && /\b(?:ANGIO|ANGIOGRAPHY|MRA)\b/.test(description);
+  if (lane === 'CT') return row.modality === 'CT' && !isAngio;
+  if (lane === 'MRI') return row.modality === 'MRI' && !isAngio;
+  return row.modality === lane;
+}
+
+function candidateMatchesModalityLane(candidate: MatchCandidate, lane: ModalityLane | null): boolean {
+  if (!lane) return true;
+  const description = `${candidate.description} ${candidate.modality ?? ''}`.toUpperCase();
+  const isAngio = /\b(?:ANGIO|ANGIOGRAPHY|CTA|MRA)\b/.test(description);
+  if (lane === 'CTA') return candidate.modality === 'CT' && /\b(?:ANGIO|ANGIOGRAPHY|CTA)\b/.test(description);
+  if (lane === 'MRA') return candidate.modality === 'MRI' && /\b(?:ANGIO|ANGIOGRAPHY|MRA)\b/.test(description);
+  if (lane === 'CT') return candidate.modality === 'CT' && !isAngio;
+  if (lane === 'MRI') return candidate.modality === 'MRI' && !isAngio;
+  return candidate.modality === lane;
 }
 
 function rowToCandidate(
@@ -223,6 +260,7 @@ export async function findMatchCandidates(
   const radiologyNorm = normalizeForRadiology(trimmed);
   const radiologyNormalizedKey = normalizeExamText(radiologyNorm.normalizedTitle);
   const exactKeys = new Set([normalizedInput, radiologyNormalizedKey, radiologyDescriptionKey].filter(Boolean));
+  const modalityLane = detectModalityLane(trimmed);
 
   const allAliases = await db.examAliases.toArray();
   const activeProfile = profileId ? await db.radiologistProfiles.get(profileId) : null;
@@ -265,6 +303,7 @@ export async function findMatchCandidates(
     if (commonCandidates.length > 0) {
       return dedupeCandidates([...candidates, ...commonCandidates])
         .filter((candidate) => candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0)
+        .filter((candidate) => candidateMatchesModalityLane(candidate, modalityLane))
         .sort((a, b) => b.confidence - a.confidence)
         .slice(0, maxResults);
     }
@@ -273,9 +312,10 @@ export async function findMatchCandidates(
   const allCpt = candidates.length < maxResults
     ? await db.cptRvuTable.where('statusCategory').anyOf(['active', 'restricted']).toArray()
     : [];
+  const modalityScopedCpt = allCpt.filter((row) => rowMatchesModalityLane(row, modalityLane));
 
   if (candidates.length < maxResults) {
-    const exactDescriptionRows = allCpt
+    const exactDescriptionRows = modalityScopedCpt
       .filter(isProductivityRelevantModifier26)
       .filter((row) => normalizeRadiologyDescription(row.description) === radiologyDescriptionKey);
 
@@ -304,7 +344,7 @@ export async function findMatchCandidates(
   }
 
   if (candidates.length < maxResults) {
-    const descScored = allCpt
+    const descScored = modalityScopedCpt
       .filter(isProductivityRelevantModifier26)
       .map((row) => {
         const normalizedDescription = normalizeRadiologyDescription(row.description);
@@ -325,6 +365,7 @@ export async function findMatchCandidates(
 
   const ranked = dedupeCandidates(candidates)
     .filter((candidate) => candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0)
+    .filter((candidate) => candidateMatchesModalityLane(candidate, modalityLane))
     .sort((a, b) => {
       const aRvu = a.workRvu ?? 0;
       const bRvu = b.workRvu ?? 0;
@@ -354,19 +395,21 @@ export async function searchExamLibrary(
 
   const radiologyDescriptionKey = normalizeRadiologyDescription(trimmed);
   const radiologyNorm = normalizeForRadiology(trimmed);
+  const modalityLane = detectModalityLane(trimmed);
   const allCpt = await db.cptRvuTable
     .where('statusCategory')
     .anyOf(['active', 'restricted'])
     .toArray();
+  const modalityScopedCpt = allCpt.filter((row) => rowMatchesModalityLane(row, modalityLane));
 
   const commonCandidates = await candidatesForCommonRadiologyMapping(trimmed);
-  const exactDescriptionCandidates = allCpt
+  const exactDescriptionCandidates = modalityScopedCpt
     .filter(isProductivityRelevantModifier26)
     .filter((row) => normalizeRadiologyDescription(row.description) === radiologyDescriptionKey)
     .map((row) => rowToCandidate(trimmed, row, 0.96, 'radiology_match', 'exact CMS description'));
 
   const tokenCount = trimmed.split(/\s+/).length;
-  const fuzzyCandidates = allCpt
+  const fuzzyCandidates = modalityScopedCpt
     .filter(isProductivityRelevantModifier26)
     .map((row) => {
       const normalizedDescription = normalizeRadiologyDescription(row.description);
@@ -389,6 +432,7 @@ export async function searchExamLibrary(
     .map(({ row, score }) => rowToCandidate(trimmed, row, score, 'radiology_match', 'CMS fuzzy match'));
 
   return dedupeCandidates([...commonCandidates, ...exactDescriptionCandidates, ...fuzzyCandidates])
+    .filter((candidate) => candidateMatchesModalityLane(candidate, modalityLane))
     .slice(0, maxResults);
 }
 
