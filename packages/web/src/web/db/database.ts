@@ -13,6 +13,7 @@ import type {
   AuditLogEntry,
   HospitalComparisonReport,
   MemorySuggestion,
+  OcrLearningEntry,
 } from '../types';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 
@@ -36,6 +37,7 @@ export class RvuDatabase extends Dexie {
   auditLogEntries!: Table<AuditLogEntry, string>;
   hospitalComparisonReports!: Table<HospitalComparisonReport, string>;
   memorySuggestions!: Table<MemorySuggestion, string>;
+  ocrLearningEntries!: Table<OcrLearningEntry, string>;
 
   constructor() {
     super('rvu_tracker_db');
@@ -315,6 +317,25 @@ export class RvuDatabase extends Dexie {
       return trans.table('studyLogs').toCollection().modify((log) => {
         if (!('ocrConfidence' in log)) log.ocrConfidence = null;
       });
+    });
+
+    // v16: persistent OCR correction/memory table. This keeps PowerScribe OCR
+    // learning separate from the canonical CPT table and reading log.
+    this.version(16).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, siteId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      ocrLearningEntries: 'id, profileId, siteId, normalizedOcrText, matchedCpt, lastUsedAt',
+      activeReviewSessions: 'id, profileId, readingDate, status, updatedAt',
+      auditLogEntries: 'id, profileId, siteId, sessionId, logDate, action, createdAt',
+      hospitalComparisonReports: 'id, profileId, siteId, reportDate, createdAt',
+      memorySuggestions: 'id, profileId, siteId, normalizedKey, status, createdAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
     });
   }
 }

@@ -1,5 +1,5 @@
 import { db } from '../db/database';
-import type { CptRvuRow, ExamAlias, MatchCandidate } from '../types';
+import type { CptRvuRow, ExamAlias, MatchCandidate, OcrLearningEntry } from '../types';
 import { combinedSimilarity, normalizeExamText } from './textMatching';
 import { normalizeForRadiology } from './examNormalizer';
 import { scoreRadiologyMatch, CONFIDENCE_THRESHOLD } from './examLibrary';
@@ -135,6 +135,39 @@ async function candidatesForOrbitCmeSeed(rawInput: string): Promise<MatchCandida
   return rows.map((row) => rowToCandidate(rawInput, row, 0.93, 'radiology_match', 'Orbit CME seed mapping'));
 }
 
+async function candidatesForOcrLearning(rawInput: string, profileId?: string | null): Promise<MatchCandidate[]> {
+  const normalized = normalizeRadiologyDescription(rawInput);
+  if (!normalized) return [];
+
+  const profile = profileId ? await db.radiologistProfiles.get(profileId) : null;
+  const siteId = profile?.practiceId ?? null;
+  const entries = (await db.ocrLearningEntries
+    .where('normalizedOcrText')
+    .equals(normalized)
+    .toArray())
+    .filter((entry) =>
+      (entry.profileId === (profileId ?? null) || entry.profileId == null) &&
+      ((entry.siteId ?? null) === siteId || entry.siteId == null),
+    )
+    .sort((a, b) => {
+      const score = (entry: OcrLearningEntry) =>
+        (entry.profileId === (profileId ?? null) ? 0 : 4) +
+        ((entry.siteId ?? null) === siteId ? 0 : entry.siteId == null ? 2 : 6) -
+        entry.confidence;
+      return score(a) - score(b);
+    });
+
+  const candidates: MatchCandidate[] = [];
+  for (const entry of entries) {
+    const rows = await getModifier26Rows(entry.matchedCpt);
+    for (const row of rows) {
+      if (entry.modifier && row.modifier !== entry.modifier) continue;
+      candidates.push(rowToCandidate(rawInput, row, entry.confidence, 'ocr_match', 'OCR learning table'));
+    }
+  }
+  return candidates;
+}
+
 async function candidatesForCommonRadiologyMapping(rawInput: string): Promise<MatchCandidate[]> {
   const candidates: MatchCandidate[] = [];
   for (const cptCode of getCommonRadiologyMappingCodes(rawInput)) {
@@ -217,6 +250,10 @@ export async function findMatchCandidates(
 
   if (candidates.length < maxResults) {
     candidates.push(...await candidatesForDictionary(trimmed, maxResults));
+  }
+
+  if (candidates.length < maxResults) {
+    candidates.push(...await candidatesForOcrLearning(trimmed, profileId));
   }
 
   if (candidates.length < maxResults) {
@@ -412,6 +449,71 @@ async function upsertDictionaryEntry(payload: LearnAliasPayload, normalized: str
   });
 }
 
+async function upsertOcrLearningEntry(payload: LearnAliasPayload, normalized: string): Promise<void> {
+  if (payload.source !== 'ocr_confirmed' && payload.source !== 'user' && payload.source !== 'manual_name_match') return;
+  const candidates = payload.candidates.filter((candidate) => candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0);
+  const primary = candidates[0];
+  if (!primary) return;
+
+  const now = new Date().toISOString();
+  const profileId = payload.profileId ?? null;
+  const profile = profileId ? await db.radiologistProfiles.get(profileId) : null;
+  const siteId = payload.siteId ?? profile?.practiceId ?? null;
+  const existing = (await db.ocrLearningEntries
+    .where('normalizedOcrText')
+    .equals(normalized)
+    .toArray())
+    .find((entry) =>
+      entry.profileId === profileId &&
+      (entry.siteId ?? null) === siteId &&
+      entry.matchedCpt === primary.cptCode &&
+      (entry.modifier ?? null) === '26',
+    );
+  const historyItem = {
+    at: now,
+    action: payload.action ?? 'confirm',
+    cptCode: primary.cptCode,
+    modifier: '26',
+    workRvu: primary.workRvu,
+  };
+
+  if (existing) {
+    const history = JSON.parse(existing.correctionHistoryJson || '[]') as unknown[];
+    const corrections = (existing.corrections ?? 0) + (payload.action === 'correct' ? 1 : 0);
+    const confirmations = (existing.confirmations ?? 0) + (payload.action === 'reject' ? 0 : 1);
+    await db.ocrLearningEntries.update(existing.id, {
+      rawOcrText: payload.rawText,
+      workRvu: primary.workRvu,
+      confidence: Math.min(1, Math.max(0.65, existing.confidence + (payload.action === 'correct' ? 0.02 : 0.03))),
+      correctionHistoryJson: JSON.stringify([...history.slice(-19), historyItem]),
+      confirmations,
+      corrections,
+      lastUsedAt: now,
+      updatedAt: now,
+    });
+    return;
+  }
+
+  await db.ocrLearningEntries.add({
+    id: crypto.randomUUID(),
+    profileId,
+    siteId,
+    rawOcrText: payload.rawText,
+    normalizedOcrText: normalized,
+    matchedCpt: primary.cptCode,
+    modifier: '26',
+    workRvu: primary.workRvu,
+    confidence: payload.action === 'correct' ? 0.95 : 0.9,
+    source: payload.source,
+    correctionHistoryJson: JSON.stringify([historyItem]),
+    confirmations: payload.action === 'reject' ? 0 : 1,
+    corrections: payload.action === 'correct' ? 1 : 0,
+    lastUsedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 export async function learnAlias(payload: LearnAliasPayload): Promise<void>;
 export async function learnAlias(
   rawText: string,
@@ -492,6 +594,7 @@ export async function learnAlias(
       matchConfidence: nextConfidence,
     });
     await upsertDictionaryEntry(payload, normalized);
+    await upsertOcrLearningEntry(payload, normalized);
     return;
   }
 
@@ -518,4 +621,5 @@ export async function learnAlias(
     createdAt: now,
   });
   await upsertDictionaryEntry(payload, normalized);
+  await upsertOcrLearningEntry(payload, normalized);
 }

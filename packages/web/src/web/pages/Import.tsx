@@ -290,6 +290,8 @@ export function Import({ onImported }: ImportProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const processingRef = useRef(false);
+  const lastClipboardImageHashRef = useRef<string | null>(null);
 
   useEffect(() => {
     loadActiveReviewSession(activeProfile?.id ?? null).then((session) => {
@@ -328,6 +330,10 @@ export function Import({ onImported }: ImportProps) {
   }, []);
 
   useEffect(() => {
+    processingRef.current = processing;
+  }, [processing]);
+
+  useEffect(() => {
     if (mode !== 'ocr') return;
     function handlePaste(event: ClipboardEvent) {
       const imageItem = Array.from(event.clipboardData?.items ?? []).find((item) => item.type.startsWith('image/'));
@@ -336,17 +342,46 @@ export function Import({ onImported }: ImportProps) {
       if (!blob) return;
       const file = new File([blob], `powerscribe-clipboard-${Date.now()}.png`, { type: blob.type || 'image/png' });
       event.preventDefault();
-      setClipboardFile(file);
-      db.userSettings.get('default').then((settings) => {
-        if (settings?.autoImportClipboardScreenshots || settings?.alwaysProcessPowerScribeClipboard) {
-          setOcrFile(file);
-          setClipboardFile(null);
-        }
-      });
+      void queueClipboardImage(file, 'clipboard paste');
     }
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [mode]);
+  }, [mode, activeProfile?.id, activePractice?.id, sessionId, logDate, reviewRows, skippedRows]);
+
+  useEffect(() => {
+    if (mode !== 'ocr') return;
+    if (!navigator.clipboard?.read) return;
+
+    let cancelled = false;
+    let busy = false;
+
+    async function pollClipboard() {
+      if (cancelled || busy || processingRef.current || !document.hasFocus()) return;
+      busy = true;
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const imageType = item.types.find((type) => type.startsWith('image/'));
+          if (!imageType) continue;
+          const blob = await item.getType(imageType);
+          const file = new File([blob], `powerscribe-clipboard-${Date.now()}.png`, { type: imageType });
+          await queueClipboardImage(file, 'clipboard monitor');
+          break;
+        }
+      } catch {
+        // Browser/OS may deny polling; manual Paste remains available.
+      } finally {
+        busy = false;
+      }
+    }
+
+    void pollClipboard();
+    const id = window.setInterval(() => void pollClipboard(), 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [mode, activeProfile?.id, activePractice?.id, sessionId, logDate, reviewRows, skippedRows]);
 
   // ── Process helpers ───────────────────────────────────────────────────────
 
@@ -363,6 +398,43 @@ export function Import({ onImported }: ImportProps) {
     setSkippedRows(merged.skippedRows);
     addTimeline(label);
     setStep('review');
+  }
+
+  async function hashImageBlob(blob: Blob): Promise<string> {
+    const buffer = await blob.arrayBuffer();
+    if (!crypto.subtle) return `${blob.size}:${blob.type}:${buffer.byteLength}`;
+    const digest = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  async function processOcrFile(file: File, timelineSource: string) {
+    setProcessing(true);
+    setError(null);
+    setOcrFile(file);
+    try {
+      const processed = await processOcrImport(file, {
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+      }, { filename: file.name, size: file.size });
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
+      setClipboardFile(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'OCR failed - try paste mode instead');
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function queueClipboardImage(file: File, timelineSource: string) {
+    const hash = await hashImageBlob(file);
+    if (hash === lastClipboardImageHashRef.current) return;
+    lastClipboardImageHashRef.current = hash;
+    setClipboardFile(file);
+    await processOcrFile(file, timelineSource);
   }
 
   async function handlePasteProcess() {
@@ -386,6 +458,8 @@ export function Import({ onImported }: ImportProps) {
 
   async function handleOcrProcess() {
     if (!ocrFile) return;
+    await processOcrFile(ocrFile, 'manual file');
+    return;
     setProcessing(true);
     setError(null);
     try {
@@ -411,8 +485,7 @@ export function Import({ onImported }: ImportProps) {
       alwaysProcessPowerScribeClipboard: true,
       updatedAt: new Date().toISOString(),
     });
-    setOcrFile(file);
-    setClipboardFile(null);
+    await queueClipboardImage(file, 'trusted clipboard');
   }
 
   // Restore a skipped row back into the review list

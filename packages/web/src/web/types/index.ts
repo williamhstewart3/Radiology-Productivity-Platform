@@ -235,6 +235,25 @@ export interface MemorySuggestion {
   updatedAt: string;
 }
 
+export interface OcrLearningEntry {
+  id: string;
+  profileId: string | null;
+  siteId?: string | null;
+  rawOcrText: string;
+  normalizedOcrText: string;
+  matchedCpt: string;
+  modifier: string | null;
+  workRvu: number | null;
+  confidence: number;
+  source: 'ocr_confirmed' | 'user' | 'manual_name_match';
+  correctionHistoryJson: string;
+  confirmations: number;
+  corrections: number;
+  lastUsedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type MatchMethod =
   | 'manual_cpt'
   | 'manual_name_match'
