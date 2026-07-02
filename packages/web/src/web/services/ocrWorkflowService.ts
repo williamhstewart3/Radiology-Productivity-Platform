@@ -1,5 +1,5 @@
 import { CSVImportProvider } from '../providers/CSVImportProvider';
-import { OCRImportProvider } from '../providers/OCRImportProvider';
+import { OCRImportProvider, type OCRImportDebugInfo } from '../providers/OCRImportProvider';
 import { runImportPipeline, type PipelineResult } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
 import { ensureUserSettings } from '../db/database';
@@ -16,6 +16,7 @@ export interface ProcessedImportResult {
   result: PipelineResult;
   extractedCount: number;
   timelineLabel: string;
+  ocrDebug?: OCRImportDebugInfo | null;
 }
 
 async function processProvider(
@@ -76,8 +77,7 @@ export async function processOcrImport(
     });
   }
 
-  const processed = await processProvider(
-    new OCRImportProvider(source, context.logDate, {
+  const provider = new OCRImportProvider(source, context.logDate, {
       cropBeforeOcr: !metadata?.cropAlreadyApplied && settings.requireCropBeforeOcr !== false,
       cropRegion: savedCrop
         ? {
@@ -87,7 +87,9 @@ export async function processOcrImport(
             height: savedCrop.height,
           }
         : null,
-    }),
+    });
+  const processed = await processProvider(
+    provider,
     context,
     (count) => `Screenshot OCR completed (${count} extracted)`,
   );
@@ -103,5 +105,5 @@ export async function processOcrImport(
       skippedRows: processed.result.skippedRows.length,
     }),
   });
-  return processed;
+  return { ...processed, ocrDebug: provider.getDebugInfo() };
 }

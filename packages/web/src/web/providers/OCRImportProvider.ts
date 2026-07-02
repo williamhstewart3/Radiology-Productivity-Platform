@@ -15,13 +15,27 @@
 
 import { parseOcrLines } from '../utils/powerScribeParser';
 import { getDefaultOcrProvider } from '../utils/ocrProvider';
-import { DEFAULT_POWERSCRIBE_STUDY_LIST_CROP, cropPowerScribeScreenshot, type RelativeCropRect } from '../utils/imageCrop';
+import {
+  DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
+  cropPowerScribeScreenshotWithDebug,
+  type DetectedCrop,
+  type RelativeCropRect,
+} from '../utils/imageCrop';
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
+import type { ParsedLine } from '../utils/powerScribeParser';
 
 export interface OCRImportOptions {
   cropBeforeOcr?: boolean;
   cropRegion?: RelativeCropRect | null;
   autoDetectPowerScribeTable?: boolean;
+}
+
+export interface OCRImportDebugInfo {
+  crop: DetectedCrop | null;
+  ocrText: string;
+  ocrLines: string[];
+  detectedRows: ParsedLine[];
+  ocrConfidence: number;
 }
 
 export class OCRImportProvider implements ImportProvider {
@@ -31,6 +45,7 @@ export class OCRImportProvider implements ImportProvider {
   private file: File | Blob;
   private studyDate: string;
   private options: OCRImportOptions;
+  private debugInfo: OCRImportDebugInfo | null = null;
 
   constructor(file: File | Blob, studyDate: string, options: OCRImportOptions = {}) {
     this.file = file;
@@ -40,17 +55,26 @@ export class OCRImportProvider implements ImportProvider {
 
   async importStudies(): Promise<ImportedStudy[]> {
     const provider = getDefaultOcrProvider();
-    const imageForOcr = this.options.cropBeforeOcr === false
-      ? this.file
-      : await cropPowerScribeScreenshot(
+    const cropResult = this.options.cropBeforeOcr === false
+      ? null
+      : await cropPowerScribeScreenshotWithDebug(
           this.file,
           this.options.autoDetectPowerScribeTable === false
             ? this.options.cropRegion ?? DEFAULT_POWERSCRIBE_STUDY_LIST_CROP
             : this.options.cropRegion ?? null,
         );
+    const imageForOcr = cropResult?.blob ?? this.file;
     const result = await provider.extractText(imageForOcr);
     const parsed = parseOcrLines(result.lines);
     const now = new Date().toISOString();
+
+    this.debugInfo = {
+      crop: cropResult?.crop ?? null,
+      ocrText: result.rawText,
+      ocrLines: result.lines,
+      detectedRows: parsed,
+      ocrConfidence: result.confidence,
+    };
 
     return parsed.map((p) => {
       const productivityDate = p.modifiedDate ?? p.studyDate ?? this.studyDate;
@@ -75,5 +99,9 @@ export class OCRImportProvider implements ImportProvider {
         dateTimeSource: p.dateTimeConfidence > 0 ? 'ocr' : 'import_default',
       };
     });
+  }
+
+  getDebugInfo(): OCRImportDebugInfo | null {
+    return this.debugInfo;
   }
 }

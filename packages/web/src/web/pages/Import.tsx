@@ -29,7 +29,7 @@ import {
   type TimelineEvent,
 } from '../services/reviewSessionService';
 import { rememberCorrectedExam } from '../services/memoryLearningService';
-import { processOcrImport, processTextImport } from '../services/ocrWorkflowService';
+import { processOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
 
@@ -129,6 +129,52 @@ function ExamSearchPanel({ initialQuery, onSelect, onClose }: ExamSearchPanelPro
 }
 
 // ─── ImportProps ──────────────────────────────────────────────────────────────
+
+function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) {
+  if (!debug) return null;
+
+  return (
+    <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs">
+      <summary className="cursor-pointer font-semibold text-slate-300">
+        OCR debug: {debug.detectedRows.length} rows, {Math.round(debug.ocrConfidence * 100)}% text confidence
+      </summary>
+      <div className="mt-3 grid gap-3">
+        {debug.crop && (
+          <div className="rounded-lg border border-white/8 bg-black/20 p-2">
+            <p className="font-medium text-slate-300">
+              Crop: {debug.crop.method} ({Math.round(debug.crop.confidence * 100)}%)
+            </p>
+            <p className="mt-1 font-mono text-[11px] text-slate-400">
+              x {debug.crop.rect.x.toFixed(3)}, y {debug.crop.rect.y.toFixed(3)}, w {debug.crop.rect.width.toFixed(3)}, h {debug.crop.rect.height.toFixed(3)}
+            </p>
+          </div>
+        )}
+        <div className="rounded-lg border border-white/8 bg-black/20 p-2">
+          <p className="font-medium text-slate-300">Detected rows</p>
+          <div className="mt-2 max-h-36 overflow-y-auto space-y-1">
+            {debug.detectedRows.length === 0 ? (
+              <p className="text-slate-500">No exam rows were detected from the OCR text.</p>
+            ) : (
+              debug.detectedRows.map((row, index) => (
+                <p key={`${row.rawText}-${index}`} className="font-mono text-[11px] text-slate-400">
+                  {index + 1}. {row.examName}
+                  {row.modifiedDateTime ? ` | modified ${row.modifiedDateTime}` : ''}
+                  {row.studyDate ? ` | exam ${row.studyDate}` : ''}
+                </p>
+              ))
+            )}
+          </div>
+        </div>
+        <div className="rounded-lg border border-white/8 bg-black/20 p-2">
+          <p className="font-medium text-slate-300">OCR text</p>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">
+            {debug.ocrText}
+          </pre>
+        </div>
+      </div>
+    </details>
+  );
+}
 
 function candidateKey(candidate: MatchCandidate): string {
   return `${candidate.cptCode}-${candidate.modifier ?? ''}`;
@@ -287,6 +333,7 @@ export function Import({ onImported }: ImportProps) {
   const [searchPanelTempId, setSearchPanelTempId] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<ReviewMode>('unknowns');
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
+  const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -420,6 +467,7 @@ export function Import({ onImported }: ImportProps) {
         sessionId,
         logDate,
       }, { filename: file.name, size: file.size });
+      setOcrDebug(processed.ocrDebug ?? null);
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
       setClipboardFile(null);
     } catch (e) {
@@ -1445,6 +1493,7 @@ export function Import({ onImported }: ImportProps) {
               OCR runs locally and is cropped before parsing. Already-imported studies are auto-skipped.
             </p>
           </div>
+          <OcrDebugPanel debug={ocrDebug} />
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button
             onClick={handleOcrProcess}

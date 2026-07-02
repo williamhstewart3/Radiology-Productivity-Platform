@@ -18,6 +18,11 @@ export interface DetectedCrop {
   method: 'detected' | 'fallback';
 }
 
+export interface CroppedImageResult {
+  blob: Blob;
+  crop: DetectedCrop;
+}
+
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
@@ -219,10 +224,21 @@ export async function cropPowerScribeScreenshot(
   cropRect?: RelativeCropRect | null,
   outputType = 'image/png',
 ): Promise<Blob> {
+  return (await cropPowerScribeScreenshotWithDebug(image, cropRect, outputType)).blob;
+}
+
+export async function cropPowerScribeScreenshotWithDebug(
+  image: File | Blob,
+  cropRect?: RelativeCropRect | null,
+  outputType = 'image/png',
+): Promise<CroppedImageResult> {
   const bitmap = await createImageBitmap(image);
   try {
-    const detected = cropRect ? { rect: cropRect } : detectPowerScribeStudyListCropFromBitmap(bitmap);
-    return await blobFromBitmapCrop(bitmap, detected.rect, outputType);
+    const crop: DetectedCrop = cropRect
+      ? { rect: normalizeCrop(cropRect), confidence: 1, method: 'fallback' }
+      : detectPowerScribeStudyListCropFromBitmap(bitmap);
+    const blob = await blobFromBitmapCrop(bitmap, crop.rect, outputType);
+    return { blob, crop };
   } finally {
     bitmap.close();
   }
