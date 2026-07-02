@@ -261,7 +261,13 @@ export async function findMatchCandidates(
   }
 
   if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForCommonRadiologyMapping(trimmed));
+    const commonCandidates = await candidatesForCommonRadiologyMapping(trimmed);
+    if (commonCandidates.length > 0) {
+      return dedupeCandidates([...candidates, ...commonCandidates])
+        .filter((candidate) => candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0)
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, maxResults);
+    }
   }
 
   const allCpt = candidates.length < maxResults

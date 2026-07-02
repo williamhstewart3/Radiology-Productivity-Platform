@@ -1,3 +1,5 @@
+import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
+
 const COMMON_EXAM_CPT_CODES: Array<{ description: string; cptCodes: string[] }> = [
   { description: 'CT HEAD WO', cptCodes: ['70450'] },
   { description: 'CT CHEST W', cptCodes: ['71260'] },
@@ -74,7 +76,7 @@ function applyPhraseReplacements(text: string): string {
 }
 
 export function normalizeRadiologyDescription(raw: string): string {
-  let text = raw.toUpperCase().trim();
+  let text = normalizeOcrExamTextForMatching(raw).toUpperCase().trim();
   if (!text) return '';
 
   text = text
