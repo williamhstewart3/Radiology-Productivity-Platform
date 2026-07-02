@@ -23,6 +23,19 @@ export interface CroppedImageResult {
   crop: DetectedCrop;
 }
 
+export type PowerScribeColumnName = 'procedure' | 'examDate' | 'modifiedDate';
+
+export interface PowerScribeColumnCrop {
+  name: PowerScribeColumnName;
+  blob: Blob;
+  rect: RelativeCropRect;
+}
+
+export interface PowerScribeColumnPreprocessResult {
+  tableCrop: DetectedCrop;
+  columns: PowerScribeColumnCrop[];
+}
+
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
@@ -227,6 +240,94 @@ export async function cropPowerScribeScreenshot(
   return (await cropPowerScribeScreenshotWithDebug(image, cropRect, outputType)).blob;
 }
 
+function absoluteRectFromRelative(rect: RelativeCropRect, width: number, height: number) {
+  const normalized = normalizeCrop(rect);
+  return {
+    x: Math.round(normalized.x * width),
+    y: Math.round(normalized.y * height),
+    width: Math.max(1, Math.round(normalized.width * width)),
+    height: Math.max(1, Math.round(normalized.height * height)),
+  };
+}
+
+function childRect(parent: RelativeCropRect, child: RelativeCropRect): RelativeCropRect {
+  const p = normalizeCrop(parent);
+  const c = normalizeCrop(child);
+  return normalizeCrop({
+    x: p.x + p.width * c.x,
+    y: p.y + p.height * c.y,
+    width: p.width * c.width,
+    height: p.height * c.height,
+  });
+}
+
+function adaptiveThreshold(imageData: ImageData, width: number, height: number): ImageData {
+  const source = imageData.data;
+  const gray = new Uint8ClampedArray(width * height);
+  const integral = new Float64Array((width + 1) * (height + 1));
+
+  for (let y = 0; y < height; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 4;
+      const raw = source[offset] * 0.299 + source[offset + 1] * 0.587 + source[offset + 2] * 0.114;
+      const contrasted = Math.max(0, Math.min(255, (raw - 128) * 1.55 + 128));
+      gray[y * width + x] = contrasted;
+      rowSum += contrasted;
+      integral[(y + 1) * (width + 1) + x + 1] = integral[y * (width + 1) + x + 1] + rowSum;
+    }
+  }
+
+  const output = new ImageData(width, height);
+  const target = output.data;
+  const radius = 14;
+  for (let y = 0; y < height; y++) {
+    const y0 = Math.max(0, y - radius);
+    const y1 = Math.min(height - 1, y + radius);
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.max(0, x - radius);
+      const x1 = Math.min(width - 1, x + radius);
+      const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+      const sum =
+        integral[(y1 + 1) * (width + 1) + x1 + 1] -
+        integral[y0 * (width + 1) + x1 + 1] -
+        integral[(y1 + 1) * (width + 1) + x0] +
+        integral[y0 * (width + 1) + x0];
+      const threshold = sum / area - 7;
+      const value = gray[y * width + x] < threshold ? 0 : 255;
+      const offset = (y * width + x) * 4;
+      target[offset] = value;
+      target[offset + 1] = value;
+      target[offset + 2] = value;
+      target[offset + 3] = 255;
+    }
+  }
+
+  return output;
+}
+
+async function preprocessedBlobFromBitmapCrop(bitmap: ImageBitmap, cropRect: RelativeCropRect, outputType: string): Promise<Blob> {
+  const source = absoluteRectFromRelative(cropRect, bitmap.width, bitmap.height);
+  const scale = 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = source.width * scale;
+  canvas.height = source.height * scale;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('Canvas is not available for OCR preprocessing');
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, canvas.width, canvas.height);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  ctx.putImageData(adaptiveThreshold(imageData, canvas.width, canvas.height), 0, 0);
+
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('Canvas preprocessing export failed'));
+    }, outputType);
+  });
+}
+
 export async function cropPowerScribeScreenshotWithDebug(
   image: File | Blob,
   cropRect?: RelativeCropRect | null,
@@ -239,6 +340,35 @@ export async function cropPowerScribeScreenshotWithDebug(
       : detectPowerScribeStudyListCropFromBitmap(bitmap);
     const blob = await blobFromBitmapCrop(bitmap, crop.rect, outputType);
     return { blob, crop };
+  } finally {
+    bitmap.close();
+  }
+}
+
+export async function preprocessPowerScribeColumnsForOcr(
+  image: File | Blob,
+  cropRect?: RelativeCropRect | null,
+  outputType = 'image/png',
+): Promise<PowerScribeColumnPreprocessResult> {
+  const bitmap = await createImageBitmap(image);
+  try {
+    const tableCrop: DetectedCrop = cropRect
+      ? { rect: normalizeCrop(cropRect), confidence: 1, method: 'fallback' }
+      : detectPowerScribeStudyListCropFromBitmap(bitmap);
+    const columnDefinitions: Array<{ name: PowerScribeColumnName; rect: RelativeCropRect }> = [
+      { name: 'procedure', rect: childRect(tableCrop.rect, { x: 0.08, y: 0, width: 0.52, height: 1 }) },
+      { name: 'examDate', rect: childRect(tableCrop.rect, { x: 0.60, y: 0, width: 0.18, height: 1 }) },
+      { name: 'modifiedDate', rect: childRect(tableCrop.rect, { x: 0.78, y: 0, width: 0.22, height: 1 }) },
+    ];
+    const columns: PowerScribeColumnCrop[] = [];
+    for (const column of columnDefinitions) {
+      columns.push({
+        name: column.name,
+        rect: column.rect,
+        blob: await preprocessedBlobFromBitmapCrop(bitmap, column.rect, outputType),
+      });
+    }
+    return { tableCrop, columns };
   } finally {
     bitmap.close();
   }

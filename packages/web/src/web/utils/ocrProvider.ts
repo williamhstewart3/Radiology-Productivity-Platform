@@ -20,7 +20,19 @@ import { createWorker, type Worker } from 'tesseract.js';
 export interface OcrResult {
   rawText: string;
   lines: string[];
+  positionedLines: OcrPositionedLine[];
   confidence: number; // 0-1, overall OCR confidence
+}
+
+export interface OcrPositionedLine {
+  text: string;
+  confidence: number;
+  bbox: {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null;
 }
 
 export interface OcrProvider {
@@ -41,10 +53,22 @@ export class TesseractProvider implements OcrProvider {
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
+    const positionedLines = (data.blocks ?? [])
+      .flatMap((block) => block.paragraphs ?? [])
+      .flatMap((paragraph) => paragraph.lines ?? [])
+      .map((line) => ({
+        text: line.text.trim(),
+        confidence: (line.confidence ?? 0) / 100,
+        bbox: line.bbox ?? null,
+      }))
+      .filter((line) => line.text.length > 0);
 
     return {
       rawText: data.text,
       lines,
+      positionedLines: positionedLines.length
+        ? positionedLines
+        : lines.map((line) => ({ text: line, confidence: (data.confidence ?? 0) / 100, bbox: null })),
       confidence: (data.confidence ?? 0) / 100,
     };
   }

@@ -175,6 +175,18 @@ function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) 
             {debug.ocrText}
           </pre>
         </div>
+        {debug.columnText && (
+          <div className="grid gap-2 md:grid-cols-3">
+            {(['procedure', 'examDate', 'modifiedDate'] as const).map((column) => (
+              <div key={column} className="rounded-lg border border-white/8 bg-black/20 p-2">
+                <p className="font-medium text-slate-300">{column}</p>
+                <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">
+                  {debug.columnText?.[column]}
+                </pre>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </details>
   );
