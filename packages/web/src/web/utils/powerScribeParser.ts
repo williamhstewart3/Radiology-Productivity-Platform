@@ -23,7 +23,7 @@ export interface ParsedLine {
 
 const ACCESSION_PATTERN = /\b(?:ACC|ACCESSION)[#:\s]*([A-Z0-9-]{5,})\b/i;
 const STANDALONE_LONG_NUMBER = /\b(\d{7,12})\b/;
-const LEADING_ROW_INDEX_PATTERN = /^\s*(?:#\s*)?(\d{1,4})[\s.)-]+(?=(?:CT|CTA|MR|MRI|MRA|XR|X-?RAY|US|ULTRASOUND|NM|PET|FLUORO|MAMMO|MAMMOGRAM)\b)/i;
+const LEADING_ROW_INDEX_PATTERN = /^\s*(?:#\s*)?(\d{1,4})(?:\s*[|:.)-]\s*|\s+)(.+)$/i;
 const EXAM_CONTEXT_PATTERN =
   /\b(?:ct|cta|mri?|mra|x-?ray|xr|ultrasound|u\/s|us|nm|pet|fluoro|mammogram|mammo|angiogram|abdomen|pelvis|chest|head|neck|brain|spine|lumbar|thoracic|cervical|knee|shoulder|hip|ankle|wrist|contrast|with|without|w\/o|w\/)\b/i;
 const METADATA_LABEL_PATTERN =
@@ -32,6 +32,22 @@ const HEADER_FOOTER_PATTERN =
   /^(?:page \d+|status|completed|study list|procedure|exam date|modified|patient name|patient id|mrn|dob|date of birth|age|accession|account|encounter|order|signed|finalized|dictated|performed|provider|radiologist|facility)\b/i;
 const UI_NOISE_PATTERN =
   /\b(?:reset\s+filters?|browse|search|filter|filters|refresh|logout|settings|preferences|dashboard|inbox|outbox|worklist|folder|sort|ascending|descending|click|button|menu|home|apply|clear|cancel|save|export|print|status\s+bar|tabs?)\b/i;
+
+const UI_TEXT_STRIP_PATTERNS = [
+  /\breset\s+filters?\b/gi,
+  /\bbrowse\b/gi,
+  /\bsearch\b/gi,
+  /\bfilters?\b/gi,
+  /\brefresh\b/gi,
+  /\bapply\b/gi,
+  /\bclear\b/gi,
+  /\bcancel\b/gi,
+  /\bsave\b/gi,
+  /\bexport\b/gi,
+  /\bprint\b/gi,
+  /\bstatus\s+bar\b/gi,
+  /\btabs?\b/gi,
+];
 
 // Date patterns to strip from exam name after extraction (so they don't
 // contaminate the exam name text). Match the same patterns as studyDateParser.
@@ -90,6 +106,31 @@ function isLikelyExamLine(text: string): boolean {
   return true;
 }
 
+function stripLeadingRowIndex(text: string): { rowIndex: string; text: string } | null {
+  const rowIndexMatch = text.match(LEADING_ROW_INDEX_PATTERN);
+  if (!rowIndexMatch) return null;
+
+  const [, rowIndex, rest] = rowIndexMatch;
+  const cleanedRest = rest.trim();
+  if (!hasExamContext(cleanedRest)) return null;
+
+  return {
+    rowIndex,
+    text: cleanedRest,
+  };
+}
+
+function stripUiText(text: string): string {
+  let cleaned = text;
+  for (const pattern of UI_TEXT_STRIP_PATTERNS) {
+    cleaned = cleaned.replace(pattern, ' ');
+  }
+  return cleaned
+    .replace(/[|•]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export function parseOcrLines(lines: string[]): ParsedLine[] {
   return lines.map((line) => parseSingleLine(line)).filter((p): p is ParsedLine => p !== null);
 }
@@ -107,10 +148,10 @@ function parseSingleLine(rawLine: string): ParsedLine | null {
 
   let working = trimmed;
   let rowIndex: string | null = null;
-  const rowIndexMatch = working.match(LEADING_ROW_INDEX_PATTERN);
-  if (rowIndexMatch) {
-    rowIndex = rowIndexMatch[1];
-    working = working.slice(rowIndexMatch[0].length).trim();
+  const rowIndexResult = stripLeadingRowIndex(working);
+  if (rowIndexResult) {
+    rowIndex = rowIndexResult.rowIndex;
+    working = rowIndexResult.text;
   }
 
   // ── Extract date/time using the dedicated parser ──────────────────────────
@@ -151,7 +192,7 @@ function parseSingleLine(rawLine: string): ParsedLine | null {
   }
 
   // ── Clean up exam name ────────────────────────────────────────────────────
-  const examName = working.replace(/\s{2,}/g, ' ').trim();
+  const examName = stripUiText(working);
   if (examName.length < 2) return null;
 
   return {

@@ -10,6 +10,8 @@
 - [x] Auto-crop PowerScribe screenshots before OCR
 - [x] Use Modified Date/Time as OCR productivity timestamp while preserving Exam Date
 - [x] Replace obsolete folder-watcher workflow with PowerScribe clipboard/window capture intake
+- [x] Tighten PowerScribe table crop bounds to avoid toolbar/navigation/status chrome before OCR
+- [x] Strip visible row numbers and mixed PowerScribe UI labels before OCR matching
 
 ---
 

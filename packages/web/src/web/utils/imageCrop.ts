@@ -6,10 +6,10 @@ export interface RelativeCropRect {
 }
 
 export const DEFAULT_POWERSCRIBE_STUDY_LIST_CROP: RelativeCropRect = {
-  x: 0.18,
-  y: 0.17,
+  x: 0.2,
+  y: 0.22,
   width: 0.76,
-  height: 0.66,
+  height: 0.58,
 };
 
 export interface DetectedCrop {
@@ -29,6 +29,24 @@ function normalizeCrop(rect: RelativeCropRect): RelativeCropRect {
   const width = Math.max(0.05, Math.min(1 - x, clamp01(rect.width)));
   const height = Math.max(0.05, Math.min(1 - y, clamp01(rect.height)));
   return { x, y, width, height };
+}
+
+function boundToStudyListArea(rect: RelativeCropRect): RelativeCropRect {
+  const bounded = normalizeCrop(rect);
+  const minX = 0.18;
+  const minY = 0.2;
+  const maxRight = 0.98;
+  const maxBottom = 0.88;
+  const x = Math.max(minX, bounded.x);
+  const y = Math.max(minY, bounded.y);
+  const right = Math.min(maxRight, Math.max(x + 0.45, bounded.x + bounded.width));
+  const bottom = Math.min(maxBottom, Math.max(y + 0.24, bounded.y + bounded.height));
+  return normalizeCrop({
+    x,
+    y,
+    width: right - x,
+    height: bottom - y,
+  });
 }
 
 function smooth(values: number[], radius: number): number[] {
@@ -100,10 +118,10 @@ function detectPowerScribeStudyListCropFromBitmap(bitmap: ImageBitmap): Detected
   const rowSignal = new Array<number>(height).fill(0);
   const colSignal = new Array<number>(width).fill(0);
 
-  const xMin = Math.floor(width * 0.12);
+  const xMin = Math.floor(width * 0.18);
   const xMax = Math.floor(width * 0.98);
-  const yMin = Math.floor(height * 0.11);
-  const yMax = Math.floor(height * 0.92);
+  const yMin = Math.floor(height * 0.2);
+  const yMax = Math.floor(height * 0.88);
 
   for (let y = yMin + 1; y < yMax; y++) {
     for (let x = xMin + 1; x < xMax; x++) {
@@ -133,11 +151,11 @@ function detectPowerScribeStudyListCropFromBitmap(bitmap: ImageBitmap): Detected
     return { rect: DEFAULT_POWERSCRIBE_STUDY_LIST_CROP, confidence: 0.2, method: 'fallback' };
   }
 
-  const detected = normalizeCrop({
-    x: Math.max(0.12, colBand.start / width - 0.025),
-    y: Math.max(0.10, rowBand.start / height - 0.025),
-    width: Math.min(0.86, (Math.min(width - 1, colBand.end + Math.round(width * 0.04)) / width) - Math.max(0.12, colBand.start / width - 0.025)),
-    height: Math.min(0.80, (Math.min(height - 1, rowBand.end + Math.round(height * 0.035)) / height) - Math.max(0.10, rowBand.start / height - 0.025)),
+  const detected = boundToStudyListArea({
+    x: colBand.start / width - 0.02,
+    y: rowBand.start / height - 0.015,
+    width: Math.min(0.8, (Math.min(width - 1, colBand.end + Math.round(width * 0.035)) / width) - (colBand.start / width - 0.02)),
+    height: Math.min(0.68, (Math.min(height - 1, rowBand.end + Math.round(height * 0.025)) / height) - (rowBand.start / height - 0.015)),
   });
 
   const rowCoverage = (rowBand.end - rowBand.start + 1) / Math.max(1, yMax - yMin);
