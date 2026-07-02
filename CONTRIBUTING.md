@@ -39,4 +39,4 @@
 - Preserve existing app behavior unless a change request says otherwise.
 - Do not modify database schema or persistent data contracts without explicit approval.
 - Do not add dependencies without explaining why.
-- Keep OCR, watcher, import, and CPT logic scoped to their feature branches.
+- Keep OCR, PowerScribe capture, import, and CPT logic scoped to their feature branches.

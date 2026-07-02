@@ -46,6 +46,7 @@ export function reviewSessionRowKey(row: PipelineReviewRow): string {
     row.source.modifiedDate ?? '',
     row.source.studyDate ?? '',
     row.source.accessionNumber ?? '',
+    row.source.rowIndex ?? '',
   ].join('|');
 }
 

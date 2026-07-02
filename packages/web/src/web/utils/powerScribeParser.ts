@@ -16,18 +16,22 @@ export interface ParsedLine {
   modifiedDateTime: string | null;
   modifiedDate: string | null;
   accessionNumber: string | null;
+  rowIndex: string | null;
   /** 0.0–1.0 confidence in the extracted date/time */
   dateTimeConfidence: number;
 }
 
 const ACCESSION_PATTERN = /\b(?:ACC|ACCESSION)[#:\s]*([A-Z0-9-]{5,})\b/i;
 const STANDALONE_LONG_NUMBER = /\b(\d{7,12})\b/;
+const LEADING_ROW_INDEX_PATTERN = /^\s*(?:#\s*)?(\d{1,4})[\s.)-]+(?=(?:CT|CTA|MR|MRI|MRA|XR|X-?RAY|US|ULTRASOUND|NM|PET|FLUORO|MAMMO|MAMMOGRAM)\b)/i;
 const EXAM_CONTEXT_PATTERN =
   /\b(?:ct|cta|mri?|mra|x-?ray|xr|ultrasound|u\/s|us|nm|pet|fluoro|mammogram|mammo|angiogram|abdomen|pelvis|chest|head|neck|brain|spine|lumbar|thoracic|cervical|knee|shoulder|hip|ankle|wrist|contrast|with|without|w\/o|w\/)\b/i;
 const METADATA_LABEL_PATTERN =
   /\b(?:dob|date of birth|birth date|age|mrn|medical record|patient(?:\s+(?:id|name))?|accession|acc|account|acct|encounter|order(?:\s+(?:id|number))?|csn|fin|har)\b/i;
 const HEADER_FOOTER_PATTERN =
-  /^(?:page \d+|status|completed|study list|patient name|patient id|mrn|dob|date of birth|age|accession|account|encounter|order|signed|finalized|dictated|performed|provider|radiologist|facility)\b/i;
+  /^(?:page \d+|status|completed|study list|procedure|exam date|modified|patient name|patient id|mrn|dob|date of birth|age|accession|account|encounter|order|signed|finalized|dictated|performed|provider|radiologist|facility)\b/i;
+const UI_NOISE_PATTERN =
+  /\b(?:reset\s+filters?|browse|search|filter|filters|refresh|logout|settings|preferences|dashboard|inbox|outbox|worklist|folder|sort|ascending|descending|click|button|menu|home|apply|clear|cancel|save|export|print|status\s+bar|tabs?)\b/i;
 
 // Date patterns to strip from exam name after extraction (so they don't
 // contaminate the exam name text). Match the same patterns as studyDateParser.
@@ -73,11 +77,8 @@ function isLikelyExamLine(text: string): boolean {
 
   const lower = text.toLowerCase();
 
-  const obviousUiNoise =
-    /\b(?:search|filter|refresh|logout|settings|preferences|dashboard|inbox|outbox|worklist|folder|sort|ascending|descending|click|button|menu|home)\b/i;
-
   if (
-    obviousUiNoise.test(lower) &&
+    UI_NOISE_PATTERN.test(lower) &&
     !/\b(?:ct|cta|mri?|mra|xr|x-?ray|us|ultrasound|nm|pet|fluoro|mammo|mammogram)\b/i.test(lower)
   ) {
     return false;
@@ -105,6 +106,12 @@ function parseSingleLine(rawLine: string): ParsedLine | null {
   }
 
   let working = trimmed;
+  let rowIndex: string | null = null;
+  const rowIndexMatch = working.match(LEADING_ROW_INDEX_PATTERN);
+  if (rowIndexMatch) {
+    rowIndex = rowIndexMatch[1];
+    working = working.slice(rowIndexMatch[0].length).trim();
+  }
 
   // ── Extract date/time using the dedicated parser ──────────────────────────
   const dateMatches = parseDateTimeMatchesFromOcr(working);
@@ -155,6 +162,7 @@ function parseSingleLine(rawLine: string): ParsedLine | null {
     modifiedDateTime,
     modifiedDate,
     accessionNumber,
+    rowIndex,
     dateTimeConfidence,
   };
 }

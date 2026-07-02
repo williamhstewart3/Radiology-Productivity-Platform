@@ -9,18 +9,18 @@ The ideal experience is simple: a radiologist finishes studies, imports or captu
 ## Core Principles
 
 - Local-first by default. Study data, screenshots, OCR, aliases, and logs should stay on-device unless the user explicitly enables a future sync feature.
-- One import pipeline. Manual entry, paste/CSV, OCR screenshots, camera capture, folder watcher, and future PowerScribe API sync should all produce `ImportedStudy[]` and flow through the same normalization, matching, duplicate detection, review, commit, and alias-learning path.
+- One import pipeline. Manual entry, paste/CSV, PowerScribe clipboard/window capture, OCR screenshots, camera capture, and future PowerScribe API sync should all produce `ImportedStudy[]` and flow through the same normalization, matching, duplicate detection, review, commit, and alias-learning path.
 - Physician work RVU only. Matching should exclude technical-only rows and prefer professional-component rows when available.
 - Review uncertainty, automate confidence. High-confidence learned mappings should disappear into the background; low-confidence OCR/matching/duplicate cases should be visible and easy to correct.
 - Profiles and locations matter. Aliases, logs, goals, and dashboards should respect the active radiologist/location context while preserving a migration path for legacy unscoped rows.
-- Privacy is a feature. Camera and watcher workflows must keep PHI warnings clear, avoid external transmission, and minimize retained screenshots.
+- Privacy is a feature. Camera and PowerScribe capture workflows must keep PHI warnings clear, avoid external transmission, and minimize retained screenshots.
 
 ## Architecture Direction
 
 The current app is a Bun/Turbo monorepo:
 
 - `packages/web`: primary React/Vite app, Dexie local database, import pipeline, OCR, matching, dashboards.
-- `packages/desktop`: Electron shell for native filesystem access and folder watching.
+- `packages/desktop`: Electron shell for native desktop capabilities.
 - `packages/mobile`: Expo shell for future mobile surfaces.
 
 The durable data model is currently Dexie/IndexedDB. The Hono API and Drizzle schema are intentionally minimal and should not become a second source of truth until cloud sync is deliberately designed.
@@ -36,24 +36,24 @@ CPT matching should continue to combine:
 
 The matcher should become more explainable over time: when it suggests a CPT, the UI should make clear whether the confidence came from a learned alias, direct CPT, protocol normalization, or fuzzy CMS description match.
 
-## OCR and Watcher Direction
+## OCR and PowerScribe Capture Direction
 
 OCR should remain provider-based. Tesseract.js is the default local provider; a future higher-accuracy provider can be added behind the same interface only if privacy and deployment constraints are explicit.
 
-The watcher should be a calm background assistant:
+Folder watching has been superseded by PowerScribe clipboard/window capture. The primary intake path is now:
 
-- Detect screenshot files.
+- Capture or paste an active PowerScribe window grab.
+- Automatically crop to the completed-studies table before OCR.
 - OCR locally.
-- Auto-commit only safe/high-confidence rows.
-- Persist anything requiring review.
-- Route processed/failed files predictably.
+- Parse procedure, exam date, modified/read date, and visible row metadata.
+- Route all rows through the shared review, duplicate detection, matching, and commit pipeline.
 
-No watcher output should be stranded in transient component state.
+No capture output should be stranded in transient component state.
 
 ## Near-Term Priorities
 
 1. Finish consolidating manual entry onto the shared import pipeline.
-2. Persist watcher review batches in IndexedDB instead of session storage.
+2. Persist PowerScribe capture review batches in IndexedDB instead of session storage.
 3. Complete multi-CPT alias support from matching through commit and history display.
 4. Reduce the existing lint/a11y backlog so lint can become a reliable CI gate.
 5. Add focused tests for date parsing, duplicate detection, alias scoping, and CSV parsing.

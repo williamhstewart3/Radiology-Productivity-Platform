@@ -2,7 +2,7 @@
  * Search-first CPT lookup and logging workstation.
  *
  * This page is intentionally self-contained: it only reads CPT rows and writes
- * studyLogs using the existing StudyLog shape. No schema/import/watcher paths
+ * studyLogs using the existing StudyLog shape. No schema/import/capture paths
  * are involved.
  */
 

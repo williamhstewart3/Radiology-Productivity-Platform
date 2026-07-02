@@ -98,6 +98,7 @@ export async function runImportPipeline(
     studyDateTime: study.modifiedDateTime ?? study.studyTime,
     studyDate: study.studyDate ?? null,
     accessionNumber: study.accessionNumber,
+    rowIndex: study.rowIndex ?? null,
     modality: study.modality ?? candidates[0]?.modality ?? null,
   }));
 
@@ -225,6 +226,7 @@ export async function commitPipelineResults(
         matchConfidence: cand.confidence,
         needsReview: isReview,
         accessionNumber: study.accessionNumber,
+        rowIndex: study.rowIndex ?? null,
         sessionId: rowSessionId,
         sourceImportId: importId,
         notes: selectedCandidates.length > 1 ? `Combined CPT study: ${cmsDescription}` : null,

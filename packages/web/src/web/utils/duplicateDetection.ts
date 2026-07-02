@@ -52,6 +52,7 @@ export interface StudyCandidate {
   studyDateTime: string | null; // ISO 8601 or null
   studyDate: string | null;
   accessionNumber: string | null;
+  rowIndex: string | null;
   modality: string | null;
 }
 
@@ -211,6 +212,14 @@ export async function checkOneDuplicate(
           reason: 'Same exam title and performed exam date',
         };
       }
+
+      if (candidate.rowIndex && log.rowIndex && candidate.rowIndex === log.rowIndex) {
+        return {
+          confidence: 'possible',
+          existingLog: log,
+          reason: 'Same exam title and visible row number',
+        };
+      }
     }
 
     // ── Tiers 2 & 3: require same CPT and same date ────────────────────
@@ -324,6 +333,7 @@ export async function checkBatchDuplicates(
             dateTimeConfidence: batchPrior.studyDateTime ? 1 : 0,
             dateTimeSource: batchPrior.studyDateTime ? 'ocr' : 'import_default',
             accessionNumber: batchPrior.accessionNumber,
+            rowIndex: batchPrior.rowIndex,
             modality: batchPrior.modality as StudyLog['modality'],
             // Required fields for type compliance
             modifier: batchPrior.modifier,

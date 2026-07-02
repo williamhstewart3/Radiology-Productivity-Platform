@@ -15,12 +15,13 @@
 
 import { parseOcrLines } from '../utils/powerScribeParser';
 import { getDefaultOcrProvider } from '../utils/ocrProvider';
-import { cropImageBlob, DEFAULT_POWERSCRIBE_STUDY_LIST_CROP, type RelativeCropRect } from '../utils/imageCrop';
+import { DEFAULT_POWERSCRIBE_STUDY_LIST_CROP, cropPowerScribeScreenshot, type RelativeCropRect } from '../utils/imageCrop';
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
 
 export interface OCRImportOptions {
   cropBeforeOcr?: boolean;
   cropRegion?: RelativeCropRect | null;
+  autoDetectPowerScribeTable?: boolean;
 }
 
 export class OCRImportProvider implements ImportProvider {
@@ -41,7 +42,12 @@ export class OCRImportProvider implements ImportProvider {
     const provider = getDefaultOcrProvider();
     const imageForOcr = this.options.cropBeforeOcr === false
       ? this.file
-      : await cropImageBlob(this.file, this.options.cropRegion ?? DEFAULT_POWERSCRIBE_STUDY_LIST_CROP);
+      : await cropPowerScribeScreenshot(
+          this.file,
+          this.options.autoDetectPowerScribeTable === false
+            ? this.options.cropRegion ?? DEFAULT_POWERSCRIBE_STUDY_LIST_CROP
+            : this.options.cropRegion ?? null,
+        );
     const result = await provider.extractText(imageForOcr);
     const parsed = parseOcrLines(result.lines);
     const now = new Date().toISOString();
@@ -61,6 +67,7 @@ export class OCRImportProvider implements ImportProvider {
         modality: null,
         accessionNumber: p.accessionNumber,
         patientMRN: null,
+        rowIndex: p.rowIndex,
         source: 'ocr' as const,
         importedAt: now,
         dateTimeConfidence: p.dateTimeConfidence,

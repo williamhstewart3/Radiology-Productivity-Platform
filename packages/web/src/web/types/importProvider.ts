@@ -103,6 +103,9 @@ export interface ImportedStudy {
   /** Patient MRN — stored for audit purposes, never used for dedup. */
   patientMRN: string | null;
 
+  /** Optional visible row/index number from the source table, when OCR captures it. */
+  rowIndex?: string | null;
+
   /** Which provider emitted this study. Set by the provider itself. */
   source: ImportSource;
 

@@ -267,11 +267,10 @@ interface ImportProps {
 type Mode = 'paste' | 'ocr' | 'powerscribe';
 type Step = 'input' | 'review' | 'done';
 type ReviewMode = 'unknowns' | 'everything' | 'auto' | 'low';
-const WATCHER_REVIEW_KEY = 'wrvu_pending_watcher_review';
 
 export function Import({ onImported }: ImportProps) {
   const { activeProfile, activePractice } = useProfile();
-  const [mode, setMode]           = useState<Mode>('paste');
+  const [mode, setMode]           = useState<Mode>('ocr');
   const [step, setStep]           = useState<Step>('input');
   const [pasteText, setPasteText] = useState('');
   const [ocrFile, setOcrFile]     = useState<File | null>(null);
@@ -291,22 +290,6 @@ export function Import({ onImported }: ImportProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const raw = sessionStorage.getItem(WATCHER_REVIEW_KEY);
-    if (!raw) return;
-    try {
-      const rows = JSON.parse(raw) as PipelineReviewRow[];
-      if (Array.isArray(rows) && rows.length > 0) {
-        setReviewRows(rows);
-        setSkippedRows([]);
-        setLogDate(rows[0]?.source.modifiedDate ?? rows[0]?.source.studyDate ?? todayDateString());
-        setStep('review');
-      }
-    } finally {
-      sessionStorage.removeItem(WATCHER_REVIEW_KEY);
-    }
-  }, []);
 
   useEffect(() => {
     loadActiveReviewSession(activeProfile?.id ?? null).then((session) => {
@@ -905,6 +888,9 @@ export function Import({ onImported }: ImportProps) {
                     {row.source.accessionNumber && (
                       <p className="text-xs text-slate-500">Acc: {row.source.accessionNumber}</p>
                     )}
+                    {row.source.rowIndex && (
+                      <p className="text-xs text-slate-500">Source row: {row.source.rowIndex}</p>
+                    )}
                     {/* Date/time row with source confidence indicator */}
                     <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                       {row.source.modifiedDateTime || row.source.studyTime ? (
@@ -1214,8 +1200,8 @@ export function Import({ onImported }: ImportProps) {
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
       <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">Import Studies</h1>
-        <p className="text-slate-400 text-sm mt-0.5">Bulk log from pasted text, screenshot OCR, or CSV</p>
+        <h1 className="text-2xl font-bold text-white tracking-tight">PowerScribe Capture</h1>
+        <p className="text-slate-400 text-sm mt-0.5">Paste or upload a PowerScribe window grab to extract exam rows</p>
       </div>
 
       {/* Mode toggle */}
@@ -1226,7 +1212,7 @@ export function Import({ onImported }: ImportProps) {
             mode === 'paste' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-300'
           }`}
         >
-          📋 Paste / CSV
+          Paste / CSV
         </button>
         <button
           onClick={() => { setMode('ocr'); setError(null); }}
@@ -1234,7 +1220,7 @@ export function Import({ onImported }: ImportProps) {
             mode === 'ocr' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-300'
           }`}
         >
-          📸 Screenshot OCR
+          Screen Capture Intake
         </button>
         {/* PowerScribe — architecture ready, live sync coming */}
         <button
@@ -1299,7 +1285,7 @@ export function Import({ onImported }: ImportProps) {
         <div className="card space-y-4">
           {clipboardFile && (
             <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-3">
-              <p className="text-sm font-semibold text-sky-300">PowerScribe screenshot detected - Process?</p>
+              <p className="text-sm font-semibold text-sky-300">PowerScribe window grab detected - Process?</p>
               <p className="text-xs text-slate-400">
                 The pasted image will be processed in memory for OCR, then discarded. Only parsed exam/CPT productivity data is stored.
               </p>
@@ -1321,14 +1307,14 @@ export function Import({ onImported }: ImportProps) {
                   onClick={() => alwaysProcessClipboard(clipboardFile)}
                   className="px-3 py-1.5 rounded-lg border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/10"
                 >
-                  Always process PowerScribe screenshots
+                  Always process PowerScribe captures
                 </button>
               </div>
             </div>
           )}
           <div>
             <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
-              Upload PowerScribe screenshot
+              Paste or upload PowerScribe window grab
             </label>
             <div
               onClick={() => fileRef.current?.click()}
@@ -1358,7 +1344,7 @@ export function Import({ onImported }: ImportProps) {
                 <div>
                   <p className="text-4xl mb-3">📸</p>
                   <p className="text-slate-300 text-sm font-medium">Paste, drop, or click to upload</p>
-                  <p className="text-slate-500 text-xs mt-1">Alt+Print Screen, then paste here. Images are not stored.</p>
+                  <p className="text-slate-500 text-xs mt-1">Copy the PowerScribe window, then paste here. Images are not stored.</p>
                 </div>
               )}
             </div>
@@ -1377,8 +1363,8 @@ export function Import({ onImported }: ImportProps) {
           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
             <p className="text-amber-300 text-xs font-medium">⚡ OCR Tips</p>
             <p className="text-amber-300/70 text-xs mt-1">
-              Higher resolution screenshots work best. Crop to just the study list.
-              OCR runs locally — nothing leaves your device. Already-imported studies are auto-skipped.
+              Capture the PowerScribe study list with Procedure, Exam Date, and Modified columns visible.
+              OCR runs locally and is cropped before parsing. Already-imported studies are auto-skipped.
             </p>
           </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}

@@ -4,7 +4,7 @@
 
 - Manual logging.
 - OCR import.
-- Screenshot watcher.
+- PowerScribe clipboard/window capture.
 - Learned aliases.
 - Duplicate detection.
 - Date/time extraction.

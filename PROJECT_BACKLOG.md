@@ -9,6 +9,7 @@
 - [x] Improve PowerScribe OCR line filtering
 - [x] Auto-crop PowerScribe screenshots before OCR
 - [x] Use Modified Date/Time as OCR productivity timestamp while preserving Exam Date
+- [x] Replace obsolete folder-watcher workflow with PowerScribe clipboard/window capture intake
 
 ---
 
@@ -19,6 +20,9 @@
 - [x] Auto-crop PowerScribe screenshots before OCR
 - [x] Restrict OCR to the PowerScribe study list region
 - [x] Ignore dates, timestamps, and UI text before parsing
+- [x] Auto-detect the completed-studies table before OCR with relative-crop fallback
+- [x] Capture visible PowerScribe row/index metadata when OCR provides it
+- [x] Treat Modified Date/Time as productivity date while preserving Exam Date
 - [ ] Save OCR confidence per study
 - [ ] Bulk approve high-confidence studies
 - [ ] Unknowns-only review mode

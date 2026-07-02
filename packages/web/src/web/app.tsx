@@ -26,7 +26,6 @@ import {
   Settings as SettingsIcon,
   Sun,
   UploadCloud,
-  Watch,
 } from 'lucide-react';
 import { Dashboard } from './pages/Dashboard';
 import { LogStudy } from './pages/LogStudy';
@@ -34,7 +33,6 @@ import { Import } from './pages/Import';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 import { Locations } from './pages/Locations';
-import { WatcherPage } from './pages/WatcherPage';
 import { CameraUploadPage } from './pages/CameraUploadPage';
 import { CptExplorer } from './pages/CptExplorer';
 import { Profiles } from './pages/Profiles';
@@ -43,7 +41,7 @@ import { Automation } from './pages/Automation';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
-type Tab = 'pace' | 'dashboard' | 'automation' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles' | 'camera' | 'explorer' | 'admin';
+type Tab = 'pace' | 'dashboard' | 'automation' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'profiles' | 'camera' | 'explorer' | 'admin';
 
 class PageErrorBoundary extends Component<
   { children: ReactNode; tab: string },
@@ -90,8 +88,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: ComponentType<{ className?: str
   { id: 'automation', label: 'Automation', icon: Bot },
   { id: 'pace',      label: 'Daily Pace', icon: Gauge },
   { id: 'log',       label: 'Log Study',  icon: ClipboardList },
-  { id: 'import',    label: 'Import',     icon: UploadCloud },
-  { id: 'watcher',   label: 'Watcher',    icon: Watch },
+  { id: 'import',    label: 'PowerScribe Capture', icon: UploadCloud },
   { id: 'camera',    label: 'Camera',     icon: Camera },
   { id: 'explorer',  label: 'CPT Explorer', icon: Search },
   { id: 'history',   label: 'History',    icon: HistoryIcon },
@@ -232,7 +229,6 @@ function MainApp() {
                 {activeTab === 'history'       && <History />}
                 {activeTab === 'settings'      && <Settings />}
                 {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
-                {activeTab === 'watcher'       && <WatcherPage onNavigateToImport={() => setActiveTab('import')} />}
                 {activeTab === 'camera'        && <CameraUploadPage onImported={() => setActiveTab('pace')} />}
                 {activeTab === 'explorer'      && <CptExplorer onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'profiles'      && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} initialEditId={activeProfile?.id ?? null} />}

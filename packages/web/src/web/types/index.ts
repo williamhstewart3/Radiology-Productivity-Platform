@@ -287,6 +287,7 @@ export interface StudyLog {
   matchConfidence: number;
   needsReview: boolean;
   accessionNumber: string | null;
+  rowIndex?: string | null;
   sessionId: string | null;
   sourceImportId: string | null;
   notes: string | null;
@@ -330,7 +331,7 @@ export interface UserSettings {
   workdayStart: string;  // "HH:MM" 24-hr
   workdayEnd: string;    // "HH:MM" 24-hr
   breakMinutes: number;
-  // PowerScribe Watcher settings
+  // Legacy folder watcher settings retained for existing IndexedDB records.
   watchFolderPath: string | null;
   autoDeleteProcessed: boolean;
   // Camera capture / PHI protection

@@ -5,7 +5,6 @@ import { db, ensureUserSettings } from '../db/database';
 import { importRvuFile } from '../utils/rvuFileImporter';
 import { buildSeedCptRows } from '../data/seedCptData';
 import { normalizeExamText } from '../utils/textMatching';
-import { isDesktop, getDesktopAPI } from '../lib/desktop';
 import type { UserSettings, ExamAlias, ExamDictionaryEntry } from '../types';
 import type { ImportResult } from '../utils/rvuFileImporter';
 
@@ -575,101 +574,10 @@ export function Settings() {
         )}
       </div>
 
-      {/* PowerScribe Watcher settings */}
-      {isDesktop() && (
-        <div className="card space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: theme.colors.textSecondary }}>
-              PowerScribe Watcher
-            </h2>
-            <p className="text-xs mt-1" style={{ color: theme.colors.textMuted }}>
-              Configure the folder watcher for automatic screenshot OCR import.
-            </p>
-          </div>
-
-          {/* Watch folder path */}
-          <div>
-            <label className="block text-xs font-medium mb-1.5" style={{ color: theme.colors.textSecondary }}>
-              Watch Folder
-            </label>
-            <div className="flex items-center gap-2">
-              <div
-                className="flex-1 rounded-lg px-3 py-2 text-sm font-mono truncate"
-                style={{
-                  background: theme.colors.bgDeep,
-                  border: `1px solid ${theme.colors.border}`,
-                  color: settings?.watchFolderPath ? theme.colors.textPrimary : theme.colors.textMuted,
-                }}
-              >
-                {settings?.watchFolderPath ?? 'No folder selected'}
-              </div>
-              <button
-                onClick={async () => {
-                  const api = getDesktopAPI();
-                  if (!api) return;
-                  const paths = await api.showOpenDialog({
-                    title: 'Select Watch Folder',
-                    properties: ['openDirectory', 'createDirectory'],
-                  });
-                  if (paths.length > 0) {
-                    const s = await ensureUserSettings();
-                    await db.userSettings.put({ ...s, watchFolderPath: paths[0], updatedAt: new Date().toISOString() });
-                  }
-                }}
-                className="px-3 py-2 rounded-lg text-sm font-medium"
-                style={{ background: theme.colors.primary, color: '#fff', border: 'none', cursor: 'pointer' }}
-              >
-                Browse…
-              </button>
-              {settings?.watchFolderPath && (
-                <button
-                  onClick={async () => {
-                    const s = await ensureUserSettings();
-                    await db.userSettings.put({ ...s, watchFolderPath: null, updatedAt: new Date().toISOString() });
-                  }}
-                  className="px-3 py-2 rounded-lg text-sm"
-                  style={{ background: theme.colors.bgDeep, color: theme.colors.textMuted, border: `1px solid ${theme.colors.border}`, cursor: 'pointer' }}
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Auto-delete toggle */}
-          <label className="flex items-center justify-between cursor-pointer select-none">
-            <div>
-              <p className="text-sm" style={{ color: theme.colors.textPrimary }}>
-                Auto-delete processed files
-              </p>
-              <p className="text-xs" style={{ color: theme.colors.textMuted }}>
-                Delete screenshots after successful OCR. If off, files move to a <code>processed/</code> subfolder.
-              </p>
-            </div>
-            <div
-              onClick={async () => {
-                const s = await ensureUserSettings();
-                await db.userSettings.put({ ...s, autoDeleteProcessed: !s.autoDeleteProcessed, updatedAt: new Date().toISOString() });
-              }}
-              className="relative inline-flex items-center h-6 w-11 rounded-full transition-colors cursor-pointer shrink-0"
-              style={{
-                background: settings?.autoDeleteProcessed ? theme.colors.primary : theme.colors.bgDeep,
-                border: `1px solid ${settings?.autoDeleteProcessed ? theme.colors.primary : theme.colors.border}`,
-              }}
-            >
-              <span
-                className="inline-block h-4 w-4 rounded-full bg-white shadow transition-transform"
-                style={{ transform: settings?.autoDeleteProcessed ? 'translateX(22px)' : 'translateX(2px)' }}
-              />
-            </div>
-          </label>
-        </div>
-      )}
-
-      {/* Camera Capture / PHI Protection */}
+      {/* PowerScribe Capture / PHI Protection */}
       <div className="card space-y-4">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Camera Capture</h2>
+          <h2 className="text-sm font-semibold text-white uppercase tracking-wider">PowerScribe Capture</h2>
           <span className="text-xs px-2 py-0.5 rounded-full font-medium"
             style={{ background: 'rgba(91,184,212,0.15)', color: theme.colors.accent, border: `1px solid rgba(91,184,212,0.25)` }}>
             PHI Protection
@@ -702,7 +610,8 @@ export function Settings() {
         <p className="text-xs text-slate-400 leading-relaxed">
           When photographing the PowerScribe list from a phone, mandatory cropping
           ensures patient identifiers (name, MRN, DOB, room) are excluded before
-          OCR runs. This setting should remain <strong className="text-white">ON</strong> in
+          OCR runs. For workstation use, copy a PowerScribe window grab and paste it
+          into PowerScribe Capture. This setting should remain <strong className="text-white">ON</strong> in
           all clinical environments.
         </p>
 
@@ -757,7 +666,7 @@ export function Settings() {
         {settings?.requireCropBeforeOcr === false && (
           <div className="px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/25">
             <p className="text-red-400 text-xs font-medium">
-              ⚠ Crop requirement is disabled. Enable it before using Camera Capture in a clinical setting.
+              ⚠ Crop requirement is disabled. Enable it before using PowerScribe Capture in a clinical setting.
             </p>
           </div>
         )}

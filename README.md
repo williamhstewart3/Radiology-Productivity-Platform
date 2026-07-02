@@ -5,10 +5,9 @@ Radiology Productivity Platform is a local-first productivity tool for radiologi
 ## Current Major Features
 
 - Manual study logging with CPT and wRVU tracking.
-- OCR screenshot import and review workflow.
-- Screenshot watcher support through the desktop shell.
+- PowerScribe clipboard/window capture with OCR screenshot import and review workflow.
 - Learned exam aliases for faster future matching.
-- Duplicate detection across manual, OCR, CSV, and watcher-style imports.
+- Duplicate detection across manual, OCR, CSV, and PowerScribe capture imports.
 - Date/time extraction for imported studies.
 - Multi-profile and multi-location context.
 - Daily Pace dashboard, Annual Dashboard, and Mini Pace Window.

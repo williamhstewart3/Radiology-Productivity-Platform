@@ -103,7 +103,7 @@ export class RvuDatabase extends Dexie {
       });
     });
 
-    // v6: adds watchFolderPath + autoDeleteProcessed to userSettings.
+    // v6: added legacy folder watcher settings to userSettings.
     //     Same stores, no index changes needed.
     this.version(6).stores({
       cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',

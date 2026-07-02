@@ -79,6 +79,7 @@ export function LogStudy({ onSaved }: LogStudyProps) {
           studyDateTime: null,
           studyDate: logDate,
           accessionNumber: null,
+          rowIndex: null,
           modality: selected.modality,
         };
         const dupeMatch = await checkOneDuplicate(candidate, undefined);
