@@ -2,6 +2,7 @@ import Papa from 'papaparse';
 import curatedDictionaryCsv from '../../../../../data/reference/radiology_exam_dictionary.csv?raw';
 import { db } from '../db/database';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import { buildOrbitCmeSeedCptRows } from './orbitCmeSeedMappings';
 import type { CptRvuRow, ExamDictionaryEntry, Modality } from '../types';
 
 interface CuratedDictionaryCsvRow {
@@ -150,8 +151,10 @@ export async function ensureCuratedRadiologyDictionarySeed(): Promise<void> {
   const existingCptKeys = new Set(
     (await db.cptRvuTable.toArray()).map((row) => `${row.cptCode}-${row.modifier ?? 'none'}`),
   );
-  const missingCptRows = buildCuratedDictionaryCptRows(entries)
-    .filter((row) => !existingCptKeys.has(`${row.cptCode}-${row.modifier ?? 'none'}`));
+  const missingCptRows = [
+    ...buildCuratedDictionaryCptRows(entries),
+    ...buildOrbitCmeSeedCptRows(),
+  ].filter((row) => !existingCptKeys.has(`${row.cptCode}-${row.modifier ?? 'none'}`));
   if (missingCptRows.length > 0) {
     await db.cptRvuTable.bulkPut(missingCptRows);
   }

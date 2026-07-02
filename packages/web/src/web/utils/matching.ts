@@ -7,6 +7,7 @@ import {
   getCommonRadiologyMappingCodes,
   normalizeRadiologyDescription,
 } from './radiologyDescriptionNormalization';
+import { findOrbitCmeSeedMapping } from '../data/orbitCmeSeedMappings';
 
 const CPT_CODE_PATTERN = /^\d{5}$/;
 const EXAM_CONTEXT_PATTERN =
@@ -127,6 +128,13 @@ async function candidatesForDictionary(rawInput: string, maxResults: number): Pr
   return candidates;
 }
 
+async function candidatesForOrbitCmeSeed(rawInput: string): Promise<MatchCandidate[]> {
+  const mapping = findOrbitCmeSeedMapping(rawInput);
+  if (!mapping) return [];
+  const rows = await getModifier26Rows(mapping.cptCode);
+  return rows.map((row) => rowToCandidate(rawInput, row, 0.93, 'radiology_match', 'Orbit CME seed mapping'));
+}
+
 async function candidatesForCommonRadiologyMapping(rawInput: string): Promise<MatchCandidate[]> {
   const candidates: MatchCandidate[] = [];
   for (const cptCode of getCommonRadiologyMappingCodes(rawInput)) {
@@ -209,6 +217,10 @@ export async function findMatchCandidates(
 
   if (candidates.length < maxResults) {
     candidates.push(...await candidatesForDictionary(trimmed, maxResults));
+  }
+
+  if (candidates.length < maxResults) {
+    candidates.push(...await candidatesForOrbitCmeSeed(trimmed));
   }
 
   if (candidates.length < maxResults) {

@@ -12,6 +12,7 @@
 - [x] Replace obsolete folder-watcher workflow with PowerScribe clipboard/window capture intake
 - [x] Tighten PowerScribe table crop bounds to avoid toolbar/navigation/status chrome before OCR
 - [x] Strip visible row numbers and mixed PowerScribe UI labels before OCR matching
+- [x] Add Orbit CME seed mappings as supplemental OCR CPT/wRVU lookup source
 
 ---
 
@@ -25,6 +26,7 @@
 - [x] Auto-detect the completed-studies table before OCR with relative-crop fallback
 - [x] Capture visible PowerScribe row/index metadata when OCR provides it
 - [x] Treat Modified Date/Time as productivity date while preserving Exam Date
+- [x] Use existing exam dictionary first, then Orbit CME seed mappings, before CMS/fuzzy OCR matching
 - [ ] Save OCR confidence per study
 - [ ] Bulk approve high-confidence studies
 - [ ] Unknowns-only review mode
