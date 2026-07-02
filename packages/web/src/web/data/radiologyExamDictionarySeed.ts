@@ -2,6 +2,7 @@ import Papa from 'papaparse';
 import curatedDictionaryCsv from '../../../../../data/reference/radiology_exam_dictionary.csv?raw';
 import { db } from '../db/database';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import { cptRvuUniqueKey, dedupeCptRvuRowsForBulkPut, normalizeCptModifier } from '../utils/cptRowDeduplication';
 import { buildOrbitCmeSeedCptRows } from './orbitCmeSeedMappings';
 import type { CptRvuRow, ExamDictionaryEntry, Modality } from '../types';
 
@@ -49,7 +50,7 @@ function parseNumber(value: string | undefined): number | null {
 
 function parseCpt(serialized: string): { cptCode: string; modifier: string | null } {
   const [cptCode, modifier] = serialized.split('-').map((part) => part.trim());
-  return { cptCode, modifier: modifier || null };
+  return { cptCode, modifier: normalizeCptModifier(modifier) };
 }
 
 function stableId(prefix: string, ...parts: Array<string | null | undefined>): string {
@@ -102,20 +103,18 @@ export function buildCuratedRadiologyDictionarySeed(): ExamDictionaryEntry[] {
 
 export function buildCuratedDictionaryCptRows(entries = buildCuratedRadiologyDictionarySeed()): CptRvuRow[] {
   const now = new Date().toISOString();
-  const byKey = new Map<string, CptRvuRow>();
+  const rows: CptRvuRow[] = [];
 
   for (const entry of entries) {
     for (const serialized of entry.cptCodes) {
       const { cptCode, modifier } = parseCpt(serialized);
       if (!cptCode) continue;
-      const key = `${cptCode}-${modifier ?? 'none'}`;
-      if (byKey.has(key)) continue;
-      byKey.set(key, {
+      rows.push({
         id: stableId('curated_dictionary_cpt', cptCode, modifier),
         cptCode,
         modifier,
         description: entry.cmsDescription || entry.canonicalDisplayName,
-        workRvu: modifier === '26' || modifier == null ? entry.modifier26Wrvu : null,
+        workRvu: modifier === '26' || normalizeCptModifier(modifier) === '' ? entry.modifier26Wrvu : null,
         nonFacilityPeRvu: null,
         facilityPeRvu: null,
         malpracticeRvu: null,
@@ -135,7 +134,7 @@ export function buildCuratedDictionaryCptRows(entries = buildCuratedRadiologyDic
     }
   }
 
-  return Array.from(byKey.values());
+  return dedupeCptRvuRowsForBulkPut(rows, 'curated dictionary CPT rows');
 }
 
 export async function ensureCuratedRadiologyDictionarySeed(): Promise<void> {
@@ -149,12 +148,15 @@ export async function ensureCuratedRadiologyDictionarySeed(): Promise<void> {
   }
 
   const existingCptKeys = new Set(
-    (await db.cptRvuTable.toArray()).map((row) => `${row.cptCode}-${row.modifier ?? 'none'}`),
+    (await db.cptRvuTable.toArray()).map(cptRvuUniqueKey),
   );
-  const missingCptRows = [
-    ...buildCuratedDictionaryCptRows(entries),
-    ...buildOrbitCmeSeedCptRows(),
-  ].filter((row) => !existingCptKeys.has(`${row.cptCode}-${row.modifier ?? 'none'}`));
+  const missingCptRows = dedupeCptRvuRowsForBulkPut(
+    [
+      ...buildCuratedDictionaryCptRows(entries),
+      ...buildOrbitCmeSeedCptRows(),
+    ],
+    'curated/Orbit CPT seed',
+  ).filter((row) => !existingCptKeys.has(cptRvuUniqueKey(row)));
   if (missingCptRows.length > 0) {
     await db.cptRvuTable.bulkPut(missingCptRows);
   }

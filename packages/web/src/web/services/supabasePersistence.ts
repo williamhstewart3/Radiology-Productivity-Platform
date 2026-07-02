@@ -1,4 +1,5 @@
 import { db } from '../db/database';
+import { dedupeCptRvuRowsForBulkPut, normalizeCptModifier } from '../utils/cptRowDeduplication';
 import type { CptRvuRow, StudyLog } from '../types';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -69,7 +70,7 @@ function toRemoteRvuRow(row: CptRvuRow, datasetId: string): Record<string, any> 
   return {
     dataset_id: datasetId,
     cpt_code: row.cptCode,
-    modifier: row.modifier,
+    modifier: normalizeCptModifier(row.modifier),
     description: row.description,
     work_rvu: row.workRvu,
     non_facility_pe_rvu: row.nonFacilityPeRvu,
@@ -94,7 +95,7 @@ function toLocalRvuRow(row: Record<string, any>): CptRvuRow {
   return {
     id: row.id,
     cptCode: row.cpt_code,
-    modifier: row.modifier,
+    modifier: normalizeCptModifier(row.modifier),
     description: row.description ?? '',
     workRvu: row.work_rvu == null ? null : Number(row.work_rvu),
     nonFacilityPeRvu: row.non_facility_pe_rvu == null ? null : Number(row.non_facility_pe_rvu),
@@ -223,7 +224,7 @@ export const supabasePersistence = {
     if (localRows.length > 0) {
       await db.transaction('rw', db.cptRvuTable, db.userSettings, async () => {
         await db.cptRvuTable.clear();
-        await db.cptRvuTable.bulkPut(localRows);
+        await db.cptRvuTable.bulkPut(dedupeCptRvuRowsForBulkPut(localRows, 'Supabase CPT hydration'));
         const settings = await db.userSettings.get('default');
         if (settings) {
           await db.userSettings.put({

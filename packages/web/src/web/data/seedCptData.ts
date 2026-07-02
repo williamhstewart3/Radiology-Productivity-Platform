@@ -1,4 +1,5 @@
 import type { CptRvuRow, Modality, PcTcIndicator, StatusCategory } from '../types';
+import { normalizeCptModifier } from '../utils/cptRowDeduplication';
 
 /**
  * ============================================================================
@@ -218,9 +219,9 @@ function nowIso() {
 export function buildSeedCptRows(): CptRvuRow[] {
   const ts = nowIso();
   return SEED_ROWS.map((row) => ({
-    id: `seed_${row.cptCode}_${row.modifier ?? 'none'}`,
+    id: `seed_${row.cptCode}_${normalizeCptModifier(row.modifier) || 'none'}`,
     cptCode: row.cptCode,
-    modifier: row.modifier,
+    modifier: normalizeCptModifier(row.modifier),
     description: row.description,
     workRvu: row.workRvu,
     nonFacilityPeRvu: null,

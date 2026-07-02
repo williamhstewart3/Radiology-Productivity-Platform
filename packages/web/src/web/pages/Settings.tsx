@@ -3,6 +3,7 @@ import { useState, useRef } from 'react';
 import { theme } from '../lib/theme';
 import { db, ensureUserSettings } from '../db/database';
 import { importRvuFile } from '../utils/rvuFileImporter';
+import { dedupeCptRvuRowsForBulkPut } from '../utils/cptRowDeduplication';
 import { buildSeedCptRows } from '../data/seedCptData';
 import { normalizeExamText } from '../utils/textMatching';
 import type { UserSettings, ExamAlias, ExamDictionaryEntry } from '../types';
@@ -82,7 +83,7 @@ export function Settings() {
   async function handleResetCpt() {
     if (!confirm('Clear CPT table and re-seed from built-in defaults?')) return;
     await db.cptRvuTable.clear();
-    await db.cptRvuTable.bulkPut(buildSeedCptRows());
+    await db.cptRvuTable.bulkPut(dedupeCptRvuRowsForBulkPut(buildSeedCptRows(), 'settings CPT seed reset'));
     const count = await db.cptRvuTable.count();
     setCptCount(count);
   }

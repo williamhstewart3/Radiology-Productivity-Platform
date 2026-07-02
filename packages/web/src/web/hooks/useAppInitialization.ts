@@ -4,6 +4,7 @@ import { buildSeedCptRows } from '../data/seedCptData';
 import { ensureCuratedRadiologyDictionarySeed } from '../data/radiologyExamDictionarySeed';
 import { persistence } from '../services/persistence';
 import { supabasePersistence } from '../services/supabasePersistence';
+import { dedupeCptRvuRowsForBulkPut } from '../utils/cptRowDeduplication';
 
 /**
  * Runs once on app startup:
@@ -31,7 +32,7 @@ export function useAppInitialization() {
 
         const existingCount = await db.cptRvuTable.count();
         if (!loadedRemoteDataset && existingCount === 0) {
-          const seedRows = buildSeedCptRows();
+          const seedRows = dedupeCptRvuRowsForBulkPut(buildSeedCptRows(), 'startup CPT seed');
           await db.cptRvuTable.bulkPut(seedRows);
         }
 
