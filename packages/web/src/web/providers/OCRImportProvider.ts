@@ -189,14 +189,18 @@ export class OCRImportProvider implements ImportProvider {
       const productivityDate = p.modifiedDate ?? p.studyDate ?? this.studyDate;
 
       return {
-        examTitle: p.examName,
+        examTitle: p.procedureName,
+        procedureName: p.procedureName,
         canonicalExam: null,
         cpt: null,
         workRvu: null,
         studyDate: p.studyDate ?? productivityDate,
-        studyTime: p.modifiedDateTime ?? p.studyDateTime,
+        examDate: p.examDate,
+        examTime: p.examTime,
+        studyTime: p.studyDateTime,
         modifiedDate: p.modifiedDate ?? productivityDate,
         modifiedDateTime: p.modifiedDateTime ?? p.studyDateTime,
+        modifiedTime: p.modifiedTime ?? p.examTime,
         modality: null,
         accessionNumber: p.accessionNumber,
         patientMRN: null,

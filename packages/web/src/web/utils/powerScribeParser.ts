@@ -1,14 +1,24 @@
+/**
+ * Parses OCR'd PowerScribe completed-studies rows into structured fields.
+ * The procedure text is intentionally separated from date/time columns before
+ * CPT matching so dates never participate in normalization or fuzzy matching.
+ */
+
 import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
 import { parseDateTimeFromOcr, parseDateTimeMatchesFromOcr } from './studyDateParser';
 
 export interface ParsedLine {
   rawText: string;
+  procedureName: string;
   examName: string;
   cleanedExamName: string;
+  examDate: string | null;
+  examTime: string | null;
   studyDateTime: string | null;
   studyDate: string | null;
   modifiedDateTime: string | null;
   modifiedDate: string | null;
+  modifiedTime: string | null;
   accessionNumber: string | null;
   rowIndex: string | null;
   dateTimeConfidence: number;
@@ -62,6 +72,19 @@ const TIME_STRIP_PATTERNS = [
   /\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b/g,
 ];
 
+const OCR_DATE_CHAR_MAP: Record<string, string> = {
+  O: '0',
+  o: '0',
+  Q: '0',
+  D: '0',
+  I: '1',
+  l: '1',
+  S: '5',
+  s: '5',
+  B: '8',
+  F: '7',
+};
+
 function hasExamContext(text: string): boolean {
   return EXAM_CONTEXT_PATTERN.test(text);
 }
@@ -107,6 +130,27 @@ function stripLeadingRowIndex(text: string): { rowIndex: string; text: string } 
   };
 }
 
+function normalizeOcrDateChars(text: string): string {
+  return text.replace(
+    /\b[0-9OoQDISsBlF]{1,2}([/-])[0-9OoQDISsBlF]{1,2}\1[0-9OoQDISsBlF]{2,4}(?:\s+[0-9OoQDISsBlF]{1,2}:[0-9OoQDISsBlF]{2}(?::[0-9OoQDISsBlF]{2})?\s*(?:AM|PM|am|pm)?)?/g,
+    (token) => token.replace(/[OoQDISsBlF]/g, (char) => OCR_DATE_CHAR_MAP[char] ?? char),
+  );
+}
+
+function replaceRanges(text: string, ranges: Array<{ index: number; endIndex: number }>): string {
+  if (ranges.length === 0) return text;
+  let result = '';
+  let cursor = 0;
+  for (const range of [...ranges].sort((a, b) => a.index - b.index)) {
+    if (range.index < cursor) continue;
+    result += text.slice(cursor, range.index);
+    result += ' ';
+    cursor = range.endIndex;
+  }
+  result += text.slice(cursor);
+  return result;
+}
+
 function stripLeftTableJunk(text: string): { rowIndex: string | null; text: string } {
   let working = stripUiText(text).replace(LEFT_STATUS_PATTERN, '').trim();
   let rowIndex: string | null = null;
@@ -117,12 +161,11 @@ function stripLeftTableJunk(text: string): { rowIndex: string | null; text: stri
     working = rowIndexResult.text;
   }
 
-  working = normalizeOcrExamTextForMatching(working);
   return { rowIndex, text: working };
 }
 
-function stripDatesAndIdentifiers(text: string): { text: string; accessionNumber: string | null } {
-  let working = text;
+function stripDatesAndIdentifiers(text: string, dateRanges: Array<{ index: number; endIndex: number }>): { text: string; accessionNumber: string | null } {
+  let working = replaceRanges(text, dateRanges);
   for (const pattern of DATE_STRIP_PATTERNS) working = working.replace(pattern, ' ');
   for (const pattern of TIME_STRIP_PATTERNS) working = working.replace(pattern, ' ');
 
@@ -143,7 +186,7 @@ function stripDatesAndIdentifiers(text: string): { text: string; accessionNumber
 }
 
 function shouldStartNewRow(line: string): boolean {
-  if (parseDateTimeMatchesFromOcr(line).length > 0) return true;
+  if (parseDateTimeMatchesFromOcr(normalizeOcrDateChars(line)).length > 0) return true;
   if (LEADING_ROW_INDEX_PATTERN.test(line)) return true;
   if (hasExamContext(line)) return true;
   return false;
@@ -177,14 +220,15 @@ function parseSingleRow(rawRow: string): ParsedLine | null {
   if (trimmed.length < 3 || isMetadataOnlyLine(trimmed)) return null;
 
   const { rowIndex, text: rowWithoutLeftJunk } = stripLeftTableJunk(trimmed);
-  const dateMatches = parseDateTimeMatchesFromOcr(rowWithoutLeftJunk);
-  const firstDate = dateMatches[0] ?? parseDateTimeFromOcr(rowWithoutLeftJunk);
+  const dateText = normalizeOcrDateChars(rowWithoutLeftJunk);
+  const dateMatches = parseDateTimeMatchesFromOcr(dateText);
+  const firstDate = dateMatches[0] ?? parseDateTimeFromOcr(dateText);
   const lastDate =
     [...dateMatches].reverse().find((match) => Boolean(match.studyDateTime)) ??
     dateMatches[dateMatches.length - 1] ??
     firstDate;
 
-  const stripped = stripDatesAndIdentifiers(rowWithoutLeftJunk);
+  const stripped = stripDatesAndIdentifiers(rowWithoutLeftJunk, dateMatches);
   const cleanedExamNameRaw = normalizeOcrExamTextForMatching(stripped.text);
   const cleanedExamName = cleanedExamNameRaw.length >= 2
     ? cleanedExamNameRaw
@@ -195,8 +239,11 @@ function parseSingleRow(rawRow: string): ParsedLine | null {
 
   const studyDateTime = firstDate?.studyDateTime ?? null;
   const studyDate = firstDate?.studyDate ?? null;
+  const examDate = firstDate?.studyDate ?? null;
+  const examTime = firstDate?.studyTime ?? null;
   const modifiedDateTime = lastDate?.studyDateTime ?? null;
   const modifiedDate = lastDate?.studyDate ?? null;
+  const modifiedTime = lastDate?.studyTime ?? null;
   const dateTimeConfidence = lastDate?.confidence ?? firstDate?.confidence ?? 0;
   const hasContext = hasExamContext(cleanedExamName);
   const hasDateColumns = dateMatches.length > 0;
@@ -214,12 +261,16 @@ function parseSingleRow(rawRow: string): ParsedLine | null {
 
   return {
     rawText: trimmed,
+    procedureName: cleanedExamName,
     examName: cleanedExamName,
     cleanedExamName,
+    examDate,
+    examTime,
     studyDateTime,
     studyDate,
     modifiedDateTime,
     modifiedDate,
+    modifiedTime,
     accessionNumber: stripped.accessionNumber,
     rowIndex,
     dateTimeConfidence,

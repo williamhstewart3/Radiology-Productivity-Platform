@@ -127,7 +127,6 @@ function ExamSearchPanel({ initialQuery, onSelect, onClose }: ExamSearchPanelPro
     </div>
   );
 }
-
 // ─── ImportProps ──────────────────────────────────────────────────────────────
 
 function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) {
@@ -195,6 +194,30 @@ function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) 
 function candidateKey(candidate: MatchCandidate): string {
   return `${candidate.cptCode}-${candidate.modifier ?? ''}`;
 }
+function procedureNameForSource(source: { procedureName?: string | null; examTitle: string }): string {
+  return (source.procedureName ?? source.examTitle).trim();
+}
+
+function formatOcrDateTime(date?: string | null, time?: string | null, fallbackDateTime?: string | null): string | null {
+  if (date) {
+    const [year, month, day] = date.split('-');
+    if (year && month && day) {
+      const shortYear = year.slice(-2);
+      return `${Number(month)}/${Number(day)}/${shortYear}${time ? ` ${time}` : ''}`;
+    }
+  }
+  if (!fallbackDateTime) return null;
+  const parsed = new Date(fallbackDateTime);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleString('en-US', {
+    month: 'numeric',
+    day: 'numeric',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
 
 function candidateExplanationText(candidate: MatchCandidate, rawText: string): string {
   const normalized = candidate.explanation?.normalizedText ?? normalizeRadiologyDescription(rawText);
@@ -211,7 +234,7 @@ function isProductivityCandidate(candidate: MatchCandidate): boolean {
 }
 
 function hasProcedureSignal(row: PipelineReviewRow): boolean {
-  const text = `${row.source.examTitle} ${row.candidates.map((c) => c.description).join(' ')}`.toLowerCase();
+  const text = `${procedureNameForSource(row.source)} ${row.candidates.map((c) => c.description).join(' ')}`.toLowerCase();
   return /\b(?:biopsy|lesion|drain|drainage|aspirat|injection|catheter|tube|port|line|needle|arthrogram|myelogram|guided|guidance|stereo|procedure)\b/.test(text) ||
     row.candidates.some((candidate) => candidate.modality === 'PROCEDURE');
 }
@@ -683,7 +706,7 @@ export function Import({ onImported }: ImportProps) {
     );
 
     const rowsByRawTitle = new Map<string, PipelineReviewRow>();
-    rowsToUpdate.forEach((reviewRow) => rowsByRawTitle.set(reviewRow.source.examTitle, reviewRow));
+    rowsToUpdate.forEach((reviewRow) => rowsByRawTitle.set(procedureNameForSource(reviewRow.source), reviewRow));
 
     for (const aliasRow of rowsByRawTitle.values()) {
       const patch = patchesByTempId.get(aliasRow.tempId);
@@ -691,7 +714,7 @@ export function Import({ onImported }: ImportProps) {
       if (!selectedForAlias.length) continue;
 
       await rememberCorrectedExam({
-        rawText: aliasRow.source.examTitle,
+        rawText: procedureNameForSource(aliasRow.source),
         candidates: selectedForAlias.map((c) => ({
           cptCode: c.cptCode,
           modifier: c.modifier,
@@ -969,7 +992,7 @@ export function Import({ onImported }: ImportProps) {
                   return (
                     <div key={s.tempId} className="px-4 py-3 flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm text-slate-300 truncate">{s.source.examTitle}</p>
+                        <p className="text-sm text-slate-300 truncate">{procedureNameForSource(s.source)}</p>
                         <div className="flex items-center gap-2 mt-0.5">
                           {top?.cptCode && (
                             <span className="text-xs font-mono text-slate-500">{top.cptCode}</span>
@@ -1013,6 +1036,16 @@ export function Import({ onImported }: ImportProps) {
             const label = confidenceLabel(row);
             const reviewReason = manualReviewReason(row);
             const canApproveSame = Boolean(buildApprovalPatch(row));
+            const procedureName = procedureNameForSource(row.source);
+            const cptSummary = selected.length > 0
+              ? selected.map((candidate) => candidate.cptCode).join(' + ')
+              : row.candidates.slice(0, 2).map((candidate) => candidate.cptCode).join(' + ');
+            const examDateTime = formatOcrDateTime(row.source.examDate ?? row.source.studyDate, row.source.examTime, row.source.studyTime);
+            const readDateTime = formatOcrDateTime(
+              row.source.modifiedDate ?? row.source.modifiedDateTime?.slice(0, 10),
+              row.source.modifiedTime,
+              row.source.modifiedDateTime,
+            );
             return (
               <div
                 key={row.tempId}
@@ -1021,44 +1054,39 @@ export function Import({ onImported }: ImportProps) {
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <div className="min-w-0">
                     <p className="text-xs text-slate-400">#{i + 1}</p>
-                    <p className="text-sm text-white font-medium truncate">{row.source.examTitle}</p>
+                    <p className="text-sm text-white font-medium truncate">{procedureName}</p>
+                    {cptSummary && (
+                      <p className="mt-0.5 text-xs font-mono text-sky-300">{cptSummary}</p>
+                    )}
                     {row.source.accessionNumber && (
                       <p className="text-xs text-slate-500">Acc: {row.source.accessionNumber}</p>
                     )}
                     {row.source.rowIndex && (
                       <p className="text-xs text-slate-500">Source row: {row.source.rowIndex}</p>
                     )}
-                    {/* Date/time row with source confidence indicator */}
-                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                      {row.source.modifiedDateTime || row.source.studyTime ? (
-                        <span className="text-xs font-mono text-slate-300">
-                          Read {new Date(row.source.modifiedDateTime ?? row.source.studyTime ?? '').toLocaleString('en-US', {
-                            month: 'numeric', day: 'numeric',
-                            hour: 'numeric', minute: '2-digit', hour12: true,
-                          })}
-                        </span>
-                      ) : row.source.studyDate ? (
-                        <span className="text-xs font-mono text-slate-300">
-                          {new Date(row.source.studyDate + 'T12:00:00').toLocaleDateString('en-US', {
-                            month: 'numeric', day: 'numeric', year: 'numeric',
-                          })}
-                        </span>
-                      ) : null}
-                      {row.source.studyDate && row.source.studyDate !== (row.source.modifiedDate ?? row.source.modifiedDateTime?.slice(0, 10)) && (
-                        <span className="text-xs font-mono text-slate-500">
-                          Exam {new Date(row.source.studyDate + 'T12:00:00').toLocaleDateString('en-US', {
-                            month: 'numeric', day: 'numeric', year: 'numeric',
-                          })}
-                        </span>
+                    <div className="mt-2 grid gap-1 text-xs">
+                      {examDateTime && (
+                        <div className="flex gap-2">
+                          <span className="w-10 shrink-0 text-slate-500">Exam:</span>
+                          <span className="font-mono text-slate-300">{examDateTime}</span>
+                        </div>
                       )}
+                      {readDateTime && (
+                        <div className="flex gap-2">
+                          <span className="w-10 shrink-0 text-slate-500">Read:</span>
+                          <span className="font-mono text-slate-300">{readDateTime}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                       {/* Source confidence badge */}
                       {row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) >= 1.0 ? (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 font-medium">
-                          OCR ✓
+                          OCR {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
                         </span>
                       ) : row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) > 0 ? (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/25 text-sky-400 font-medium">
-                          OCR date
+                          OCR {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
                         </span>
                       ) : (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/25 text-amber-400/80 font-medium" title="Date was not extracted from OCR — using the log date you selected">
@@ -1196,7 +1224,7 @@ export function Import({ onImported }: ImportProps) {
                     </button>
                     {searchPanelTempId === row.tempId && (
                       <ExamSearchPanel
-                        initialQuery={row.source.examTitle}
+                        initialQuery={procedureNameForSource(row.source)}
                         onSelect={(c) => handleManualSelect(row.tempId, c)}
                         onClose={() => setSearchPanelTempId(null)}
                       />
@@ -1261,7 +1289,7 @@ export function Import({ onImported }: ImportProps) {
                             </span>
                           )}
                           <span className="mt-1 block text-[10px] leading-snug text-slate-500">
-                            {candidateExplanationText(c, row.source.examTitle)}
+                            {candidateExplanationText(c, procedureNameForSource(row.source))}
                           </span>
                           {c.confidence < 0.75 && row.candidates.length > 1 && (
                             <span className="mt-0.5 block text-[10px] text-amber-300/80">
@@ -1286,7 +1314,7 @@ export function Import({ onImported }: ImportProps) {
                     </div>
                     {searchPanelTempId === row.tempId && (
                       <ExamSearchPanel
-                        initialQuery={row.source.examTitle}
+                        initialQuery={procedureNameForSource(row.source)}
                         onSelect={(c) => handleManualSelect(row.tempId, c)}
                         onClose={() => setSearchPanelTempId(null)}
                       />

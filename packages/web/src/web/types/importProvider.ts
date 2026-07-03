@@ -46,6 +46,9 @@ export interface ImportedStudy {
   /** Raw exam title as it appears in the source system (e.g. "CT ABDOMEN W CON") */
   examTitle: string;
 
+  /** Clean procedure/exam name with OCR date/time columns removed. */
+  procedureName?: string | null;
+
   /**
    * Canonical exam name if the source system already provides one.
    * If the source only gives a raw title, leave this null and let the
@@ -70,6 +73,12 @@ export interface ImportedStudy {
   /** ISO date string (YYYY-MM-DD) for the performed exam date. */
   studyDate: string;
 
+  /** Explicit performed exam date extracted from OCR, if available. */
+  examDate?: string | null;
+
+  /** Explicit performed exam time (HH:MM) extracted from OCR, if available. */
+  examTime?: string | null;
+
   /**
    * Full ISO 8601 datetime for the performed exam if the source provides it.
    * OCR often only provides the date, so this may be null.
@@ -81,6 +90,9 @@ export interface ImportedStudy {
    * This is the productivity date; if omitted, the pipeline falls back to studyDate.
    */
   modifiedDate?: string | null;
+
+  /** Explicit modified/read time (HH:MM) extracted from OCR, if available. */
+  modifiedTime?: string | null;
 
   /**
    * Full ISO 8601 datetime for when the exam was read/signed/modified.

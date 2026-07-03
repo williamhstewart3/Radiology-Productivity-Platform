@@ -36,7 +36,7 @@ export function getSelectedWorkRvu(row: PipelineReviewRow): number {
 }
 
 export function normalizedExamKey(row: PipelineReviewRow): string {
-  return normalizeRadiologyDescription(row.source.examTitle);
+  return normalizeRadiologyDescription(row.source.procedureName ?? row.source.examTitle);
 }
 
 export function reviewSessionRowKey(row: PipelineReviewRow): string {

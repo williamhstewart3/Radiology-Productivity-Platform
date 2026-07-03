@@ -69,6 +69,10 @@ function cmsDescriptionsFor(candidates: MatchCandidate[]): string {
   return candidates.map((candidate) => candidate.description).filter(Boolean).join(' + ');
 }
 
+function procedureNameFor(study: ImportedStudy): string {
+  return (study.procedureName ?? study.examTitle).trim();
+}
+
 export async function runImportPipeline(
   studies: ImportedStudy[],
   logDate: string,
@@ -82,16 +86,17 @@ export async function runImportPipeline(
   const matched: Array<{ study: ImportedStudy; candidates: MatchCandidate[] }> = [];
 
   for (const study of studies) {
-    const query = study.cpt ?? study.cleanedExamName ?? study.examTitle;
+    const procedureName = procedureNameFor(study);
+    const query = study.cpt ?? procedureName;
     const candidates = (await findMatchCandidates(query, 6, profileId, {
       requireExamContextForDirectCpt: study.source === 'ocr' && !study.cpt,
-      directCptContext: study.cleanedExamName ?? study.examTitle,
+      directCptContext: procedureName,
     })).filter(productivityRelevant);
     matched.push({ study, candidates });
   }
 
   const dupeCandidates: StudyCandidate[] = matched.map(({ study, candidates }) => ({
-    examNameRaw: study.examTitle,
+    examNameRaw: procedureNameFor(study),
     cptCode: study.cpt ?? candidates[0]?.cptCode ?? null,
     modifier: candidates[0]?.modifier ?? null,
     logDate: study.modifiedDate ?? study.modifiedDateTime?.slice(0, 10) ?? study.studyDate ?? logDate,
@@ -139,7 +144,7 @@ export async function runImportPipeline(
       candidates,
       selectedCandidateIndex: selectedIndex,
       selectedCandidateIndices: selectedIndex === null ? [] : [selectedIndex],
-      displayTitle: study.examTitle,
+      displayTitle: procedureNameFor(study),
       needsReview: parserNeedsReview || (!autoAccept && Boolean(reviewReason ?? (candidates.length === 0 || !top || top.confidence < 0.75))),
       autoApproved: autoAccept,
       autoApprovalLevel,
@@ -179,8 +184,9 @@ export async function commitPipelineResults(
     if (selectedCandidates.length === 0) continue;
 
     const study = row.source;
-    const displayTitle = (row.displayTitle ?? study.examTitle).trim() || study.examTitle;
-    const normalizedTitle = normalizeRadiologyDescription(displayTitle || study.examTitle);
+    const procedureName = procedureNameFor(study);
+    const displayTitle = (row.displayTitle ?? procedureName).trim() || procedureName;
+    const normalizedTitle = normalizeRadiologyDescription(displayTitle || procedureName);
     const cmsDescription = cmsDescriptionsFor(selectedCandidates) || null;
     const performedDate = study.studyDate || logDate;
     const modifiedDateTime = study.modifiedDateTime ?? study.studyTime;
@@ -191,7 +197,7 @@ export async function commitPipelineResults(
 
     for (const cand of selectedCandidates) {
       const fingerprint = buildFingerprint(
-        study.examTitle,
+        procedureName,
         cand.cptCode,
         productivityDate,
         modifiedDateTime,
@@ -218,7 +224,7 @@ export async function commitPipelineResults(
         studyDate,
         dateTimeConfidence: study.dateTimeConfidence ?? 0,
         dateTimeSource: study.dateTimeSource ?? 'import_default',
-        examNameRaw: study.examTitle,
+        examNameRaw: procedureName,
         examTitleNormalized: normalizedTitle,
         examTitleDisplay: displayTitle,
         cmsDescription: cand.description || cmsDescription,
@@ -248,7 +254,7 @@ export async function commitPipelineResults(
 
     if (rowCommitted) {
       await learnAlias({
-        rawText: study.examTitle,
+        rawText: procedureName,
         canonicalExamName: displayTitle,
         candidates: selectedCandidates.map((candidate) => ({
           cptCode: candidate.cptCode,
@@ -271,7 +277,7 @@ export async function commitPipelineResults(
     const uploadDayId = await supabasePersistence.createUploadDay({
       readingDate: logDate,
       profileId: profileId ?? null,
-      rawExamText: reviewRows.map((row) => row.source.examTitle).join('\n'),
+      rawExamText: reviewRows.map((row) => procedureNameFor(row.source)).join('\n'),
       totalDailyWrvu,
     });
     await supabasePersistence.saveStudyLogs(committedLogs, uploadDayId);
