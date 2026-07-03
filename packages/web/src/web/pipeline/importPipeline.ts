@@ -80,6 +80,10 @@ function procedureNameFor(study: ImportedStudy): string {
   return (study.procedureName ?? study.cleanedExamName ?? study.cleanedText ?? study.examTitle).trim();
 }
 
+export function __testProcedureNameFor(study: ImportedStudy): string {
+  return procedureNameFor(study);
+}
+
 export async function runImportPipeline(
   studies: ImportedStudy[],
   logDate: string,

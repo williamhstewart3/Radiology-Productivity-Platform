@@ -4,6 +4,7 @@ import { db } from '../db/database';
 import { supabasePersistence } from '../services/supabasePersistence';
 import { normalizeCptModifier } from './cptRowDeduplication';
 import type { CptRvuRow, StatusCategory, PcTcIndicator } from '../types';
+import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from '../data/acrRadiologyActiveCptSet';
 import { classifyModality } from '../data/modalityClassifier';
 
 export interface ImportResult {
@@ -235,6 +236,7 @@ export async function parseRvuFile(
 }
 
 function toCptRow(row: ParsedRvuRow, fileVersion: string, existingRow: CptRvuRow | undefined, nowIso: string): CptRvuRow {
+  const includeInAutoMatch = isRadiologyActiveCpt(row.cptCode);
   return {
     id: existingRow?.id ?? crypto.randomUUID(),
     cptCode: row.cptCode,
@@ -253,6 +255,8 @@ function toCptRow(row: ParsedRvuRow, fileVersion: string, existingRow: CptRvuRow
     modality: existingRow?.modality ?? classifyModality(row.cptCode),
     rvuFileVersion: fileVersion,
     effectiveDate: nowIso.slice(0, 10),
+    includeInAutoMatch,
+    autoMatchSource: includeInAutoMatch ? ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE : existingRow?.autoMatchSource ?? null,
     isUserVerified: false,
     createdAt: existingRow?.createdAt ?? nowIso,
     updatedAt: nowIso,

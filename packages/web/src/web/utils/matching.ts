@@ -9,6 +9,7 @@ import {
 } from './radiologyDescriptionNormalization';
 import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
 import { findOrbitCmeSeedMapping } from '../data/orbitCmeSeedMappings';
+import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from '../data/acrRadiologyActiveCptSet';
 
 const CPT_CODE_PATTERN = /^\d{5}$/;
 const EXAM_CONTEXT_PATTERN =
@@ -77,6 +78,8 @@ interface ModalityFirstParse {
 
 const LEADING_OCR_JUNK_PATTERN =
   /^(?:(?:[+@#*|/\\_\-.:;()[\]{}<>!?~]+|(?:\u2713|\u2714|\u2611|\u25a0|\u25a1|\u25cf|\u2022)|\d{1,4}|vb|vi|vo|vx|v|l|i|o|x|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread|warning|warn|alert|check)\s+)+/i;
+const FIRST_MODALITY_PATTERN =
+  /\b(?:CTA|CT\s*ANGIO(?:GRAM|GRAPHY)?|MR\s*ANGIO(?:GRAM|GRAPHY)?|MRA|MRI|MR|X\s*-?\s*RAY|XR|RADIOGRAPH|US|U\/S|ULTRASOUND|SONOGRAM|PET|NM|NUCLEAR|MAMMO|MAMMOGRAM|MAMMOGRAPHY|DXA|DEXA|FLUORO|FLUOROSCOPY)\b|(?:CT(?=ANGIOGRAM|ANGIOGRAPHY|CARDIAC|CHEST|HEAD|ABDOMEN|RENAL|APPENDIX|LDCT))|(?:XR(?=CHEST|ABDOMEN|WRIST|HAND|HIP|SHOULDER|KNEE|ANKLE|FOOT|PELVIS))|(?:MRI(?=PROSTATE|ABDOMEN|BRAIN|SPINE|CHEST|PELVIS|MRCP))|(?:MRA(?=HEAD|NECK|CHEST|ABDOMEN|PELVIS))|(?:US(?=CAROTID|ARTERIAL|OB|ABDOMEN|PELVIS|RENAL))/i;
 const CONCATENATED_MODALITY_REWRITES: Array<[RegExp, string]> = [
   [/^CT(ANGIOGRAM|ANGIOGRAPHY|CARDIAC|CHEST|HEAD|ABDOMEN|RENAL|APPENDIX|LDCT)\b/i, 'CT $1'],
   [/^MRI(PROSTATE|ABDOMEN|BRAIN|SPINE|CHEST|PELVIS|MRCP)\b/i, 'MRI $1'],
@@ -85,11 +88,26 @@ const CONCATENATED_MODALITY_REWRITES: Array<[RegExp, string]> = [
   [/^US(CAROTID|ARTERIAL|OB|ABDOMEN|PELVIS|RENAL)\b/i, 'US $1'],
 ];
 
+function normalizeXrViewLanguage(text: string): string {
+  if (!/^XR\b/i.test(text)) return text;
+  return text
+    .replace(/\b(?:PA|AP)\s+LATERAL\s+AND\s+OBLIQUE\b/gi, '3 VIEWS')
+    .replace(/\b(?:PA|AP)\s+AND\s+LATERAL\s+AND\s+OBLIQUE\b/gi, '3 VIEWS')
+    .replace(/\bPA\s+AND\s+LATERAL\b/gi, '2 VIEWS')
+    .replace(/\bAP\s+AND\s+LATERAL\b/gi, '2 VIEWS')
+    .replace(/\bAP\b(?!\s+(?:AND|LATERAL|OBLIQUE))\b/gi, '1 VIEW');
+}
+
 function stripLeadingOcrJunk(rawInput: string): string {
   let text = normalizeOcrExamTextForMatching(rawInput)
     .replace(/[\u201c\u201d"']/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+  const modalityStart = text.search(FIRST_MODALITY_PATTERN);
+  if (modalityStart > 0) {
+    text = text.slice(modalityStart).trim();
+  }
 
   let previous = '';
   while (text !== previous) {
@@ -101,7 +119,7 @@ function stripLeadingOcrJunk(rawInput: string): string {
     text = text.replace(pattern, replacement);
   }
 
-  return text.replace(/\s+/g, ' ').trim();
+  return normalizeXrViewLanguage(text).replace(/\s+/g, ' ').trim();
 }
 
 function detectModalityLane(rawInput: string): ModalityLane | null {
@@ -177,6 +195,10 @@ function rowMatchesModalityLane(row: CptRvuRow, lane: ModalityLane | null): bool
   return row.modality === lane;
 }
 
+function isAutoMatchEligibleRow(row: CptRvuRow): boolean {
+  return row.includeInAutoMatch === true || isRadiologyActiveCpt(row.cptCode);
+}
+
 function candidateMatchesModalityLane(candidate: MatchCandidate, lane: ModalityLane | null): boolean {
   if (!lane) return true;
   const description = `${candidate.description} ${candidate.cptCode} ${candidate.modality ?? ''}`.toUpperCase();
@@ -207,6 +229,9 @@ function rowToCandidate(
   source = 'CMS RVU table',
 ): MatchCandidate {
   const normalizedText = normalizeRadiologyDescription(rawInput);
+  const effectiveSource = source === 'CMS RVU table' && isAutoMatchEligibleRow(row)
+    ? ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE
+    : source;
   return {
     cptCode: row.cptCode,
     modifier: row.modifier,
@@ -218,8 +243,8 @@ function rowToCandidate(
     explanation: {
       rawText: rawInput,
       normalizedText,
-      source,
-      detail: `${row.cptCode}${row.modifier ? `-${row.modifier}` : ''} from ${source}; CMS description: ${row.description}`,
+      source: effectiveSource,
+      detail: `${row.cptCode}${row.modifier ? `-${row.modifier}` : ''} from ${effectiveSource}; CMS description: ${row.description}`,
     },
   };
 }
@@ -351,7 +376,7 @@ function deterministicCptCodesFor(parsed: ModalityFirstParse): string[] {
     if (parsed.keywords.has('CHEST_PORTABLE') || hasNormalizedPhrase(normalized, 'XR CHEST PORTABLE')) return ['71045'];
     if (hasNormalizedPhrase(normalized, 'XR CHEST PA AND LATERAL') || hasNormalizedPhrase(normalized, 'XR CHEST 2 VIEWS')) return ['71046'];
     if (hasNormalizedPhrase(normalized, 'XR ABDOMEN AP') || hasNormalizedPhrase(normalized, 'XR ABDOMEN 1 VIEW')) return ['74018'];
-    if (/\bXR\b.*\bWRIST\b.*\b(?:PA|LATERAL|OBLIQUE)\b/i.test(upper)) return ['73110'];
+    if (/\bXR\b.*\bWRIST\b.*\b(?:PA|LATERAL|OBLIQUE|3 VIEWS)\b/i.test(upper)) return ['73110'];
     if (/\bXR\b.*\bHAND\b.*\b(?:PA|LATERAL|OBLIQUE)\b/i.test(upper)) return ['73130'];
     if (/\bXR\b.*\bHIP\b.*\bPELVIS\b.*\b(?:AP|LATERAL)\b/i.test(upper) || /\bXR\b.*\bPELVIS\b.*\bHIP\b.*\b(?:AP|LATERAL)\b/i.test(upper)) return ['73502'];
   }
@@ -492,6 +517,31 @@ function keywordScopedRows(rows: CptRvuRow[], parsed: ModalityFirstParse): CptRv
   return scoped;
 }
 
+export function __testParseModalityFirst(rawInput: string): {
+  lane: ModalityLane | null;
+  cleanedProcedure: string;
+  keywords: string[];
+} {
+  const parsed = parseModalityFirst(rawInput);
+  return {
+    lane: parsed.lane,
+    cleanedProcedure: parsed.cleanedProcedure,
+    keywords: Array.from(parsed.keywords).sort(),
+  };
+}
+
+export function __testDeterministicCptCodesFor(rawInput: string): string[] {
+  return deterministicCptCodesFor(parseModalityFirst(rawInput));
+}
+
+export function __testAutoMatchRowsFor(rawInput: string, rows: CptRvuRow[]): CptRvuRow[] {
+  const parsed = parseModalityFirst(rawInput);
+  return keywordScopedRows(
+    rows.filter(isAutoMatchEligibleRow).filter((row) => rowMatchesModalityLane(row, parsed.lane)),
+    parsed,
+  );
+}
+
 function aliasNormalizedKeys(alias: ExamAlias): string[] {
   return [
     alias.aliasText,
@@ -594,7 +644,8 @@ export async function findMatchCandidates(
   const allCpt = candidates.length < maxResults
     ? await db.cptRvuTable.where('statusCategory').anyOf(['active', 'restricted']).toArray()
     : [];
-  const modalityScopedCpt = allCpt.filter((row) => rowMatchesModalityLane(row, modalityLane));
+  const autoMatchCpt = allCpt.filter(isAutoMatchEligibleRow);
+  const modalityScopedCpt = autoMatchCpt.filter((row) => rowMatchesModalityLane(row, modalityLane));
   const keywordScopedCpt = keywordScopedRows(modalityScopedCpt, parsed);
 
   if (candidates.length < maxResults) {
@@ -603,7 +654,7 @@ export async function findMatchCandidates(
       .filter((row) => normalizeRadiologyDescription(row.description) === radiologyDescriptionKey);
 
     for (const row of exactDescriptionRows) {
-      candidates.push(rowToCandidate(matchInput, row, 0.96, 'radiology_match', 'exact CMS description'));
+      candidates.push(rowToCandidate(matchInput, row, 0.96, 'radiology_match', 'exact ACR-active CMS description'));
       if (dedupeCandidates(candidates).length >= maxResults) break;
     }
   }
@@ -642,7 +693,7 @@ export async function findMatchCandidates(
       .slice(0, maxResults * 3);
 
     for (const { row, score } of descScored) {
-      candidates.push(rowToCandidate(matchInput, row, score, 'radiology_match', 'CMS fuzzy match'));
+      candidates.push(rowToCandidate(matchInput, row, score, 'radiology_match', 'ACR-active CMS fuzzy match'));
       if (dedupeCandidates(candidates).length >= maxResults) break;
     }
   }

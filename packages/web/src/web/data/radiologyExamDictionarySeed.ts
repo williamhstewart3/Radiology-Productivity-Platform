@@ -1,6 +1,7 @@
 import Papa from 'papaparse';
 import curatedDictionaryCsv from '../../../../../data/reference/radiology_exam_dictionary.csv?raw';
 import { db } from '../db/database';
+import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from './acrRadiologyActiveCptSet';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import { cptRvuUniqueKey, dedupeCptRvuRowsForBulkPut, normalizeCptModifier } from '../utils/cptRowDeduplication';
 import { buildOrbitCmeSeedCptRows } from './orbitCmeSeedMappings';
@@ -109,6 +110,7 @@ export function buildCuratedDictionaryCptRows(entries = buildCuratedRadiologyDic
     for (const serialized of entry.cptCodes) {
       const { cptCode, modifier } = parseCpt(serialized);
       if (!cptCode) continue;
+      const includeInAutoMatch = isRadiologyActiveCpt(cptCode);
       rows.push({
         id: stableId('curated_dictionary_cpt', cptCode, modifier),
         cptCode,
@@ -127,6 +129,8 @@ export function buildCuratedDictionaryCptRows(entries = buildCuratedRadiologyDic
         modality: entry.modality,
         rvuFileVersion: 'CURATED_RADIOLOGY_DICTIONARY',
         effectiveDate: '2026-01-01',
+        includeInAutoMatch,
+        autoMatchSource: includeInAutoMatch ? ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE : null,
         isUserVerified: true,
         createdAt: now,
         updatedAt: now,

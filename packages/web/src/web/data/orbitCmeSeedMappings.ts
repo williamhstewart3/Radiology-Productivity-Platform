@@ -1,5 +1,6 @@
 import Papa from 'papaparse';
 import orbitCmeSeedCsv from '../../../../../data/orbit_cme_seed_mappings.csv?raw';
+import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from './acrRadiologyActiveCptSet';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import type { CptRvuRow, Modality } from '../types';
 
@@ -93,6 +94,7 @@ export function buildOrbitCmeSeedCptRows(rows = getOrbitCmeSeedMappings()): CptR
   for (const row of rows) {
     const key = `${row.cptCode}-26`;
     if (byKey.has(key)) continue;
+    const includeInAutoMatch = isRadiologyActiveCpt(row.cptCode);
     byKey.set(key, {
       id: stableId('orbit_cme_seed_cpt', row.cptCode, '26'),
       cptCode: row.cptCode,
@@ -111,6 +113,8 @@ export function buildOrbitCmeSeedCptRows(rows = getOrbitCmeSeedMappings()): CptR
       modality: modalityFor(row),
       rvuFileVersion: 'ORBIT_CME_SEED',
       effectiveDate: '2026-01-01',
+      includeInAutoMatch,
+      autoMatchSource: includeInAutoMatch ? ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE : null,
       isUserVerified: true,
       createdAt: now,
       updatedAt: now,

@@ -1,4 +1,5 @@
 import type { CptRvuRow, Modality, PcTcIndicator, StatusCategory } from '../types';
+import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from './acrRadiologyActiveCptSet';
 import { normalizeCptModifier } from '../utils/cptRowDeduplication';
 
 /**
@@ -236,6 +237,8 @@ export function buildSeedCptRows(): CptRvuRow[] {
     modality: row.modality,
     rvuFileVersion: 'SEED_VERIFIED',
     effectiveDate: '2026-01-01',
+    includeInAutoMatch: isRadiologyActiveCpt(row.cptCode),
+    autoMatchSource: isRadiologyActiveCpt(row.cptCode) ? ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE : null,
     isUserVerified: true,
     createdAt: ts,
     updatedAt: ts,

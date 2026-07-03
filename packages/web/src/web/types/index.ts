@@ -113,6 +113,8 @@ export interface CptRvuRow {
   modality: Modality;
   rvuFileVersion: string;
   effectiveDate: string;
+  includeInAutoMatch?: boolean;
+  autoMatchSource?: string | null;
   isUserVerified: boolean;
   createdAt: string;
   updatedAt: string;

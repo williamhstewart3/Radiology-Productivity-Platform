@@ -15,6 +15,7 @@ import type {
   MemorySuggestion,
   OcrLearningEntry,
 } from '../types';
+import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from '../data/acrRadiologyActiveCptSet';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 
 /**
@@ -336,6 +337,31 @@ export class RvuDatabase extends Dexie {
       radiologistProfiles: 'id, practiceId, active, lastUsed',
       organizations: 'id',
       practices: 'id, organizationId',
+    });
+
+    // v17: mark ACR CY2026 radiology-active CPTs for default OCR auto-matching.
+    // The full CMS CPT table stays intact; only this flag narrows automatic suggestions.
+    this.version(17).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, siteId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      ocrLearningEntries: 'id, profileId, siteId, normalizedOcrText, matchedCpt, lastUsedAt',
+      activeReviewSessions: 'id, profileId, readingDate, status, updatedAt',
+      auditLogEntries: 'id, profileId, siteId, sessionId, logDate, action, createdAt',
+      hospitalComparisonReports: 'id, profileId, siteId, reportDate, createdAt',
+      memorySuggestions: 'id, profileId, siteId, normalizedKey, status, createdAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      return trans.table('cptRvuTable').toCollection().modify((row) => {
+        const includeInAutoMatch = isRadiologyActiveCpt(row.cptCode);
+        row.includeInAutoMatch = includeInAutoMatch;
+        row.autoMatchSource = includeInAutoMatch ? ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE : row.autoMatchSource ?? null;
+      });
     });
   }
 }

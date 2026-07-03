@@ -16,6 +16,8 @@
 - [x] Split OCR procedure, exam date/time, and read date/time into separate structured fields
 - [x] Use modality-first PowerScribe OCR matching with deterministic protocol mappings before fuzzy fallback
 - [x] Add Windows clipboard OCR helper path that returns structured PowerScribe rows
+- [x] Add ACR CY2026 radiology-active CPT set for default OCR auto-matching
+- [x] Add hard modality filters and XR view normalization before fuzzy CPT matching
 
 ---
 
@@ -56,6 +58,9 @@
 - [ ] Ignore 0.0 RVU CPT codes
 - [x] Support deterministic multiple-CPT OCR matches for common combined studies
 - [x] Combined-study matching for common CT/CTA protocol pairs
+- [x] Restrict automatic fuzzy CPT matching to ACR radiology-active CPTs by default
+- [x] Strip junk before the first modality token before CPT matching
+- [x] Add deterministic aliases for common PowerScribe OCR study names
 
 ---
 
