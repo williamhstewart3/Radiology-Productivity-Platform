@@ -55,12 +55,19 @@ function productivityRelevant(candidate: MatchCandidate): boolean {
   return candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0;
 }
 
+function isDeterministicProtocolCandidate(candidate: MatchCandidate): boolean {
+  return candidate.method === 'radiology_match' &&
+    candidate.confidence >= 0.99 &&
+    candidate.explanation?.source === 'deterministic protocol mapping';
+}
+
 function reviewReasonFor(top: MatchCandidate | undefined, candidates: MatchCandidate[], duplicateStatus: DuplicateStatus): string | null {
   if (!top) return 'New or unknown exam';
   if (!productivityRelevant(top)) return 'Not modifier 26 productivity RVU';
   if (duplicateStatus === 'possible') return 'Possible duplicate';
   if (top.confidence < 0.95) return 'Low confidence match';
   const plausible = candidates.filter((candidate) => productivityRelevant(candidate) && candidate.confidence >= 0.65);
+  if (plausible.length > 1 && plausible.every(isDeterministicProtocolCandidate)) return null;
   if (plausible.length > 1 && top.method !== 'alias_match') return 'Multiple possible CPT matches';
   return null;
 }
@@ -70,7 +77,7 @@ function cmsDescriptionsFor(candidates: MatchCandidate[]): string {
 }
 
 function procedureNameFor(study: ImportedStudy): string {
-  return (study.procedureName ?? study.examTitle).trim();
+  return (study.procedureName ?? study.cleanedExamName ?? study.cleanedText ?? study.examTitle).trim();
 }
 
 export async function runImportPipeline(
@@ -128,22 +135,34 @@ export async function runImportPipeline(
     const matchReviewReason = reviewReasonFor(top, candidates, dupStatus);
     const reviewReason = study.parserReviewReason ?? matchReviewReason;
     const autoApprovalLevel =
-      !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= 0.99 && dupStatus === null
+      !parserNeedsReview && top && isDeterministicProtocolCandidate(top) && dupStatus === null
+        ? 'learned'
+        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= 0.99 && dupStatus === null
         ? 'silent'
         : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= 0.95 && dupStatus === null
         ? 'learned'
         : null;
     const autoAccept = Boolean(autoApprovalLevel && !reviewReason);
 
+    const deterministicSelectedIndices = top && isDeterministicProtocolCandidate(top)
+      ? candidates
+          .map((candidate, index) => (isDeterministicProtocolCandidate(candidate) && productivityRelevant(candidate) ? index : -1))
+          .filter((index) => index >= 0)
+      : [];
     const selectedIndex =
-      top && top.confidence >= 0.75 && productivityRelevant(top) ? 0 : null;
+      deterministicSelectedIndices[0] ??
+      (top && top.confidence >= 0.75 && productivityRelevant(top) ? 0 : null);
+    const selectedCandidateIndices =
+      deterministicSelectedIndices.length > 0
+        ? deterministicSelectedIndices
+        : selectedIndex === null ? [] : [selectedIndex];
 
     const row: PipelineReviewRow = {
       tempId: crypto.randomUUID(),
       source: study,
       candidates,
       selectedCandidateIndex: selectedIndex,
-      selectedCandidateIndices: selectedIndex === null ? [] : [selectedIndex],
+      selectedCandidateIndices,
       displayTitle: procedureNameFor(study),
       needsReview: parserNeedsReview || (!autoAccept && Boolean(reviewReason ?? (candidates.length === 0 || !top || top.confidence < 0.75))),
       autoApproved: autoAccept,

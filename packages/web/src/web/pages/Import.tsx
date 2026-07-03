@@ -194,8 +194,18 @@ function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) 
 function candidateKey(candidate: MatchCandidate): string {
   return `${candidate.cptCode}-${candidate.modifier ?? ''}`;
 }
-function procedureNameForSource(source: { procedureName?: string | null; examTitle: string }): string {
-  return (source.procedureName ?? source.examTitle).trim();
+function procedureNameForSource(source: { procedureName?: string | null; cleanedExamName?: string | null; cleanedText?: string | null; examTitle: string }): string {
+  return (source.procedureName ?? source.cleanedExamName ?? source.cleanedText ?? source.examTitle).trim();
+}
+
+function formatOcrTime(time: string): string {
+  const match = time.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return time;
+  const hour24 = Number(match[1]);
+  const minute = match[2];
+  const period = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${minute} ${period}`;
 }
 
 function formatOcrDateTime(date?: string | null, time?: string | null, fallbackDateTime?: string | null): string | null {
@@ -203,7 +213,7 @@ function formatOcrDateTime(date?: string | null, time?: string | null, fallbackD
     const [year, month, day] = date.split('-');
     if (year && month && day) {
       const shortYear = year.slice(-2);
-      return `${Number(month)}/${Number(day)}/${shortYear}${time ? ` ${time}` : ''}`;
+      return `${Number(month)}/${Number(day)}/${shortYear}${time ? ` ${formatOcrTime(time)}` : ''}`;
     }
   }
   if (!fallbackDateTime) return null;
@@ -215,7 +225,7 @@ function formatOcrDateTime(date?: string | null, time?: string | null, fallbackD
     year: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hour12: true,
   });
 }
 

@@ -14,6 +14,7 @@
 - [x] Strip visible row numbers and mixed PowerScribe UI labels before OCR matching
 - [x] Add Orbit CME seed mappings as supplemental OCR CPT/wRVU lookup source
 - [x] Split OCR procedure, exam date/time, and read date/time into separate structured fields
+- [x] Use modality-first PowerScribe OCR matching with deterministic protocol mappings before fuzzy fallback
 
 ---
 
@@ -30,6 +31,8 @@
 - [x] Use existing exam dictionary first, then Orbit CME seed mappings, before CMS/fuzzy OCR matching
 - [x] Save OCR confidence per study
 - [x] Keep OCR dates out of procedure normalization and fuzzy CPT matching
+- [x] Strip leading PowerScribe row/status junk before procedure parsing and matching
+- [x] Preserve Exam and Read times in OCR review cards
 - [ ] Bulk approve high-confidence studies
 - [ ] Unknowns-only review mode
 - [ ] Review later workflow
@@ -49,8 +52,8 @@
 - [ ] Improve fuzzy matching confidence
 - [ ] Prioritize modifier 26 CPTs only
 - [ ] Ignore 0.0 RVU CPT codes
-- [ ] Support multiple CPT codes after OCR review
-- [ ] Combined-study matching
+- [x] Support deterministic multiple-CPT OCR matches for common combined studies
+- [x] Combined-study matching for common CT/CTA protocol pairs
 
 ---
 

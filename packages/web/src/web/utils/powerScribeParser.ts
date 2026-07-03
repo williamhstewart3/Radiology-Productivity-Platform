@@ -12,8 +12,10 @@ export interface ParsedLine {
   procedureName: string;
   examName: string;
   cleanedExamName: string;
+  cleanedText: string;
   examDate: string | null;
   examTime: string | null;
+  examDateTime: string | null;
   studyDateTime: string | null;
   studyDate: string | null;
   modifiedDateTime: string | null;
@@ -39,7 +41,7 @@ const HEADER_FOOTER_PATTERN =
 const UI_NOISE_PATTERN =
   /\b(?:reset\s+filters?|browse|search|filter|filters|refresh|logout|settings|preferences|dashboard|inbox|outbox|worklist|folder|sort|ascending|descending|click|button|menu|home|apply|clear|cancel|save|export|print|status\s+bar|tabs?)\b/i;
 const LEFT_STATUS_PATTERN =
-  /^\s*(?:(?:[|/\\_\-#>*]+|[voxlit]|[0-9]{1,4}|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread)\s+){1,10}/i;
+  /^\s*(?:(?:[+@|/\\_\-#>*.:;()[\]{}]+|vb|vi|vo|vx|[voxlit]|[0-9]{1,4}|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread|warning|warn|alert|check)\s+){1,10}/i;
 
 const UI_TEXT_STRIP_PATTERNS = [
   /\breset\s+filters?\b/gi,
@@ -264,8 +266,10 @@ function parseSingleRow(rawRow: string): ParsedLine | null {
     procedureName: cleanedExamName,
     examName: cleanedExamName,
     cleanedExamName,
+    cleanedText: cleanedExamName,
     examDate,
     examTime,
+    examDateTime: studyDateTime,
     studyDateTime,
     studyDate,
     modifiedDateTime,

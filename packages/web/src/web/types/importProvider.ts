@@ -79,6 +79,9 @@ export interface ImportedStudy {
   /** Explicit performed exam time (HH:MM) extracted from OCR, if available. */
   examTime?: string | null;
 
+  /** Full ISO datetime for the performed exam, exposed with PowerScribe column naming. */
+  examDateTime?: string | null;
+
   /**
    * Full ISO 8601 datetime for the performed exam if the source provides it.
    * OCR often only provides the date, so this may be null.
@@ -120,6 +123,9 @@ export interface ImportedStudy {
 
   /** OCR/parser-cleaned exam name before CPT matching, when available. */
   cleanedExamName?: string | null;
+
+  /** OCR/parser-cleaned row text before CPT matching, when available. */
+  cleanedText?: string | null;
 
   /** Confidence that OCR table row/procedure extraction was clean. */
   extractionConfidence?: number | null;

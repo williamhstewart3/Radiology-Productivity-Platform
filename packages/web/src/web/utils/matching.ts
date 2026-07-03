@@ -40,26 +40,138 @@ function isProductivityRelevantModifier26(row: CptRvuRow): boolean {
   return row.modifier === '26' && (row.workRvu ?? 0) > 0;
 }
 
-type ModalityLane = Modality | 'CTA' | 'MRA';
+type ModalityLane = Modality | 'CTA' | 'MRA' | 'PET' | 'DXA';
+type BodyProtocolKeyword =
+  | 'CHEST'
+  | 'ABDOMEN'
+  | 'PELVIS'
+  | 'HEAD'
+  | 'NECK'
+  | 'BRAIN'
+  | 'SPINE'
+  | 'C_SPINE'
+  | 'T_SPINE'
+  | 'L_SPINE'
+  | 'HIP'
+  | 'WRIST'
+  | 'HAND'
+  | 'CHEST_PORTABLE'
+  | 'PROSTATE'
+  | 'RENAL_STONE'
+  | 'APPENDIX'
+  | 'CARDIAC_SCORE'
+  | 'ANGIOGRAM'
+  | 'CAROTID'
+  | 'LOWER_EXTREMITY'
+  | 'UPPER_EXTREMITY'
+  | 'MRCP'
+  | 'MAMMO_BIOPSY'
+  | 'STEREOTACTIC'
+  | 'LUNG_CANCER_SCREENING';
+
+interface ModalityFirstParse {
+  lane: ModalityLane | null;
+  cleanedProcedure: string;
+  keywords: Set<BodyProtocolKeyword>;
+}
+
+const LEADING_OCR_JUNK_PATTERN =
+  /^(?:(?:[+@#*|/\\_\-.:;()[\]{}<>!?~]+|(?:\u2713|\u2714|\u2611|\u25a0|\u25a1|\u25cf|\u2022)|\d{1,4}|vb|vi|vo|vx|v|l|i|o|x|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread|warning|warn|alert|check)\s+)+/i;
+const CONCATENATED_MODALITY_REWRITES: Array<[RegExp, string]> = [
+  [/^CT(ANGIOGRAM|ANGIOGRAPHY|CARDIAC|CHEST|HEAD|ABDOMEN|RENAL|APPENDIX|LDCT)\b/i, 'CT $1'],
+  [/^MRI(PROSTATE|ABDOMEN|BRAIN|SPINE|CHEST|PELVIS|MRCP)\b/i, 'MRI $1'],
+  [/^MRA(HEAD|NECK|CHEST|ABDOMEN|PELVIS)\b/i, 'MRA $1'],
+  [/^XR(CHEST|ABDOMEN|WRIST|HAND|HIP)\b/i, 'XR $1'],
+  [/^US(CAROTID|ARTERIAL|OB|ABDOMEN|PELVIS|RENAL)\b/i, 'US $1'],
+];
+
+function stripLeadingOcrJunk(rawInput: string): string {
+  let text = normalizeOcrExamTextForMatching(rawInput)
+    .replace(/[\u201c\u201d"']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  let previous = '';
+  while (text !== previous) {
+    previous = text;
+    text = text.replace(LEADING_OCR_JUNK_PATTERN, '').trim();
+  }
+
+  for (const [pattern, replacement] of CONCATENATED_MODALITY_REWRITES) {
+    text = text.replace(pattern, replacement);
+  }
+
+  return text.replace(/\s+/g, ' ').trim();
+}
 
 function detectModalityLane(rawInput: string): ModalityLane | null {
-  const normalized = normalizeOcrExamTextForMatching(rawInput).toUpperCase();
-  if (/\b(?:CTA|CT ANGIO(?:GRAM|GRAPHY)?)\b/.test(normalized)) return 'CTA';
-  if (/\b(?:MRA|MR ANGIO(?:GRAM|GRAPHY)?)\b/.test(normalized)) return 'MRA';
-  if (/\bCT\b/.test(normalized)) return 'CT';
-  if (/\bMRI?\b|\bMR\b/.test(normalized)) return 'MRI';
-  if (/\b(?:XR|X RAY|X-RAY|RADIOGRAPH)\b/.test(normalized)) return 'XR';
-  if (/\b(?:US|U\/S|ULTRASOUND|SONOGRAM)\b/.test(normalized)) return 'US';
-  if (/\b(?:NM|NUCLEAR|PET)\b/.test(normalized)) return 'NM_PET';
+  const normalized = stripLeadingOcrJunk(rawInput).toUpperCase();
+  if (/^(?:CTA|CT ANGIO(?:GRAM|GRAPHY)?)(?:\b|\s)/.test(normalized)) return 'CTA';
+  if (/^(?:MRA|MR ANGIO(?:GRAM|GRAPHY)?)(?:\b|\s)/.test(normalized)) return 'MRA';
+  if (/^CT(?:\b|\s)/.test(normalized)) return 'CT';
+  if (/^(?:MRI|MR)(?:\b|\s)/.test(normalized)) return 'MRI';
+  if (/^(?:XR|X RAY|X-RAY|RADIOGRAPH)(?:\b|\s)/.test(normalized)) return 'XR';
+  if (/^(?:US|U\/S|ULTRASOUND|SONOGRAM)(?:\b|\s)/.test(normalized)) return 'US';
+  if (/^PET(?:\b|\s)/.test(normalized)) return 'PET';
+  if (/^(?:NM|NUCLEAR)(?:\b|\s)/.test(normalized)) return 'NM_PET';
+  if (/^(?:MAMMO|MAMMOGRAM|MAMMOGRAPHY)(?:\b|\s)/.test(normalized)) return 'MAMMO';
+  if (/^(?:DXA|DEXA)(?:\b|\s)/.test(normalized)) return 'DXA';
+  if (/^(?:FLUORO|FLUOROSCOPY)(?:\b|\s)/.test(normalized)) return 'FLUORO';
   return null;
+}
+
+function extractBodyProtocolKeywords(text: string): Set<BodyProtocolKeyword> {
+  const normalized = normalizeRadiologyDescription(text);
+  const upper = stripLeadingOcrJunk(text).toUpperCase();
+  const keywords = new Set<BodyProtocolKeyword>();
+  if (/\b(?:CHEST|THORAX)\b/.test(upper) || /\bTHORAX\b/.test(normalized)) keywords.add('CHEST');
+  if (/\b(?:ABDOMEN|ABD)\b/.test(upper) || /\bABD\b/.test(normalized)) keywords.add('ABDOMEN');
+  if (/\b(?:PELVIS|PEL)\b/.test(upper) || /\bPEL\b/.test(normalized)) keywords.add('PELVIS');
+  if (/\bHEAD\b/.test(upper)) keywords.add('HEAD');
+  if (/\bNECK\b/.test(upper)) keywords.add('NECK');
+  if (/\bBRAIN\b/.test(upper)) keywords.add('BRAIN');
+  if (/\b(?:SPINE|CERVICAL|THORACIC|LUMBAR)\b/.test(upper)) keywords.add('SPINE');
+  if (/\b(?:C SPINE|CERVICAL)\b/.test(upper)) keywords.add('C_SPINE');
+  if (/\b(?:T SPINE|THORACIC)\b/.test(upper)) keywords.add('T_SPINE');
+  if (/\b(?:L SPINE|LUMBAR)\b/.test(upper)) keywords.add('L_SPINE');
+  if (/\bHIP\b/.test(upper)) keywords.add('HIP');
+  if (/\bWRIST\b/.test(upper)) keywords.add('WRIST');
+  if (/\bHAND\b/.test(upper)) keywords.add('HAND');
+  if (/\bCHEST\b.*\bPORTABLE\b|\bPORTABLE\b.*\bCHEST\b/.test(upper)) keywords.add('CHEST_PORTABLE');
+  if (/\bPROSTATE\b/.test(upper)) keywords.add('PROSTATE');
+  if (/\bRENAL\b.*\bSTONE\b|\bSTONE\b.*\bPROTOCOL\b/.test(upper)) keywords.add('RENAL_STONE');
+  if (/\bAPPENDIX\b|\bAPPENDICITIS\b/.test(upper)) keywords.add('APPENDIX');
+  if (/\bCARDIAC\b.*\b(?:SCORE|SCORING)\b|\bCALCIUM\b.*\bSCORE\b/.test(upper)) keywords.add('CARDIAC_SCORE');
+  if (/\b(?:ANGIOGRAM|ANGIOGRAPHY|CTA|MRA)\b/.test(upper)) keywords.add('ANGIOGRAM');
+  if (/\bCAROTID\b/.test(upper)) keywords.add('CAROTID');
+  if (/\b(?:LOWER EXTREMITY|LOWER EXT|LEG)\b/.test(upper)) keywords.add('LOWER_EXTREMITY');
+  if (/\b(?:UPPER EXTREMITY|UPPER EXT|ARM)\b/.test(upper)) keywords.add('UPPER_EXTREMITY');
+  if (/\bMRCP\b/.test(upper)) keywords.add('MRCP');
+  if (/\bMAMMO\b.*\bBIOPSY\b|\bBREAST\b.*\bBIOPSY\b/.test(upper)) keywords.add('MAMMO_BIOPSY');
+  if (/\bSTEREOTACTIC\b|\bSTEREO\b/.test(upper)) keywords.add('STEREOTACTIC');
+  if (/\b(?:LUNG CANCER SCREEN|LDCT|LOW DOSE)\b/.test(upper)) keywords.add('LUNG_CANCER_SCREENING');
+  return keywords;
+}
+
+function parseModalityFirst(rawInput: string): ModalityFirstParse {
+  const cleanedProcedure = stripLeadingOcrJunk(rawInput);
+  return {
+    lane: detectModalityLane(cleanedProcedure),
+    cleanedProcedure,
+    keywords: extractBodyProtocolKeywords(cleanedProcedure),
+  };
 }
 
 function rowMatchesModalityLane(row: CptRvuRow, lane: ModalityLane | null): boolean {
   if (!lane) return true;
-  const description = `${row.description} ${row.modality}`.toUpperCase();
+  const description = `${row.description} ${row.cptCode} ${row.modality}`.toUpperCase();
   const isAngio = /\b(?:ANGIO|ANGIOGRAPHY|CTA|MRA)\b/.test(description);
   if (lane === 'CTA') return row.modality === 'CT' && /\b(?:ANGIO|ANGIOGRAPHY|CTA)\b/.test(description);
   if (lane === 'MRA') return row.modality === 'MRI' && /\b(?:ANGIO|ANGIOGRAPHY|MRA)\b/.test(description);
+  if (lane === 'PET') return row.modality === 'NM_PET' && /\bPET\b/.test(description);
+  if (lane === 'DXA') return /^(?:77080|77081|77085|77086|77072|77078)$/.test(row.cptCode) || /\b(?:DXA|DEXA|BONE DENSITY|BONE AGE)\b/.test(description);
+  if (lane === 'MAMMO') return row.modality === 'MAMMO' || /\b(?:MAMMO|MAMMOGRAM|MAMMOGRAPHY|BREAST|TOMOSYNTHESIS|STEREOTACTIC)\b/.test(description);
+  if (lane === 'FLUORO') return row.modality === 'FLUORO' || /\bFLUORO/.test(description);
   if (lane === 'CT') return row.modality === 'CT' && !isAngio;
   if (lane === 'MRI') return row.modality === 'MRI' && !isAngio;
   return row.modality === lane;
@@ -67,13 +179,24 @@ function rowMatchesModalityLane(row: CptRvuRow, lane: ModalityLane | null): bool
 
 function candidateMatchesModalityLane(candidate: MatchCandidate, lane: ModalityLane | null): boolean {
   if (!lane) return true;
-  const description = `${candidate.description} ${candidate.modality ?? ''}`.toUpperCase();
+  const description = `${candidate.description} ${candidate.cptCode} ${candidate.modality ?? ''}`.toUpperCase();
   const isAngio = /\b(?:ANGIO|ANGIOGRAPHY|CTA|MRA)\b/.test(description);
   if (lane === 'CTA') return candidate.modality === 'CT' && /\b(?:ANGIO|ANGIOGRAPHY|CTA)\b/.test(description);
   if (lane === 'MRA') return candidate.modality === 'MRI' && /\b(?:ANGIO|ANGIOGRAPHY|MRA)\b/.test(description);
+  if (lane === 'PET') return candidate.modality === 'NM_PET' && /\bPET\b/.test(description);
+  if (lane === 'DXA') return /^(?:77080|77081|77085|77086|77072|77078)$/.test(candidate.cptCode) || /\b(?:DXA|DEXA|BONE DENSITY|BONE AGE)\b/.test(description);
+  if (lane === 'MAMMO') return candidate.modality === 'MAMMO' || /\b(?:MAMMO|MAMMOGRAM|MAMMOGRAPHY|BREAST|TOMOSYNTHESIS|STEREOTACTIC)\b/.test(description);
+  if (lane === 'FLUORO') return candidate.modality === 'FLUORO' || /\bFLUORO/.test(description);
   if (lane === 'CT') return candidate.modality === 'CT' && !isAngio;
   if (lane === 'MRI') return candidate.modality === 'MRI' && !isAngio;
   return candidate.modality === lane;
+}
+
+function candidateRespectsOrBypassesModalityLane(candidate: MatchCandidate, lane: ModalityLane | null): boolean {
+  if (!lane) return true;
+  const source = candidate.explanation?.source;
+  if (candidate.method === 'alias_match' || source === 'exam dictionary' || source === 'OCR learning table') return true;
+  return candidateMatchesModalityLane(candidate, lane);
 }
 
 function rowToCandidate(
@@ -216,6 +339,159 @@ async function candidatesForCommonRadiologyMapping(rawInput: string): Promise<Ma
   return candidates;
 }
 
+function hasNormalizedPhrase(normalized: string, phrase: string): boolean {
+  return normalized.includes(normalizeRadiologyDescription(phrase));
+}
+
+function deterministicCptCodesFor(parsed: ModalityFirstParse): string[] {
+  const normalized = normalizeRadiologyDescription(parsed.cleanedProcedure);
+  const upper = parsed.cleanedProcedure.toUpperCase();
+
+  if (parsed.lane === 'XR') {
+    if (parsed.keywords.has('CHEST_PORTABLE') || hasNormalizedPhrase(normalized, 'XR CHEST PORTABLE')) return ['71045'];
+    if (hasNormalizedPhrase(normalized, 'XR CHEST PA AND LATERAL') || hasNormalizedPhrase(normalized, 'XR CHEST 2 VIEWS')) return ['71046'];
+    if (hasNormalizedPhrase(normalized, 'XR ABDOMEN AP') || hasNormalizedPhrase(normalized, 'XR ABDOMEN 1 VIEW')) return ['74018'];
+    if (/\bXR\b.*\bWRIST\b.*\b(?:PA|LATERAL|OBLIQUE)\b/i.test(upper)) return ['73110'];
+    if (/\bXR\b.*\bHAND\b.*\b(?:PA|LATERAL|OBLIQUE)\b/i.test(upper)) return ['73130'];
+    if (/\bXR\b.*\bHIP\b.*\bPELVIS\b.*\b(?:AP|LATERAL)\b/i.test(upper) || /\bXR\b.*\bPELVIS\b.*\bHIP\b.*\b(?:AP|LATERAL)\b/i.test(upper)) return ['73502'];
+  }
+
+  if (parsed.lane === 'CT') {
+    if (parsed.keywords.has('CARDIAC_SCORE') || hasNormalizedPhrase(normalized, 'CT CARDIAC SCORING') || hasNormalizedPhrase(normalized, 'CT CARDIAC SCORE SPECIAL')) return ['75571'];
+    if (parsed.keywords.has('LUNG_CANCER_SCREENING')) return ['71271'];
+    if (parsed.keywords.has('RENAL_STONE')) return ['74176'];
+    if (parsed.keywords.has('APPENDIX')) return ['74177'];
+    if (parsed.keywords.has('CHEST') && parsed.keywords.has('ABDOMEN') && parsed.keywords.has('PELVIS')) {
+      if (/\bW\s*WO\b|\bWWO\b|\bWITH AND WITHOUT\b/i.test(upper)) return ['71270', '74178'];
+      if (/\bWO\b|\bWITHOUT\b|\bW\/O\b/i.test(upper)) return ['71250', '74176'];
+      return ['71260', '74177'];
+    }
+    if (parsed.keywords.has('ABDOMEN') && parsed.keywords.has('PELVIS')) {
+      if (/\bW\s*WO\b|\bWWO\b|\bWITH AND WITHOUT\b/i.test(upper)) return ['74178'];
+      if (/\bWO\b|\bWITHOUT\b|\bW\/O\b/i.test(upper)) return ['74176'];
+      return ['74177'];
+    }
+    if (parsed.keywords.has('HEAD')) {
+      if (/\bWO\b|\bWITHOUT\b|\bW\/O\b/i.test(upper)) return ['70450'];
+      if (/\bW\b|\bWITH\b|\bCONTRAST\b/i.test(upper)) return ['70460'];
+    }
+    if (parsed.keywords.has('CHEST')) {
+      if (/\bWO\b|\bWITHOUT\b|\bW\/O\b/i.test(upper)) return ['71250'];
+      if (/\bW\b|\bWITH\b|\bCONTRAST\b/i.test(upper)) return ['71260'];
+    }
+  }
+
+  if (parsed.lane === 'CTA') {
+    if (parsed.keywords.has('HEAD') && parsed.keywords.has('NECK')) return ['70496', '70498'];
+    if (/\b(?:PULMONARY EMBOLUS|PULMONARY EMBOLISM|PE STUDY|PE PROTOCOL)\b/i.test(upper)) return ['71275'];
+    if (/\b(?:CORONARY|CARDIAC IMAGE)\b/i.test(upper)) return ['75574'];
+  }
+
+  if (parsed.lane === 'MRI') {
+    if (parsed.keywords.has('PROSTATE')) return ['72197'];
+    if (parsed.keywords.has('MRCP') && parsed.keywords.has('ABDOMEN')) return ['74183'];
+    if (parsed.keywords.has('ABDOMEN') && (/\bW\s*WO\b|\bWWO\b|\bWITH AND WITHOUT\b/i.test(upper))) return ['74183'];
+  }
+
+  if (parsed.lane === 'US') {
+    if (parsed.keywords.has('CAROTID') && /\bBILATERAL\b/i.test(upper)) return ['93880'];
+    if (parsed.keywords.has('LOWER_EXTREMITY') && /\bARTERIAL\b/i.test(upper)) {
+      return /\bBILATERAL\b/i.test(upper) ? ['93925'] : ['93926'];
+    }
+    if (/\bOB\b.*(?:<|LESS THAN|LT)\s*14\b|\bOB\b.*\bFIRST GESTATION\b|\bOB\b.*\bSINGLE\b/i.test(upper)) return ['76801'];
+  }
+
+  return [];
+}
+
+async function candidatesForDeterministicProtocol(rawInput: string, parsed: ModalityFirstParse): Promise<MatchCandidate[]> {
+  const candidates: MatchCandidate[] = [];
+  for (const cptCode of deterministicCptCodesFor(parsed)) {
+    const rows = await getModifier26Rows(cptCode);
+    for (const row of rows) {
+      candidates.push(rowToCandidate(rawInput, row, 0.995, 'radiology_match', 'deterministic protocol mapping'));
+    }
+  }
+  return candidates;
+}
+
+function rowMatchesKeyword(row: CptRvuRow, keyword: BodyProtocolKeyword): boolean {
+  const description = `${row.description} ${row.cptCode}`.toUpperCase();
+  switch (keyword) {
+    case 'CHEST':
+      return /\b(?:CHEST|THORAX)\b/.test(description);
+    case 'ABDOMEN':
+      return /\b(?:ABDOMEN|ABD)\b/.test(description);
+    case 'PELVIS':
+      return /\b(?:PELVIS|PEL)\b/.test(description);
+    case 'HEAD':
+      return /\bHEAD\b/.test(description);
+    case 'NECK':
+      return /\bNECK\b/.test(description);
+    case 'BRAIN':
+      return /\bBRAIN\b/.test(description);
+    case 'SPINE':
+      return /\b(?:SPINE|CERVICAL|THORACIC|LUMBAR|C-SPINE|T-SPINE|L-SPINE)\b/.test(description);
+    case 'C_SPINE':
+      return /\b(?:CERVICAL|C-SPINE|C SPINE)\b/.test(description);
+    case 'T_SPINE':
+      return /\b(?:THORACIC|T-SPINE|T SPINE)\b/.test(description);
+    case 'L_SPINE':
+      return /\b(?:LUMBAR|L-SPINE|L SPINE)\b/.test(description);
+    case 'HIP':
+      return /\bHIP\b/.test(description);
+    case 'WRIST':
+      return /\bWRIST\b/.test(description);
+    case 'HAND':
+      return /\bHAND\b/.test(description);
+    case 'CHEST_PORTABLE':
+      return /\bCHEST\b/.test(description) && /\b(?:1 VIEW|PORTABLE)\b/.test(description);
+    case 'PROSTATE':
+      return /\bPROSTATE\b/.test(description) || row.cptCode === '72197';
+    case 'RENAL_STONE':
+      return row.cptCode === '74176' || /\bRENAL\b.*\bSTONE\b/.test(description);
+    case 'APPENDIX':
+      return row.cptCode === '74177' || /\bAPPENDIX\b/.test(description);
+    case 'CARDIAC_SCORE':
+      return row.cptCode === '75571' || /\b(?:CALCIUM SCORE|CARDIAC SCORE)\b/.test(description);
+    case 'ANGIOGRAM':
+      return /\b(?:ANGIO|ANGIOGRAPHY|CTA|MRA)\b/.test(description);
+    case 'CAROTID':
+      return /\bCAROTID\b/.test(description) || row.cptCode === '93880';
+    case 'LOWER_EXTREMITY':
+      return /\b(?:LOWER EXTREMITY|LEG|LOWER)\b/.test(description);
+    case 'UPPER_EXTREMITY':
+      return /\b(?:UPPER EXTREMITY|ARM|UPPER)\b/.test(description);
+    case 'MRCP':
+      return row.cptCode === '74183' || /\bMRCP\b/.test(description);
+    case 'MAMMO_BIOPSY':
+      return /\b(?:BREAST|MAMMO)\b.*\bBIOPSY\b/.test(description) || /^1908[1-6]$/.test(row.cptCode);
+    case 'STEREOTACTIC':
+      return /\b(?:STEREOTACTIC|STEREO)\b/.test(description);
+    case 'LUNG_CANCER_SCREENING':
+      return row.cptCode === '71271' || /\b(?:LUNG SCREEN|LOW-DOSE|LOW DOSE)\b/.test(description);
+    default:
+      return false;
+  }
+}
+
+function keywordScopedRows(rows: CptRvuRow[], parsed: ModalityFirstParse): CptRvuRow[] {
+  const priorityGroups: BodyProtocolKeyword[][] = [
+    ['CARDIAC_SCORE', 'RENAL_STONE', 'APPENDIX', 'LUNG_CANCER_SCREENING', 'MRCP', 'MAMMO_BIOPSY', 'STEREOTACTIC'],
+    ['PROSTATE', 'CAROTID', 'CHEST_PORTABLE'],
+    ['C_SPINE', 'T_SPINE', 'L_SPINE', 'SPINE', 'HIP', 'WRIST', 'HAND', 'HEAD', 'NECK', 'BRAIN', 'CHEST', 'ABDOMEN', 'PELVIS', 'LOWER_EXTREMITY', 'UPPER_EXTREMITY'],
+  ];
+
+  let scoped = rows;
+  for (const group of priorityGroups) {
+    const active = group.filter((keyword) => parsed.keywords.has(keyword));
+    if (active.length === 0) continue;
+    const narrowed = scoped.filter((row) => active.some((keyword) => rowMatchesKeyword(row, keyword)));
+    if (narrowed.length > 0) scoped = narrowed;
+  }
+  return scoped;
+}
+
 function aliasNormalizedKeys(alias: ExamAlias): string[] {
   return [
     alias.aliasText,
@@ -255,12 +531,14 @@ export async function findMatchCandidates(
       .slice(0, maxResults);
   }
 
-  const normalizedInput = normalizeExamText(trimmed);
-  const radiologyDescriptionKey = normalizeRadiologyDescription(trimmed);
-  const radiologyNorm = normalizeForRadiology(trimmed);
+  const parsed = parseModalityFirst(trimmed);
+  const matchInput = parsed.cleanedProcedure || trimmed;
+  const normalizedInput = normalizeExamText(matchInput);
+  const radiologyDescriptionKey = normalizeRadiologyDescription(matchInput);
+  const radiologyNorm = normalizeForRadiology(matchInput);
   const radiologyNormalizedKey = normalizeExamText(radiologyNorm.normalizedTitle);
   const exactKeys = new Set([normalizedInput, radiologyNormalizedKey, radiologyDescriptionKey].filter(Boolean));
-  const modalityLane = detectModalityLane(trimmed);
+  const modalityLane = parsed.lane;
 
   const allAliases = await db.examAliases.toArray();
   const activeProfile = profileId ? await db.radiologistProfiles.get(profileId) : null;
@@ -287,23 +565,27 @@ export async function findMatchCandidates(
   }
 
   if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForDictionary(trimmed, maxResults));
+    candidates.push(...await candidatesForDictionary(matchInput, maxResults));
   }
 
   if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForOcrLearning(trimmed, profileId));
+    candidates.push(...await candidatesForOcrLearning(matchInput, profileId));
   }
 
   if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForOrbitCmeSeed(trimmed));
+    candidates.push(...await candidatesForOrbitCmeSeed(matchInput));
   }
 
   if (candidates.length < maxResults) {
-    const commonCandidates = await candidatesForCommonRadiologyMapping(trimmed);
+    candidates.push(...await candidatesForDeterministicProtocol(matchInput, parsed));
+  }
+
+  if (candidates.length < maxResults) {
+    const commonCandidates = await candidatesForCommonRadiologyMapping(matchInput);
     if (commonCandidates.length > 0) {
       return dedupeCandidates([...candidates, ...commonCandidates])
         .filter((candidate) => candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0)
-        .filter((candidate) => candidateMatchesModalityLane(candidate, modalityLane))
+        .filter((candidate) => candidateRespectsOrBypassesModalityLane(candidate, modalityLane))
         .sort((a, b) => b.confidence - a.confidence)
         .slice(0, maxResults);
     }
@@ -313,14 +595,15 @@ export async function findMatchCandidates(
     ? await db.cptRvuTable.where('statusCategory').anyOf(['active', 'restricted']).toArray()
     : [];
   const modalityScopedCpt = allCpt.filter((row) => rowMatchesModalityLane(row, modalityLane));
+  const keywordScopedCpt = keywordScopedRows(modalityScopedCpt, parsed);
 
   if (candidates.length < maxResults) {
-    const exactDescriptionRows = modalityScopedCpt
+    const exactDescriptionRows = keywordScopedCpt
       .filter(isProductivityRelevantModifier26)
       .filter((row) => normalizeRadiologyDescription(row.description) === radiologyDescriptionKey);
 
     for (const row of exactDescriptionRows) {
-      candidates.push(rowToCandidate(trimmed, row, 0.96, 'radiology_match', 'exact CMS description'));
+      candidates.push(rowToCandidate(matchInput, row, 0.96, 'radiology_match', 'exact CMS description'));
       if (dedupeCandidates(candidates).length >= maxResults) break;
     }
   }
@@ -330,7 +613,7 @@ export async function findMatchCandidates(
       .map((alias) => ({
         alias,
         score: Math.max(
-          combinedSimilarity(trimmed, alias.aliasTextRaw),
+          combinedSimilarity(matchInput, alias.aliasTextRaw),
           combinedSimilarity(radiologyDescriptionKey, normalizeRadiologyDescription(alias.aliasTextRaw)),
         ),
       }))
@@ -344,28 +627,29 @@ export async function findMatchCandidates(
   }
 
   if (candidates.length < maxResults) {
-    const descScored = modalityScopedCpt
+    const descScored = keywordScopedCpt
       .filter(isProductivityRelevantModifier26)
       .map((row) => {
         const normalizedDescription = normalizeRadiologyDescription(row.description);
         const exactNormalizedScore = normalizedDescription === radiologyDescriptionKey ? 0.96 : 0;
         const radioScore = scoreRadiologyMatch(radiologyNorm, row.description);
         const normalizedTextScore = combinedSimilarity(radiologyDescriptionKey, normalizedDescription);
-        return { row, score: Math.max(exactNormalizedScore, radioScore, normalizedTextScore * 0.92) };
+        const keywordBoost = Array.from(parsed.keywords).some((keyword) => rowMatchesKeyword(row, keyword)) ? 0.08 : 0;
+        return { row, score: Math.min(1, Math.max(exactNormalizedScore, radioScore, normalizedTextScore * 0.92) + keywordBoost) };
       })
       .filter((x) => x.score >= 0.35)
       .sort((a, b) => b.score - a.score)
       .slice(0, maxResults * 3);
 
     for (const { row, score } of descScored) {
-      candidates.push(rowToCandidate(trimmed, row, score, 'radiology_match', 'CMS fuzzy match'));
+      candidates.push(rowToCandidate(matchInput, row, score, 'radiology_match', 'CMS fuzzy match'));
       if (dedupeCandidates(candidates).length >= maxResults) break;
     }
   }
 
   const ranked = dedupeCandidates(candidates)
     .filter((candidate) => candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0)
-    .filter((candidate) => candidateMatchesModalityLane(candidate, modalityLane))
+    .filter((candidate) => candidateRespectsOrBypassesModalityLane(candidate, modalityLane))
     .sort((a, b) => {
       const aRvu = a.workRvu ?? 0;
       const bRvu = b.workRvu ?? 0;
@@ -393,33 +677,38 @@ export async function searchExamLibrary(
     return rows.map((row) => rowToCandidate(trimmed, row, 1, 'manual_cpt', 'direct CPT')).slice(0, maxResults);
   }
 
-  const radiologyDescriptionKey = normalizeRadiologyDescription(trimmed);
-  const radiologyNorm = normalizeForRadiology(trimmed);
-  const modalityLane = detectModalityLane(trimmed);
+  const parsed = parseModalityFirst(trimmed);
+  const matchInput = parsed.cleanedProcedure || trimmed;
+  const radiologyDescriptionKey = normalizeRadiologyDescription(matchInput);
+  const radiologyNorm = normalizeForRadiology(matchInput);
+  const modalityLane = parsed.lane;
   const allCpt = await db.cptRvuTable
     .where('statusCategory')
     .anyOf(['active', 'restricted'])
     .toArray();
   const modalityScopedCpt = allCpt.filter((row) => rowMatchesModalityLane(row, modalityLane));
+  const keywordScopedCpt = keywordScopedRows(modalityScopedCpt, parsed);
 
-  const commonCandidates = await candidatesForCommonRadiologyMapping(trimmed);
-  const exactDescriptionCandidates = modalityScopedCpt
+  const deterministicCandidates = await candidatesForDeterministicProtocol(matchInput, parsed);
+  const commonCandidates = await candidatesForCommonRadiologyMapping(matchInput);
+  const exactDescriptionCandidates = keywordScopedCpt
     .filter(isProductivityRelevantModifier26)
     .filter((row) => normalizeRadiologyDescription(row.description) === radiologyDescriptionKey)
-    .map((row) => rowToCandidate(trimmed, row, 0.96, 'radiology_match', 'exact CMS description'));
+    .map((row) => rowToCandidate(matchInput, row, 0.96, 'radiology_match', 'exact CMS description'));
 
-  const tokenCount = trimmed.split(/\s+/).length;
-  const fuzzyCandidates = modalityScopedCpt
+  const tokenCount = matchInput.split(/\s+/).length;
+  const fuzzyCandidates = keywordScopedCpt
     .filter(isProductivityRelevantModifier26)
     .map((row) => {
       const normalizedDescription = normalizeRadiologyDescription(row.description);
       const radioScore = scoreRadiologyMatch(radiologyNorm, row.description);
-      const textScore = combinedSimilarity(trimmed, row.description);
+      const textScore = combinedSimilarity(matchInput, row.description);
       const normalizedTextScore = combinedSimilarity(radiologyDescriptionKey, normalizedDescription);
       const blendedScore = tokenCount > 3
         ? radioScore * 0.70 + textScore * 0.15 + normalizedTextScore * 0.15
         : radioScore * 0.40 + textScore * 0.35 + normalizedTextScore * 0.25;
-      const score = Math.max(normalizedDescription === radiologyDescriptionKey ? 0.96 : 0, blendedScore);
+      const keywordBoost = Array.from(parsed.keywords).some((keyword) => rowMatchesKeyword(row, keyword)) ? 0.08 : 0;
+      const score = Math.min(1, Math.max(normalizedDescription === radiologyDescriptionKey ? 0.96 : 0, blendedScore) + keywordBoost);
       return { row, score };
     })
     .filter((x) => x.score >= 0.20)
@@ -429,10 +718,10 @@ export async function searchExamLibrary(
       return (b.row.workRvu ?? 0) - (a.row.workRvu ?? 0);
     })
     .slice(0, maxResults * 2)
-    .map(({ row, score }) => rowToCandidate(trimmed, row, score, 'radiology_match', 'CMS fuzzy match'));
+    .map(({ row, score }) => rowToCandidate(matchInput, row, score, 'radiology_match', 'CMS fuzzy match'));
 
-  return dedupeCandidates([...commonCandidates, ...exactDescriptionCandidates, ...fuzzyCandidates])
-    .filter((candidate) => candidateMatchesModalityLane(candidate, modalityLane))
+  return dedupeCandidates([...deterministicCandidates, ...commonCandidates, ...exactDescriptionCandidates, ...fuzzyCandidates])
+    .filter((candidate) => candidateRespectsOrBypassesModalityLane(candidate, modalityLane))
     .slice(0, maxResults);
 }
 
