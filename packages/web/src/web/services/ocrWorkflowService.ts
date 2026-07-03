@@ -1,9 +1,11 @@
 import { CSVImportProvider } from '../providers/CSVImportProvider';
 import { OCRImportProvider, type OCRImportDebugInfo } from '../providers/OCRImportProvider';
+import { StructuredPowerScribeOcrImportProvider } from '../providers/StructuredPowerScribeOcrImportProvider';
 import { runImportPipeline, type PipelineResult, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
 import { ensureUserSettings } from '../db/database';
 import type { ImportProvider } from '../types/importProvider';
+import type { PowerScribeStructuredOcrRow } from '../types/structuredOcr';
 
 interface WorkflowContext {
   profileId: string | null;
@@ -145,4 +147,29 @@ export async function processOcrImport(
     }),
   });
   return { ...processed, ocrDebug: attachOcrMatchDebug(provider.getDebugInfo(), processed.result) };
+}
+
+export async function processStructuredPowerScribeOcrImport(
+  rows: PowerScribeStructuredOcrRow[],
+  context: WorkflowContext,
+): Promise<ProcessedImportResult> {
+  const processed = await processProvider(
+    new StructuredPowerScribeOcrImportProvider(rows, context.logDate),
+    context,
+    (count) => `Windows PowerScribe OCR completed (${count} extracted)`,
+  );
+  await recordAuditEvent({
+    profileId: context.profileId,
+    siteId: context.siteId,
+    sessionId: context.sessionId,
+    logDate: context.logDate,
+    action: 'ocr_completed',
+    summary: `Windows PowerScribe OCR completed ${processed.extractedCount} extracted studies`,
+    detailsJson: JSON.stringify({
+      source: 'windows_structured_ocr',
+      reviewRows: processed.result.reviewRows.length,
+      skippedRows: processed.result.skippedRows.length,
+    }),
+  });
+  return processed;
 }

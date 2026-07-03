@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   showNotification: (title: string, body: string) =>
     ipcRenderer.invoke("notification:show", title, body),
 
+  // Windows PowerScribe OCR
+  extractPowerScribeClipboardRows: () =>
+    ipcRenderer.invoke("powerscribe:extract-clipboard-rows"),
+
   // Window controls
   minimize: () => ipcRenderer.invoke("window:minimize"),
   maximize: () => ipcRenderer.invoke("window:maximize"),

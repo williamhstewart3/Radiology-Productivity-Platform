@@ -15,6 +15,7 @@
 - [x] Add Orbit CME seed mappings as supplemental OCR CPT/wRVU lookup source
 - [x] Split OCR procedure, exam date/time, and read date/time into separate structured fields
 - [x] Use modality-first PowerScribe OCR matching with deterministic protocol mappings before fuzzy fallback
+- [x] Add Windows clipboard OCR helper path that returns structured PowerScribe rows
 
 ---
 
@@ -33,6 +34,7 @@
 - [x] Keep OCR dates out of procedure normalization and fuzzy CPT matching
 - [x] Strip leading PowerScribe row/status junk before procedure parsing and matching
 - [x] Preserve Exam and Read times in OCR review cards
+- [x] Prefer Windows structured PowerScribe clipboard OCR in Electron with browser OCR fallback
 - [ ] Bulk approve high-confidence studies
 - [ ] Unknowns-only review mode
 - [ ] Review later workflow

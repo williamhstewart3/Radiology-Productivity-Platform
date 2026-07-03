@@ -13,6 +13,7 @@ import { theme } from '../lib/theme';
 import { searchExamLibrary } from '../utils/matching';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import { useProfile } from '../hooks/useProfile';
+import { getDesktopAPI } from '../lib/desktop';
 import { todayDateString } from '../utils/calculations';
 import { db, ensureUserSettings } from '../db/database';
 import {
@@ -29,7 +30,7 @@ import {
   type TimelineEvent,
 } from '../services/reviewSessionService';
 import { rememberCorrectedExam } from '../services/memoryLearningService';
-import { processOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
 
@@ -526,11 +527,36 @@ export function Import({ onImported }: ImportProps) {
     }
   }
 
+  async function processWindowsClipboardCapture(file: File, timelineSource: string): Promise<boolean> {
+    const desktop = getDesktopAPI();
+    if (desktop?.platform !== 'win32' || !desktop.extractPowerScribeClipboardRows) return false;
+
+    try {
+      const rows = await desktop.extractPowerScribeClipboardRows();
+      if (rows.length === 0) return false;
+      const processed = await processStructuredPowerScribeOcrImport(rows, {
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+      });
+      setOcrFile(file);
+      setOcrDebug(null);
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
+      setClipboardFile(null);
+      return true;
+    } catch (error) {
+      console.warn('Windows PowerScribe OCR helper failed; falling back to browser OCR.', error);
+      return false;
+    }
+  }
+
   async function queueClipboardImage(file: File, timelineSource: string) {
     const hash = await hashImageBlob(file);
     if (hash === lastClipboardImageHashRef.current) return;
     lastClipboardImageHashRef.current = hash;
     setClipboardFile(file);
+    if (await processWindowsClipboardCapture(file, timelineSource)) return;
     await processOcrFile(file, timelineSource);
   }
 
