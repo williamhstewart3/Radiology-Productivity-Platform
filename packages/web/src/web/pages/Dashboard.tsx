@@ -565,6 +565,45 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </div>
       </div>
 
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-white">Recent activity</p>
+            <p className="text-xs text-slate-500">A quiet replay of what the companion has tracked today.</p>
+          </div>
+          <button
+            onClick={() => onNavigate('history')}
+            className="px-3 py-1.5 rounded-lg border border-white/10 text-xs text-slate-400 hover:border-white/20 hover:text-white transition-colors"
+          >
+            History
+          </button>
+        </div>
+        <div className="space-y-2">
+          {todayActiveLogs.slice(-5).reverse().map((log) => (
+            <div key={log.id} className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/3 px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-white">{log.examTitleDisplay ?? log.examNameRaw}</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {log.cptCode ?? 'Unmatched'} - {log.modality ?? 'Unknown'}
+                  {log.needsReview ? ' - needs review' : ''}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="font-mono text-sm font-semibold text-white">+{fmt(log.workRvu ?? 0)}</p>
+                <p className="text-[10px] text-slate-500">
+                  {new Date(log.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                </p>
+              </div>
+            </div>
+          ))}
+          {todayActiveLogs.length === 0 && (
+            <div className="rounded-xl border border-white/8 bg-white/3 px-3 py-4 text-sm text-slate-500">
+              No studies tracked yet today. The HUD will update as capture/import runs.
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* YTD Progress bar */}
       <div className="card space-y-4">
         <div className="flex items-center justify-between">

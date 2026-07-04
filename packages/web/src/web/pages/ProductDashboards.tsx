@@ -241,7 +241,7 @@ export function ActivityTimelinePage() {
 }
 
 export function AnalyticsPage() {
-  const { logs } = useProductivityData();
+  const { today, logs, sessions } = useProductivityData();
   const series = buildDailySeries(logs, 21);
   const lastSeven = series.slice(-7);
   const totals = computePeriodTotals(logs);
@@ -249,10 +249,22 @@ export function AnalyticsPage() {
   const hoursWithWork = hourly.length || 1;
   const rvuPerHour = totals.totalWorkRvu / hoursWithWork;
   const examsPerHour = totals.studyCount / hoursWithWork;
+  const mixRows = modalityRows(logs);
+  const totalMixRvu = mixRows.reduce((sum, row) => sum + row.rvu, 0);
+  const totalMixCount = mixRows.reduce((sum, row) => sum + row.count, 0);
+  const todayLogs = logs.filter((log) => log.logDate === today);
+  const reviewed = todayLogs.filter((log) => !log.needsReview);
+  const manual = todayLogs.filter((log) => log.needsReview);
+  const duplicateSkipped = sessions.reduce((sum, session) => sum + session.duplicateCount, 0);
+  const failed = todayLogs.filter((log) => !log.cptCode).length;
+  const autoApproved = todayLogs.filter((log) => log.matchMethod === 'alias_match' && (log.matchConfidence ?? 0) >= 0.95).length;
+  const avgConfidence = todayLogs.length
+    ? todayLogs.reduce((sum, log) => sum + (log.matchConfidence ?? 0), 0) / todayLogs.length * 100
+    : 0;
 
   return (
     <div className="premium-page">
-      <PageHeader eyebrow="Analytics" title="Productivity cockpit" subtitle="Clean trend views for pace, throughput, and study mix." />
+      <PageHeader eyebrow="Analytics" title="Why today feels different" subtitle="Deeper answers when the HUD raises a question." />
       <div className="premium-metric-grid">
         <MetricCard icon={Gauge} label="RVUs / active hour" value={fmt(rvuPerHour)} detail={`${hoursWithWork} productive hours sampled`} />
         <MetricCard icon={Activity} label="Exams / active hour" value={fmt(examsPerHour)} detail={`${totals.studyCount} completed exams`} />
@@ -293,6 +305,50 @@ export function AnalyticsPage() {
           </div>
         </Panel>
       </div>
+      <div className="grid gap-4 xl:grid-cols-[0.95fr_1.25fr]">
+        <Panel title="Study mix" subtitle={`${totalMixCount} exams - ${fmt(totalMixRvu)} wRVU`}>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={mixRows} dataKey="rvu" nameKey="label" innerRadius={66} outerRadius={106} paddingAngle={3}>
+                  {mixRows.map((row) => <Cell key={row.modality} fill={row.color} />)}
+                </Pie>
+                <Tooltip formatter={(value) => `${compactNumber.format(Number(value))} wRVU`} contentStyle={{ background: '#0b1220', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+        <Panel title="Modality contribution" subtitle="Count and wRVU share">
+          <div className="space-y-3">
+            {mixRows.map((row) => (
+              <div key={row.modality} className="premium-mix-row">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: row.color }} />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-[var(--theme-text-primary)]">{row.label}</p>
+                    <p className="text-xs text-[var(--theme-text-muted)]">{row.count} exams</p>
+                  </div>
+                </div>
+                <div className="w-44 max-w-[35vw]">
+                  <div className="h-2 overflow-hidden rounded-full bg-white/6">
+                    <div className="h-full rounded-full" style={{ width: `${totalMixRvu ? (row.rvu / totalMixRvu) * 100 : 0}%`, background: row.color }} />
+                  </div>
+                </div>
+                <p className="w-20 text-right font-mono text-sm text-[var(--theme-text-primary)]">{fmt(row.rvu)}</p>
+              </div>
+            ))}
+            {mixRows.length === 0 && <div className="premium-empty">No completed studies in the selected data yet.</div>}
+          </div>
+        </Panel>
+      </div>
+      <Panel title="Tracking confidence" subtitle="Quiet automation should stay trustworthy">
+        <div className="premium-metric-grid">
+          <MetricCard icon={ShieldCheck} label="Average match confidence" value={`${fmt(avgConfidence, 0)}%`} detail="Today's imported studies" />
+          <MetricCard icon={CheckCircle2} label="Auto-approved" value={String(autoApproved)} detail="High-confidence learned matches" tone="success" />
+          <MetricCard icon={AlertTriangle} label="Manual reviews" value={String(manual.length)} detail={`${reviewed.length} confirmed today`} tone={manual.length ? 'warning' : 'success'} />
+          <MetricCard icon={Clock3} label="Duplicates skipped" value={String(duplicateSkipped)} detail={`${failed} failed matches today`} />
+        </div>
+      </Panel>
     </div>
   );
 }

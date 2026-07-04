@@ -10,25 +10,16 @@ import { MiniPaceWindow } from './components/MiniPaceWindow';
 import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
 import {
   Bell,
-  Bot,
   BarChart3,
-  Camera,
   ChevronRight,
-  ClipboardList,
-  Database,
-  Gauge,
   History as HistoryIcon,
   LayoutDashboard,
-  MapPinned,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  PieChart,
   Search,
   Settings as SettingsIcon,
-  ShieldCheck,
   Sun,
-  Target,
   UploadCloud,
 } from 'lucide-react';
 import { Dashboard } from './pages/Dashboard';
@@ -106,22 +97,12 @@ class PageErrorBoundary extends Component<
 }
 
 const NAV_ITEMS: { id: Tab; label: string; icon: ComponentType<{ className?: string }> }[] = [
-  { id: 'dashboard', label: 'Mission Control', icon: LayoutDashboard },
-  { id: 'activity',  label: 'Timeline', icon: HistoryIcon },
+  { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
+  { id: 'import',    label: 'Capture', icon: UploadCloud },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-  { id: 'studyMix',  label: 'Study Mix', icon: PieChart },
-  { id: 'accuracy',  label: 'Accuracy', icon: ShieldCheck },
-  { id: 'goals',     label: 'Goals', icon: Target },
-  { id: 'pace',      label: 'Daily Pace', icon: Gauge },
-  { id: 'import',    label: 'PowerScribe Capture', icon: UploadCloud },
-  { id: 'automation', label: 'Automation', icon: Bot },
-  { id: 'log',       label: 'Log Study',  icon: ClipboardList },
-  { id: 'camera',    label: 'Camera',     icon: Camera },
-  { id: 'explorer',  label: 'CPT Explorer', icon: Search },
   { id: 'history',   label: 'History',    icon: HistoryIcon },
-  { id: 'locations', label: 'Locations',  icon: MapPinned },
+  { id: 'explorer',  label: 'CPT Library', icon: Search },
   { id: 'settings',  label: 'Settings',   icon: SettingsIcon },
-  { id: 'admin',     label: 'Admin Data', icon: Database },
 ];
 
 function MainApp() {
@@ -259,7 +240,7 @@ function MainApp() {
                 {activeTab === 'log'           && <LogStudy onSaved={() => setActiveTab('pace')} />}
                 {activeTab === 'import'        && <Import onImported={() => setActiveTab('pace')} />}
                 {activeTab === 'history'       && <History />}
-                {activeTab === 'settings'      && <Settings />}
+                {activeTab === 'settings'      && <Settings onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'camera'        && <CameraUploadPage onImported={() => setActiveTab('pace')} />}
                 {activeTab === 'explorer'      && <CptExplorer onNavigate={(t) => setActiveTab(t as Tab)} />}
@@ -269,8 +250,8 @@ function MainApp() {
             </div>
           </main>
 
-          <nav className="desktop-topbar sticky bottom-0 z-40 grid grid-cols-5 gap-1 px-2 py-2 lg:hidden">
-            {NAV_ITEMS.slice(0, 10).map((item) => {
+          <nav className="desktop-topbar sticky bottom-0 z-40 grid grid-cols-6 gap-1 px-2 py-2 lg:hidden">
+            {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;
               return (

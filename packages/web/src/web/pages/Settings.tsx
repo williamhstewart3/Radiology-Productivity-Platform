@@ -9,7 +9,11 @@ import { normalizeExamText } from '../utils/textMatching';
 import type { UserSettings, ExamAlias, ExamDictionaryEntry } from '../types';
 import type { ImportResult } from '../utils/rvuFileImporter';
 
-export function Settings() {
+interface SettingsProps {
+  onNavigate?: (tab: 'automation' | 'profiles' | 'locations' | 'admin') => void;
+}
+
+export function Settings({ onNavigate }: SettingsProps) {
   const settings = useLiveQuery<UserSettings | undefined>(
     () => db.userSettings.get('default'),
     []
@@ -155,8 +159,37 @@ export function Settings() {
     <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
       <div>
         <h1 className="text-2xl font-bold text-white tracking-tight">Settings</h1>
-        <p className="text-slate-400 text-sm mt-0.5">Goals, schedule, and RVU data</p>
+        <p className="text-slate-400 text-sm mt-0.5">Goals, automation, profiles, and RVU data</p>
       </div>
+
+      {onNavigate && (
+        <div className="card space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Configuration</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              These are setup tools, not workday destinations. Keep them here unless something needs attention.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {[
+              { label: 'Automation', detail: 'Capture and review behavior', tab: 'automation' as const },
+              { label: 'Profiles', detail: 'Radiologists and goals', tab: 'profiles' as const },
+              { label: 'Locations', detail: 'Practices and workspaces', tab: 'locations' as const },
+              { label: 'Admin Data', detail: 'CPT tables and diagnostics', tab: 'admin' as const },
+            ].map((item) => (
+              <button
+                key={item.tab}
+                type="button"
+                onClick={() => onNavigate(item.tab)}
+                className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-left transition-all hover:border-white/20 hover:bg-white/[0.06]"
+              >
+                <p className="text-sm font-medium text-white">{item.label}</p>
+                <p className="mt-0.5 text-xs text-slate-500">{item.detail}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Goal settings */}
       <div className="card space-y-4">
