@@ -21,6 +21,7 @@ import {
 import { todayDateString } from '../utils/calculations';
 import { ConfettiCanvas } from './ConfettiCanvas';
 import { baptistTheme as t } from '../lib/theme';
+import { getDesktopAPI } from '../lib/desktop';
 
 // ─── Status → visual tokens ─────────────────────────────────────────────────
 
@@ -226,6 +227,22 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
   const updatedStr = `${h}:${String(mi).padStart(2, '0')} ${ap}`;
 
   const beforeWork = metrics.status === 'before_work';
+  const completedLogs = todayLogs.filter((log) => !log.needsReview);
+  const lastSuccessfulLog = [...completedLogs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const lastImportLabel = lastSuccessfulLog
+    ? new Date(lastSuccessfulLog.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    : 'No imports yet';
+  const paceLabel = beforeWork ? 'Ready' : diffLabel;
+
+  const handlePasteScreenshot = () => {
+    const desktop = getDesktopAPI();
+    if (desktop) {
+      void desktop.showNotification(
+        'PowerScribe Capture',
+        'Open the main window and use PowerScribe Capture after copying a screenshot.',
+      );
+    }
+  };
 
   return (
     <div style={{
@@ -239,6 +256,23 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
         .mini-card { width: 100%; max-width: clamp(420px, 80vw, 760px); }
+        .mini-action {
+          border: 1px solid rgba(91,184,212,0.28);
+          background: rgba(91,184,212,0.10);
+          color: rgba(224,234,244,0.96);
+          border-radius: 10px;
+          padding: 10px 12px;
+          font-weight: 700;
+          font-size: 12px;
+          letter-spacing: 0.01em;
+          transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+          white-space: nowrap;
+        }
+        .mini-action:hover {
+          transform: translateY(-1px);
+          border-color: rgba(91,184,212,0.58);
+          background: rgba(91,184,212,0.16);
+        }
 
         @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -399,6 +433,55 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
               {projLabel}
             </span>
           </div>
+        </div>
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr)) auto',
+          gap: 10,
+          alignItems: 'stretch',
+        }}>
+          {[
+            ['Exams', String(completedLogs.length)],
+            ['Pace', paceLabel],
+            ['Last import', lastImportLabel],
+          ].map(([label, value]) => (
+            <div
+              key={label}
+              style={{
+                border: '1px solid rgba(148,163,184,0.12)',
+                background: 'rgba(15,24,36,0.42)',
+                borderRadius: 10,
+                padding: '10px 12px',
+                minWidth: 0,
+              }}
+            >
+              <div style={{
+                color: 'rgba(148,163,184,0.58)',
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+              }}>
+                {label}
+              </div>
+              <div style={{
+                marginTop: 4,
+                color: 'rgba(224,234,244,0.95)',
+                fontSize: 14,
+                fontWeight: 800,
+                fontVariantNumeric: 'tabular-nums',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {value}
+              </div>
+            </div>
+          ))}
+          <button type="button" className="mini-action" onClick={handlePasteScreenshot}>
+            Paste Screenshot
+          </button>
         </div>
 
         {/* ── Updated timestamp ── */}

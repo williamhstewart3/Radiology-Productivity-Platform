@@ -230,6 +230,70 @@ function formatOcrDateTime(date?: string | null, time?: string | null, fallbackD
   });
 }
 
+function structuredSourceValue(source: PipelineReviewRow['source'], keys: string[]): string | null {
+  const raw = source as unknown as Record<string, unknown>;
+  for (const key of keys) {
+    const value = raw[key];
+    if (Array.isArray(value) && value.length > 0) return value.join(', ');
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function StructuredDetails({
+  row,
+  selected,
+  reviewReason,
+}: {
+  row: PipelineReviewRow;
+  selected: MatchCandidate[];
+  reviewReason: string | null;
+}) {
+  const procedureName = procedureNameForSource(row.source);
+  const topCandidate = selected[0] ?? row.candidates[0];
+  const normalized = topCandidate?.explanation?.normalizedText ?? normalizeRadiologyDescription(procedureName);
+  const rawOcr = row.source.parserRawLine ?? row.source.examTitle;
+  const detailRows = [
+    ['Modality', row.source.modality ?? topCandidate?.modality ?? 'Unavailable'],
+    ['Anatomy/body regions', structuredSourceValue(row.source, ['bodyRegions', 'bodyRegion', 'anatomy']) ?? 'Unavailable'],
+    ['Contrast', structuredSourceValue(row.source, ['contrast', 'contrastStatus']) ?? 'Unavailable'],
+    ['CPT(s)', selected.length > 0 ? selected.map((candidate) => candidate.cptCode).join(' + ') : 'Unselected'],
+    ['Exam date', row.source.examDate ?? row.source.studyDate ?? 'Unavailable'],
+    ['Exam time', row.source.examTime ?? 'Unavailable'],
+    ['Modified date', row.source.modifiedDate ?? row.source.modifiedDateTime?.slice(0, 10) ?? 'Unavailable'],
+    ['Modified time', row.source.modifiedTime ?? row.source.modifiedDateTime?.slice(11, 16) ?? 'Unavailable'],
+    ['Review reasons', [row.reviewReason, row.source.parserReviewReason, reviewReason].filter(Boolean).join(' | ') || 'None'],
+  ];
+
+  return (
+    <details className="mb-2 rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2 text-xs">
+      <summary className="cursor-pointer select-none text-[11px] font-semibold uppercase tracking-wide text-slate-400 transition-colors hover:text-slate-200">
+        Structured details
+      </summary>
+      <div className="mt-3 grid gap-3">
+        <div className="grid gap-2 md:grid-cols-3">
+          {detailRows.map(([label, value]) => (
+            <div key={label} className="rounded-lg border border-white/8 bg-black/15 px-2.5 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+              <p className="mt-1 break-words font-mono text-[11px] leading-snug text-slate-300">{value}</p>
+            </div>
+          ))}
+        </div>
+        <div className="grid gap-2 lg:grid-cols-2">
+          <div className="rounded-lg border border-white/8 bg-black/15 p-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Raw OCR text</p>
+            <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">{rawOcr}</pre>
+          </div>
+          <div className="rounded-lg border border-white/8 bg-black/15 p-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Normalized text</p>
+            <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">{normalized}</pre>
+          </div>
+        </div>
+      </div>
+    </details>
+  );
+}
+
 function candidateExplanationText(candidate: MatchCandidate, rawText: string): string {
   const normalized = candidate.explanation?.normalizedText ?? normalizeRadiologyDescription(rawText);
   const source = candidate.explanation?.source ?? candidate.method.replace(/_/g, ' ');
@@ -363,6 +427,38 @@ interface ImportProps {
 type Mode = 'paste' | 'ocr' | 'powerscribe';
 type Step = 'input' | 'review' | 'done';
 type ReviewMode = 'unknowns' | 'everything' | 'auto' | 'low';
+type ImportToastTone = 'info' | 'success' | 'warning' | 'danger';
+
+interface ImportToast {
+  id: string;
+  tone: ImportToastTone;
+  title: string;
+  body?: string;
+}
+
+function ImportToastStack({ toasts }: { toasts: ImportToast[] }) {
+  if (toasts.length === 0) return null;
+  const toneClass: Record<ImportToastTone, string> = {
+    info: 'border-sky-500/25 bg-sky-500/10 text-sky-200',
+    success: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200',
+    warning: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
+    danger: 'border-red-500/30 bg-red-500/10 text-red-200',
+  };
+
+  return (
+    <div className="fixed bottom-5 right-5 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2 pointer-events-none">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-200 ${toneClass[toast.tone]}`}
+        >
+          <p className="text-sm font-semibold">{toast.title}</p>
+          {toast.body && <p className="mt-1 text-xs leading-relaxed opacity-80">{toast.body}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function Import({ onImported }: ImportProps) {
   const { activeProfile, activePractice } = useProfile();
@@ -386,6 +482,7 @@ export function Import({ onImported }: ImportProps) {
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [toasts, setToasts] = useState<ImportToast[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const processingRef = useRef(false);
   const lastClipboardImageHashRef = useRef<string | null>(null);
@@ -489,12 +586,28 @@ export function Import({ onImported }: ImportProps) {
     ]);
   }
 
+  function pushToast(tone: ImportToastTone, title: string, body?: string) {
+    const id = crypto.randomUUID();
+    setToasts((items) => [...items, { id, tone, title, body }].slice(-4));
+    window.setTimeout(() => {
+      setToasts((items) => items.filter((item) => item.id !== id));
+    }, tone === 'danger' ? 7000 : 4800);
+  }
+
   function appendPipelineRows(nextRows: PipelineReviewRow[], nextSkippedRows: PipelineReviewRow[], label: string) {
     const merged = mergeReviewSessionRows(reviewRows, skippedRows, nextRows, nextSkippedRows);
     setReviewRows(merged.reviewRows);
     setSkippedRows(merged.skippedRows);
     addTimeline(label);
     setStep('review');
+    const readyCount = nextRows.length;
+    const estimatedRvu = nextRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
+    const reviewCount = nextRows.filter((row) => row.needsReview).length;
+    pushToast(
+      reviewCount > 0 ? 'warning' : 'success',
+      `Ready to review ${readyCount} exam${readyCount === 1 ? '' : 's'}`,
+      `+${estimatedRvu.toFixed(1)} wRVUs pending - ${nextSkippedRows.length} duplicate${nextSkippedRows.length === 1 ? '' : 's'} skipped - ${reviewCount} require review`,
+    );
   }
 
   async function hashImageBlob(blob: Blob): Promise<string> {
@@ -510,6 +623,7 @@ export function Import({ onImported }: ImportProps) {
     setProcessing(true);
     setError(null);
     setOcrFile(file);
+    pushToast('info', 'OCR processing...', 'Reading the screenshot and detecting completed-study rows.');
     try {
       const processed = await processOcrImport(file, {
         profileId: activeProfile?.id ?? null,
@@ -517,11 +631,13 @@ export function Import({ onImported }: ImportProps) {
         sessionId,
         logDate,
       }, { filename: file.name, size: file.size });
+      pushToast('info', 'Matching CPT codes...', 'Running aliases, active CPT filters, and review checks.');
       setOcrDebug(processed.ocrDebug ?? null);
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
       setClipboardFile(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'OCR failed - try paste mode instead');
+      pushToast('danger', 'OCR failed', e instanceof Error ? e.message : 'Try paste mode instead.');
     } finally {
       setProcessing(false);
     }
@@ -532,8 +648,10 @@ export function Import({ onImported }: ImportProps) {
     if (desktop?.platform !== 'win32' || !desktop.extractPowerScribeClipboardRows) return false;
 
     try {
+      pushToast('info', 'Reading PowerScribe...', 'Using the Windows structured OCR helper.');
       const rows = await desktop.extractPowerScribeClipboardRows();
       if (rows.length === 0) return false;
+      pushToast('info', 'Matching CPT codes...', 'Using structured procedure names only.');
       const processed = await processStructuredPowerScribeOcrImport(rows, {
         profileId: activeProfile?.id ?? null,
         siteId: activePractice?.id ?? null,
@@ -556,6 +674,7 @@ export function Import({ onImported }: ImportProps) {
     if (hash === lastClipboardImageHashRef.current) return;
     lastClipboardImageHashRef.current = hash;
     setClipboardFile(file);
+    pushToast('info', 'Screenshot captured', `PowerScribe image received from ${timelineSource}.`);
     if (await processWindowsClipboardCapture(file, timelineSource)) return;
     await processOcrFile(file, timelineSource);
   }
@@ -564,6 +683,7 @@ export function Import({ onImported }: ImportProps) {
     if (!pasteText.trim()) return;
     setProcessing(true);
     setError(null);
+    pushToast('info', 'Matching CPT codes...', 'Parsing pasted studies and preparing the review queue.');
     try {
       const processed = await processTextImport(pasteText, {
         profileId: activeProfile?.id ?? null,
@@ -574,6 +694,7 @@ export function Import({ onImported }: ImportProps) {
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Processing failed');
+      pushToast('danger', 'Processing failed', e instanceof Error ? e.message : 'Could not parse the pasted study list.');
     } finally {
       setProcessing(false);
     }
@@ -626,6 +747,9 @@ export function Import({ onImported }: ImportProps) {
     setImporting(true);
     setError(null);
     try {
+      const selectedRvu = reviewRows
+        .filter((row) => row.included)
+        .reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
       const result = await finalizeReviewSession({
         sessionId,
         profileId: activeProfile?.id ?? null,
@@ -639,8 +763,14 @@ export function Import({ onImported }: ImportProps) {
       setSkippedCount(result.skippedCount);
       setReviewNeeded(result.reviewNeededCount);
       setStep('done');
+      pushToast(
+        result.reviewNeededCount > 0 ? 'warning' : 'success',
+        `Imported ${result.importedCount} exam${result.importedCount === 1 ? '' : 's'}`,
+        `+${selectedRvu.toFixed(1)} wRVUs - ${result.skippedCount} duplicate${result.skippedCount === 1 ? '' : 's'} skipped - ${result.reviewNeededCount} require review`,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Import failed');
+      pushToast('danger', 'Import failed', e instanceof Error ? e.message : 'The review session was not saved.');
     } finally {
       setImporting(false);
     }
@@ -792,58 +922,62 @@ export function Import({ onImported }: ImportProps) {
   // ── Done screen ───────────────────────────────────────────────────────────
   if (step === 'done') {
     return (
-      <div className="max-w-lg mx-auto text-center space-y-6 py-16 animate-in fade-in duration-300">
-        <div className="w-20 h-20 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto text-4xl">
-          ✓
-        </div>
-        <div>
-          <h2 className="text-2xl font-bold text-white">Import Complete</h2>
-          <div className="mt-3 space-y-1.5">
-            <p className="text-emerald-400 text-sm font-medium">
-              Imported: {importedCount} {importedCount === 1 ? 'study' : 'studies'}
-            </p>
-            {skippedCount > 0 && (
-              <p className="text-slate-400 text-sm">
-                Skipped duplicates: {skippedCount}
+      <>
+        <div className="max-w-lg mx-auto text-center space-y-6 py-16 animate-in fade-in duration-300">
+          <div className="w-20 h-20 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto text-4xl">
+            ✓
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-white">Import Complete</h2>
+            <div className="mt-3 space-y-1.5">
+              <p className="text-emerald-400 text-sm font-medium">
+                Imported: {importedCount} {importedCount === 1 ? 'study' : 'studies'}
               </p>
-            )}
-            {reviewNeeded > 0 && (
-              <p className="text-amber-400 text-sm">
-                Needs review: {reviewNeeded}
-              </p>
-            )}
+              {skippedCount > 0 && (
+                <p className="text-slate-400 text-sm">
+                  Skipped duplicates: {skippedCount}
+                </p>
+              )}
+              {reviewNeeded > 0 && (
+                <p className="text-amber-400 text-sm">
+                  Needs review: {reviewNeeded}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={() => {
+                setStep('input');
+                setPasteText('');
+                setOcrFile(null);
+                setReviewRows([]);
+                setSkippedRows([]);
+                setShowSkipped(false);
+                sessionStorage.removeItem(WATCHER_REVIEW_KEY);
+              }}
+              className="px-6 py-2.5 rounded-xl border border-white/15 text-slate-300 text-sm hover:border-white/30 transition-colors"
+            >
+              Import More
+            </button>
+            <button
+              onClick={onImported}
+              className="px-6 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+              style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
+            >
+              View Dashboard
+            </button>
           </div>
         </div>
-        <div className="flex gap-3 justify-center">
-          <button
-            onClick={() => {
-              setStep('input');
-              setPasteText('');
-              setOcrFile(null);
-              setReviewRows([]);
-              setSkippedRows([]);
-              setShowSkipped(false);
-              sessionStorage.removeItem(WATCHER_REVIEW_KEY);
-            }}
-            className="px-6 py-2.5 rounded-xl border border-white/15 text-slate-300 text-sm hover:border-white/30 transition-colors"
-          >
-            Import More
-          </button>
-          <button
-            onClick={onImported}
-            className="px-6 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity"
-            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
-          >
-            View Dashboard
-          </button>
-        </div>
-      </div>
+        <ImportToastStack toasts={toasts} />
+      </>
     );
   }
 
   // ── Review screen ─────────────────────────────────────────────────────────
   if (step === 'review') {
     return (
+      <>
       <div className="space-y-5 animate-in fade-in duration-300">
         <div className="flex items-center justify-between">
           <div>
@@ -1192,6 +1326,10 @@ export function Import({ onImported }: ImportProps) {
                   </div>
                 )}
 
+                {row.included && (
+                  <StructuredDetails row={row} selected={selected} reviewReason={reviewReason} />
+                )}
+
                 {/* ── Candidate list or no-match state ─────────────── */}
                 {row.included && selected.length > 0 && (
                   <div className="mb-2 rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2">
@@ -1399,11 +1537,14 @@ export function Import({ onImported }: ImportProps) {
           </button>
         </div>
       </div>
+      <ImportToastStack toasts={toasts} />
+      </>
     );
   }
 
   // ── Input screen ──────────────────────────────────────────────────────────
   return (
+    <>
     <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
       <div>
         <h1 className="text-2xl font-bold text-white tracking-tight">PowerScribe Capture</h1>
@@ -1599,5 +1740,7 @@ export function Import({ onImported }: ImportProps) {
         </div>
       )}
     </div>
+    <ImportToastStack toasts={toasts} />
+    </>
   );
 }

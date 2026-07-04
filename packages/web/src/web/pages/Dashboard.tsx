@@ -329,6 +329,20 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     return map;
   }, [allStudyLogs]);
 
+  const workdayStart = activeProfile?.workdayStart ?? settings?.workdayStart ?? '08:00';
+  const [startHour, startMinute] = workdayStart.split(':').map(Number);
+  const now = new Date();
+  const start = new Date();
+  start.setHours(Number.isFinite(startHour) ? startHour : 8, Number.isFinite(startMinute) ? startMinute : 0, 0, 0);
+  const elapsedHours = Math.max(0.25, (now.getTime() - start.getTime()) / 3_600_000);
+  const currentHourlyPace = (todayStats?.totalWorkRvu ?? 0) / elapsedHours;
+  const projectedEndOfDay = (todayStats?.totalWorkRvu ?? 0) + (activeSession?.projectedWrvu ?? 0);
+  const lastImportStatus = activeSession
+    ? `${activeSession.totalExams} captured - ${activeSession.duplicateCount} dupes`
+    : todayActiveLogs.length > 0
+      ? `${todayActiveLogs.length} exams logged`
+      : 'No imports today';
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       <ConfettiCanvas active={showConfetti} />
@@ -337,10 +351,10 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--theme-text-primary)' }}>
-            Annual Dashboard
+            Mission Control
           </h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--theme-text-muted)' }}>
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            How you are doing today - {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -388,7 +402,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       )}
 
       {/* Top metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
         {/* Today */}
         <div
           className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
@@ -398,14 +412,14 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             boxShadow: '0 4px 20px rgba(0,0,0,0.28), 0 0 40px rgba(37,99,168,0.06)',
           }}
         >
-          <p className="metric-label">{mode === 'my' ? 'Today' : 'Today (All)'}</p>
+          <p className="metric-label">Today's wRVUs</p>
           <p className="metric-value">{fmt(todayStats?.totalWorkRvu ?? 0)}</p>
           <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
             {todayStats?.studyCount ?? 0} {todayStats?.studyCount === 1 ? 'study' : 'studies'}
           </p>
         </div>
 
-        {/* YTD wRVU */}
+        {/* Exams completed */}
         <div
           className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
           style={{
@@ -414,14 +428,14 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
           }}
         >
-          <p className="metric-label">YTD wRVU</p>
-          <p className="metric-value">{fmtInt(ytdStats?.ytdWorkRvu ?? 0)}</p>
+          <p className="metric-label">Exams completed</p>
+          <p className="metric-value">{fmtInt(todayStats?.studyCount ?? 0)}</p>
           <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
-            of {fmtInt(ytdStats?.annualGoal ?? 0)} goal
+            {fmt(todayStats?.avgRvuPerStudy ?? 0)} avg wRVU
           </p>
         </div>
 
-        {/* % to Goal */}
+        {/* Current pace */}
         <div
           className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
           style={{
@@ -430,25 +444,46 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
           }}
         >
-          <p className="metric-label">% to Goal</p>
-          <p
-            className="metric-value"
-            style={{
-              color: (ytdStats?.percentToGoal ?? 0) >= 100
-                ? 'var(--theme-ahead)'
-                : (ytdStats?.percentToGoal ?? 0) >= 85
-                ? 'var(--theme-on-track)'
-                : undefined,
-            }}
-          >
-            {fmt(ytdStats?.percentToGoal ?? 0, 1)}%
+          <p className="metric-label">Current pace</p>
+          <p className="metric-value">{fmt(currentHourlyPace)}</p>
+          <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
+            wRVU / active hour
           </p>
+        </div>
+
+        {/* Projected day */}
+        <div
+          className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
+          style={{
+            background: 'linear-gradient(145deg, rgba(22,32,50,0.95), rgba(15,22,34,0.98))',
+            border: '1px solid rgba(91,184,212,0.1)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
+          }}
+        >
+          <p className="metric-label">Projected EOD</p>
+          <p className="metric-value">{fmt(projectedEndOfDay)}</p>
+          <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
+            includes active review
+          </p>
+        </div>
+
+        {/* Goal progress */}
+        <div
+          className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
+          style={{
+            background: 'linear-gradient(145deg, rgba(22,32,50,0.95), rgba(15,22,34,0.98))',
+            border: '1px solid rgba(91,184,212,0.1)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
+          }}
+        >
+          <p className="metric-label">Goal progress</p>
+          <p className="metric-value">{fmt(ytdStats?.percentToGoal ?? 0, 0)}%</p>
           <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
             {fmtInt(ytdStats?.remainingRvu ?? 0)} remaining
           </p>
         </div>
 
-        {/* Req. Pace */}
+        {/* Last import */}
         <div
           className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
           style={{
@@ -457,10 +492,10 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
           }}
         >
-          <p className="metric-label">{mode === 'my' ? 'Req. Pace' : 'Avg / Day'}</p>
-          <p className="metric-value">{fmt(ytdStats?.requiredRvuPerWorkday ?? 0)}</p>
+          <p className="metric-label">Last import</p>
+          <p className="text-lg font-semibold leading-tight text-white mt-2">{lastImportStatus}</p>
           <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
-            wRVU/workday needed
+            {activeSession ? `${activeSession.needsReviewCount} require review` : 'Ready for capture'}
           </p>
         </div>
       </div>

@@ -11,6 +11,7 @@ import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
 import {
   Bell,
   Bot,
+  BarChart3,
   Camera,
   ChevronRight,
   ClipboardList,
@@ -22,9 +23,12 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  PieChart,
   Search,
   Settings as SettingsIcon,
+  ShieldCheck,
   Sun,
+  Target,
   UploadCloud,
 } from 'lucide-react';
 import { Dashboard } from './pages/Dashboard';
@@ -38,10 +42,28 @@ import { CptExplorer } from './pages/CptExplorer';
 import { Profiles } from './pages/Profiles';
 import { AdminData } from './pages/AdminData';
 import { Automation } from './pages/Automation';
+import { AccuracyPage, ActivityTimelinePage, AnalyticsPage, GoalsPage, StudyMixPage } from './pages/ProductDashboards';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
-type Tab = 'pace' | 'dashboard' | 'automation' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'profiles' | 'camera' | 'explorer' | 'admin';
+type Tab =
+  | 'dashboard'
+  | 'activity'
+  | 'analytics'
+  | 'studyMix'
+  | 'accuracy'
+  | 'goals'
+  | 'pace'
+  | 'automation'
+  | 'log'
+  | 'import'
+  | 'history'
+  | 'settings'
+  | 'locations'
+  | 'profiles'
+  | 'camera'
+  | 'explorer'
+  | 'admin';
 
 class PageErrorBoundary extends Component<
   { children: ReactNode; tab: string },
@@ -84,11 +106,16 @@ class PageErrorBoundary extends Component<
 }
 
 const NAV_ITEMS: { id: Tab; label: string; icon: ComponentType<{ className?: string }> }[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'automation', label: 'Automation', icon: Bot },
+  { id: 'dashboard', label: 'Mission Control', icon: LayoutDashboard },
+  { id: 'activity',  label: 'Timeline', icon: HistoryIcon },
+  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { id: 'studyMix',  label: 'Study Mix', icon: PieChart },
+  { id: 'accuracy',  label: 'Accuracy', icon: ShieldCheck },
+  { id: 'goals',     label: 'Goals', icon: Target },
   { id: 'pace',      label: 'Daily Pace', icon: Gauge },
-  { id: 'log',       label: 'Log Study',  icon: ClipboardList },
   { id: 'import',    label: 'PowerScribe Capture', icon: UploadCloud },
+  { id: 'automation', label: 'Automation', icon: Bot },
+  { id: 'log',       label: 'Log Study',  icon: ClipboardList },
   { id: 'camera',    label: 'Camera',     icon: Camera },
   { id: 'explorer',  label: 'CPT Explorer', icon: Search },
   { id: 'history',   label: 'History',    icon: HistoryIcon },
@@ -99,7 +126,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: ComponentType<{ className?: str
 
 function MainApp() {
   const { isReady, error } = useAppInitialization();
-  const [activeTab, setActiveTab] = useState<Tab>('pace');
+  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [isDark, setIsDark] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { activeProfile, activePractice } = useOrg();
@@ -223,6 +250,11 @@ function MainApp() {
               <PageErrorBoundary tab={activeTab}>
                 {activeTab === 'pace'          && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'dashboard'     && <Dashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
+                {activeTab === 'activity'      && <ActivityTimelinePage />}
+                {activeTab === 'analytics'     && <AnalyticsPage />}
+                {activeTab === 'studyMix'      && <StudyMixPage />}
+                {activeTab === 'accuracy'      && <AccuracyPage />}
+                {activeTab === 'goals'         && <GoalsPage />}
                 {activeTab === 'automation'    && <Automation />}
                 {activeTab === 'log'           && <LogStudy onSaved={() => setActiveTab('pace')} />}
                 {activeTab === 'import'        && <Import onImported={() => setActiveTab('pace')} />}
