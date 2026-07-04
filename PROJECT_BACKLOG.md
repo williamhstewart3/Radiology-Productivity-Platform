@@ -19,7 +19,7 @@
 - [x] Add ACR CY2026 radiology-active CPT set for default OCR auto-matching
 - [x] Add hard modality filters and XR view normalization before fuzzy CPT matching
 - [x] Crop PowerScribe OCR input to Procedure, Exam Date, and Modified columns before OCR
-- [x] Redesign primary app surfaces into a premium Mission Control desktop experience
+- [x] Redesign primary app surfaces into a premium Home/HUD desktop experience
 - [x] Add Timeline, Analytics, Study Mix, Accuracy, and Goals dashboards
 - [x] Add compact structured OCR review details and transient import toasts
 

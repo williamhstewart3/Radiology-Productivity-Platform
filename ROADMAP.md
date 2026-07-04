@@ -24,7 +24,7 @@ Top-level navigation should follow workflows:
 - Multi-profile support.
 - Multi-location support.
 - Daily Pace.
-- Mission Control dashboard.
+- Home dashboard.
 - Mini Pace Window.
 - CPT Explorer.
 - Mobile camera workflow.

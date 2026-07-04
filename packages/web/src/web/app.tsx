@@ -22,7 +22,6 @@ import {
   Sun,
   UploadCloud,
 } from 'lucide-react';
-import { Dashboard } from './pages/Dashboard';
 import { LogStudy } from './pages/LogStudy';
 import { Import } from './pages/Import';
 import { History } from './pages/History';
@@ -33,18 +32,13 @@ import { CptExplorer } from './pages/CptExplorer';
 import { Profiles } from './pages/Profiles';
 import { AdminData } from './pages/AdminData';
 import { Automation } from './pages/Automation';
-import { AccuracyPage, ActivityTimelinePage, AnalyticsPage, GoalsPage, StudyMixPage } from './pages/ProductDashboards';
+import { AnalyticsPage } from './pages/ProductDashboards';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
 type Tab =
   | 'dashboard'
-  | 'activity'
   | 'analytics'
-  | 'studyMix'
-  | 'accuracy'
-  | 'goals'
-  | 'pace'
   | 'automation'
   | 'log'
   | 'import'
@@ -229,20 +223,15 @@ function MainApp() {
           <main className="min-h-0 flex-1 overflow-auto">
             <div className="mx-auto w-full max-w-[1720px] px-4 py-5 lg:px-6 lg:py-6">
               <PageErrorBoundary tab={activeTab}>
-                {activeTab === 'pace'          && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
-                {activeTab === 'dashboard'     && <Dashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
-                {activeTab === 'activity'      && <ActivityTimelinePage />}
+                {activeTab === 'dashboard'     && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'analytics'     && <AnalyticsPage />}
-                {activeTab === 'studyMix'      && <StudyMixPage />}
-                {activeTab === 'accuracy'      && <AccuracyPage />}
-                {activeTab === 'goals'         && <GoalsPage />}
                 {activeTab === 'automation'    && <Automation />}
-                {activeTab === 'log'           && <LogStudy onSaved={() => setActiveTab('pace')} />}
-                {activeTab === 'import'        && <Import onImported={() => setActiveTab('pace')} />}
+                {activeTab === 'log'           && <LogStudy onSaved={() => setActiveTab('dashboard')} />}
+                {activeTab === 'import'        && <Import onImported={() => setActiveTab('dashboard')} />}
                 {activeTab === 'history'       && <History />}
                 {activeTab === 'settings'      && <Settings onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
-                {activeTab === 'camera'        && <CameraUploadPage onImported={() => setActiveTab('pace')} />}
+                {activeTab === 'camera'        && <CameraUploadPage onImported={() => setActiveTab('dashboard')} />}
                 {activeTab === 'explorer'      && <CptExplorer onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'profiles'      && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} initialEditId={activeProfile?.id ?? null} />}
                 {activeTab === 'admin'         && <AdminData />}

@@ -275,7 +275,7 @@ export function Settings({ onNavigate }: SettingsProps) {
       {/* Daily Pace settings */}
       <div className="card space-y-4">
         <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Daily Pace</h2>
-        <p className="text-xs text-slate-400">Used by the Daily Pace tab to track real-time productivity during your shift.</p>
+        <p className="text-xs text-slate-400">Used by Home to track real-time productivity during your shift.</p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>

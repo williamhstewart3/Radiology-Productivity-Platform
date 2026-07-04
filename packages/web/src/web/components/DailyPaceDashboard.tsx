@@ -411,9 +411,10 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
             className="text-2xl font-bold tracking-tight"
             style={{ color: 'var(--theme-text-primary)' }}
           >
-            Daily Pace
+            Home
           </h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--theme-text-muted)' }}>
+            Daily pace · {' '}
             {fmt12(paceSettings.workdayStart)} – {fmt12(paceSettings.workdayEnd)}
             {paceSettings.breakMinutes > 0 && ` · ${paceSettings.breakMinutes}m break`}
           </p>
@@ -439,6 +440,17 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
           >
             <span>📌</span>
             <span className="hidden sm:inline">Mini Window</span>
+          </button>
+          <button
+            onClick={() => onNavigate('import')}
+            className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5"
+            style={{
+              background: 'rgba(91,184,212,0.08)',
+              border: '1px solid rgba(91,184,212,0.20)',
+              color: 'var(--theme-text-secondary)',
+            }}
+          >
+            <span>Import Studies</span>
           </button>
           <button
             onClick={() => onNavigate('log')}
