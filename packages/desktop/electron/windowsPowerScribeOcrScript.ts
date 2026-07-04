@@ -174,6 +174,141 @@ function Detect-TableCrop([System.Drawing.Bitmap] $Bitmap) {
   }
 }
 
+function Get-FallbackColumnLayout {
+  return [pscustomobject]@{
+    threeColumnRect = [pscustomobject]@{ x = 0.13; y = 0.0; width = 0.86; height = 1.0 }
+    columns = [pscustomobject]@{
+      procedure = [pscustomobject]@{ x = 0.13; y = 0.0; width = 0.43; height = 1.0 }
+      examDate = [pscustomobject]@{ x = 0.59; y = 0.0; width = 0.17; height = 1.0 }
+      modifiedDate = [pscustomobject]@{ x = 0.78; y = 0.0; width = 0.21; height = 1.0 }
+    }
+    confidence = 0.45
+    method = 'fallback'
+  }
+}
+
+function Best-GutterBand([double[]] $Values, [double] $MinRatio, [double] $MaxRatio, [double] $Threshold) {
+  $minIndex = [Math]::Max(0, [int][Math]::Floor($Values.Length * $MinRatio))
+  $maxIndex = [Math]::Min($Values.Length - 1, [int][Math]::Ceiling($Values.Length * $MaxRatio))
+  $minWidth = [Math]::Max(6, [int][Math]::Round($Values.Length * 0.012))
+  $best = $null
+  $start = $null
+  $sum = 0.0
+
+  for ($i = $minIndex; $i -le $maxIndex; $i++) {
+    $low = $Values[$i] -le $Threshold
+    if ($low -and $null -eq $start) {
+      $start = $i
+      $sum = 0.0
+    }
+    if ($low) { $sum += $Values[$i] }
+    if ((-not $low -or $i -eq $maxIndex) -and $null -ne $start) {
+      $end = if ($low) { $i } else { $i - 1 }
+      $width = $end - $start + 1
+      if ($width -ge $minWidth) {
+        $average = $sum / [Math]::Max(1, $width)
+        $score = $width * [Math]::Max(0.0001, $Threshold - $average)
+        if ($null -eq $best -or $score -gt $best.score) {
+          $best = [pscustomobject]@{
+            center = (($start + $end) / 2.0) / [double]$Values.Length
+            width = $width / [double]$Values.Length
+            score = $score
+          }
+        }
+      }
+      $start = $null
+      $sum = 0.0
+    }
+  }
+
+  return $best
+}
+
+function Detect-ColumnLayoutFromProjection([double[]] $Projection) {
+  if ($Projection.Length -lt 80) { return Get-FallbackColumnLayout }
+
+  $smoothRadius = [Math]::Max(2, [int][Math]::Round($Projection.Length * 0.006))
+  $smoothed = Smooth-Values $Projection $smoothRadius
+  $windowStart = [Math]::Floor($smoothed.Length * 0.10)
+  $windowEnd = [Math]::Floor($smoothed.Length * 0.96)
+  $window = [double[]]($smoothed[$windowStart..$windowEnd])
+  $lowThreshold = [Math]::Max(0.0015, (Percentile $window 0.24))
+  $firstGutter = Best-GutterBand $smoothed 0.45 0.68 $lowThreshold
+  $secondGutter = Best-GutterBand $smoothed 0.66 0.90 $lowThreshold
+
+  if ($null -eq $firstGutter -or $null -eq $secondGutter -or ($secondGutter.center - $firstGutter.center) -lt 0.10) {
+    return Get-FallbackColumnLayout
+  }
+
+  $padding = 0.012
+  $left = 0.13
+  $right = 0.99
+  $procedureRight = [Math]::Max(0.34, $firstGutter.center - $padding)
+  $examLeft = [Math]::Min(0.72, $firstGutter.center + $padding)
+  $examRight = [Math]::Max($examLeft + 0.10, $secondGutter.center - $padding)
+  $modifiedLeft = [Math]::Min(0.88, $secondGutter.center + $padding)
+
+  if ($procedureRight -le $left + 0.18 -or $examRight -le $examLeft + 0.08 -or $right -le $modifiedLeft + 0.08) {
+    return Get-FallbackColumnLayout
+  }
+
+  $confidence = [Math]::Max(0.55, [Math]::Min(0.95, 0.60 + $firstGutter.width * 6.0 + $secondGutter.width * 6.0))
+  return [pscustomobject]@{
+    threeColumnRect = Normalize-Rect ([pscustomobject]@{ x = $left; y = 0.0; width = $right - $left; height = 1.0 })
+    columns = [pscustomobject]@{
+      procedure = Normalize-Rect ([pscustomobject]@{ x = $left; y = 0.0; width = $procedureRight - $left; height = 1.0 })
+      examDate = Normalize-Rect ([pscustomobject]@{ x = $examLeft; y = 0.0; width = $examRight - $examLeft; height = 1.0 })
+      modifiedDate = Normalize-Rect ([pscustomobject]@{ x = $modifiedLeft; y = 0.0; width = $right - $modifiedLeft; height = 1.0 })
+    }
+    confidence = $confidence
+    method = 'detected'
+  }
+}
+
+function Detect-ColumnLayout([System.Drawing.Bitmap] $Bitmap, $TableRect) {
+  $r = Normalize-Rect $TableRect
+  $sourceX = [int][Math]::Round($r.x * $Bitmap.Width)
+  $sourceY = [int][Math]::Round($r.y * $Bitmap.Height)
+  $sourceWidth = [Math]::Max(1, [int][Math]::Round($r.width * $Bitmap.Width))
+  $sourceHeight = [Math]::Max(1, [int][Math]::Round($r.height * $Bitmap.Height))
+  $maxWidth = 900
+  $scale = [Math]::Min(1.0, $maxWidth / [double]$sourceWidth)
+  $width = [Math]::Max(1, [int][Math]::Round($sourceWidth * $scale))
+  $height = [Math]::Max(1, [int][Math]::Round($sourceHeight * $scale))
+  $small = New-Object System.Drawing.Bitmap $width, $height
+  $graphics = [System.Drawing.Graphics]::FromImage($small)
+  $graphics.DrawImage(
+    $Bitmap,
+    (New-Object System.Drawing.Rectangle 0, 0, $width, $height),
+    (New-Object System.Drawing.Rectangle $sourceX, $sourceY, $sourceWidth, $sourceHeight),
+    [System.Drawing.GraphicsUnit]::Pixel
+  )
+  $graphics.Dispose()
+
+  try {
+    $projection = New-Object double[] $width
+    $yMin = [int][Math]::Floor($height * 0.06)
+    $yMax = [int][Math]::Floor($height * 0.98)
+    for ($y = $yMin + 1; $y -lt $yMax; $y++) {
+      for ($x = 1; $x -lt ($width - 1); $x++) {
+        $pixel = $small.GetPixel($x, $y)
+        $leftPixel = $small.GetPixel($x - 1, $y)
+        $lum = $pixel.R * 0.299 + $pixel.G * 0.587 + $pixel.B * 0.114
+        $leftLum = $leftPixel.R * 0.299 + $leftPixel.G * 0.587 + $leftPixel.B * 0.114
+        if ($lum -lt 150 -or [Math]::Abs($lum - $leftLum) -gt 28) {
+          $projection[$x] += 1
+        }
+      }
+    }
+    for ($i = 0; $i -lt $projection.Length; $i++) {
+      $projection[$i] = $projection[$i] / [Math]::Max(1, $yMax - $yMin)
+    }
+    return Detect-ColumnLayoutFromProjection $projection
+  } finally {
+    $small.Dispose()
+  }
+}
+
 function Child-Rect($Parent, $Child) {
   $p = Normalize-Rect $Parent
   $c = Normalize-Rect $Child
@@ -387,9 +522,10 @@ $image = [System.Windows.Forms.Clipboard]::GetImage()
 $bitmap = New-Object System.Drawing.Bitmap $image
 try {
   $table = Detect-TableCrop $bitmap
-  $procedureRect = Child-Rect $table.rect ([pscustomobject]@{ x = 0.13; y = 0.0; width = 0.43; height = 1.0 })
-  $examRect = Child-Rect $table.rect ([pscustomobject]@{ x = 0.59; y = 0.0; width = 0.17; height = 1.0 })
-  $modifiedRect = Child-Rect $table.rect ([pscustomobject]@{ x = 0.78; y = 0.0; width = 0.21; height = 1.0 })
+  $columnLayout = Detect-ColumnLayout $bitmap $table.rect
+  $procedureRect = Child-Rect $table.rect $columnLayout.columns.procedure
+  $examRect = Child-Rect $table.rect $columnLayout.columns.examDate
+  $modifiedRect = Child-Rect $table.rect $columnLayout.columns.modifiedDate
 
   $procedureBitmap = Crop-Bitmap $bitmap $procedureRect
   $examBitmap = Crop-Bitmap $bitmap $examRect

@@ -33,6 +33,7 @@ export interface PowerScribeColumnCrop {
 
 export interface PowerScribeColumnPreprocessResult {
   tableCrop: DetectedCrop;
+  threeColumnCrop: DetectedCrop;
   columns: PowerScribeColumnCrop[];
 }
 
@@ -261,6 +262,148 @@ function childRect(parent: RelativeCropRect, child: RelativeCropRect): RelativeC
   });
 }
 
+interface PowerScribeColumnLayout {
+  threeColumnRect: RelativeCropRect;
+  columns: Record<PowerScribeColumnName, RelativeCropRect>;
+  confidence: number;
+  method: 'detected' | 'fallback';
+}
+
+const FALLBACK_COLUMN_LAYOUT: PowerScribeColumnLayout = {
+  threeColumnRect: { x: 0.13, y: 0, width: 0.86, height: 1 },
+  columns: {
+    procedure: { x: 0.13, y: 0, width: 0.43, height: 1 },
+    examDate: { x: 0.59, y: 0, width: 0.17, height: 1 },
+    modifiedDate: { x: 0.78, y: 0, width: 0.21, height: 1 },
+  },
+  confidence: 0.45,
+  method: 'fallback',
+};
+
+function fallbackColumnLayout(): PowerScribeColumnLayout {
+  return {
+    ...FALLBACK_COLUMN_LAYOUT,
+    threeColumnRect: { ...FALLBACK_COLUMN_LAYOUT.threeColumnRect },
+    columns: {
+      procedure: { ...FALLBACK_COLUMN_LAYOUT.columns.procedure },
+      examDate: { ...FALLBACK_COLUMN_LAYOUT.columns.examDate },
+      modifiedDate: { ...FALLBACK_COLUMN_LAYOUT.columns.modifiedDate },
+    },
+  };
+}
+
+function bestGutterBand(
+  values: number[],
+  minRatio: number,
+  maxRatio: number,
+  threshold: number,
+): { center: number; width: number; score: number } | null {
+  const minIndex = Math.max(0, Math.floor(values.length * minRatio));
+  const maxIndex = Math.min(values.length - 1, Math.ceil(values.length * maxRatio));
+  const minWidth = Math.max(6, Math.round(values.length * 0.012));
+  let best: { center: number; width: number; score: number } | null = null;
+  let start: number | null = null;
+  let sum = 0;
+
+  for (let i = minIndex; i <= maxIndex; i++) {
+    const low = values[i] <= threshold;
+    if (low && start === null) {
+      start = i;
+      sum = 0;
+    }
+    if (low) sum += values[i];
+    if ((!low || i === maxIndex) && start !== null) {
+      const end = low ? i : i - 1;
+      const width = end - start + 1;
+      if (width >= minWidth) {
+        const average = sum / Math.max(1, width);
+        const score = width * Math.max(0.0001, threshold - average);
+        if (!best || score > best.score) {
+          best = { center: (start + end) / 2 / values.length, width: width / values.length, score };
+        }
+      }
+      start = null;
+      sum = 0;
+    }
+  }
+
+  return best;
+}
+
+function detectPowerScribeColumnLayoutFromProjection(projection: number[]): PowerScribeColumnLayout {
+  if (projection.length < 80) return fallbackColumnLayout();
+
+  const smoothed = smooth(projection, Math.max(2, Math.round(projection.length * 0.006)));
+  const searchValues = smoothed.slice(Math.floor(smoothed.length * 0.10), Math.floor(smoothed.length * 0.96));
+  const lowThreshold = Math.max(0.0015, percentile(searchValues, 0.24));
+  const firstGutter = bestGutterBand(smoothed, 0.45, 0.68, lowThreshold);
+  const secondGutter = bestGutterBand(smoothed, 0.66, 0.90, lowThreshold);
+
+  if (!firstGutter || !secondGutter || secondGutter.center - firstGutter.center < 0.10) {
+    return fallbackColumnLayout();
+  }
+
+  const padding = 0.012;
+  const left = 0.13;
+  const right = 0.99;
+  const procedureRight = Math.max(0.34, firstGutter.center - padding);
+  const examLeft = Math.min(0.72, firstGutter.center + padding);
+  const examRight = Math.max(examLeft + 0.10, secondGutter.center - padding);
+  const modifiedLeft = Math.min(0.88, secondGutter.center + padding);
+
+  if (procedureRight <= left + 0.18 || examRight <= examLeft + 0.08 || right <= modifiedLeft + 0.08) {
+    return fallbackColumnLayout();
+  }
+
+  const confidence = Math.max(0.55, Math.min(0.95, 0.60 + firstGutter.width * 6 + secondGutter.width * 6));
+  return {
+    threeColumnRect: normalizeCrop({ x: left, y: 0, width: right - left, height: 1 }),
+    columns: {
+      procedure: normalizeCrop({ x: left, y: 0, width: procedureRight - left, height: 1 }),
+      examDate: normalizeCrop({ x: examLeft, y: 0, width: examRight - examLeft, height: 1 }),
+      modifiedDate: normalizeCrop({ x: modifiedLeft, y: 0, width: right - modifiedLeft, height: 1 }),
+    },
+    confidence,
+    method: 'detected',
+  };
+}
+
+function detectPowerScribeColumnLayoutFromBitmap(bitmap: ImageBitmap, tableRect: RelativeCropRect): PowerScribeColumnLayout {
+  const source = absoluteRectFromRelative(tableRect, bitmap.width, bitmap.height);
+  const maxWidth = 900;
+  const scale = Math.min(1, maxWidth / source.width);
+  const width = Math.max(1, Math.round(source.width * scale));
+  const height = Math.max(1, Math.round(source.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return fallbackColumnLayout();
+  ctx.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, width, height);
+  const imageData = ctx.getImageData(0, 0, width, height).data;
+  const projection = new Array<number>(width).fill(0);
+  const yMin = Math.floor(height * 0.06);
+  const yMax = Math.floor(height * 0.98);
+
+  for (let y = yMin + 1; y < yMax; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const offset = (y * width + x) * 4;
+      const leftOffset = (y * width + x - 1) * 4;
+      const lum = imageData[offset] * 0.299 + imageData[offset + 1] * 0.587 + imageData[offset + 2] * 0.114;
+      const leftLum = imageData[leftOffset] * 0.299 + imageData[leftOffset + 1] * 0.587 + imageData[leftOffset + 2] * 0.114;
+      if (lum < 150 || Math.abs(lum - leftLum) > 28) {
+        projection[x] += 1;
+      }
+    }
+  }
+
+  return detectPowerScribeColumnLayoutFromProjection(projection.map((value) => value / Math.max(1, yMax - yMin)));
+}
+
+export function __testDetectPowerScribeColumnLayoutFromProjection(projection: number[]): PowerScribeColumnLayout {
+  return detectPowerScribeColumnLayoutFromProjection(projection);
+}
+
 function adaptiveThreshold(imageData: ImageData, width: number, height: number): ImageData {
   const source = imageData.data;
   const gray = new Uint8ClampedArray(width * height);
@@ -355,10 +498,16 @@ export async function preprocessPowerScribeColumnsForOcr(
     const tableCrop: DetectedCrop = cropRect
       ? { rect: normalizeCrop(cropRect), confidence: 1, method: 'fallback' }
       : detectPowerScribeStudyListCropFromBitmap(bitmap);
+    const columnLayout = detectPowerScribeColumnLayoutFromBitmap(bitmap, tableCrop.rect);
+    const threeColumnCrop: DetectedCrop = {
+      rect: childRect(tableCrop.rect, columnLayout.threeColumnRect),
+      confidence: columnLayout.confidence,
+      method: columnLayout.method,
+    };
     const columnDefinitions: Array<{ name: PowerScribeColumnName; rect: RelativeCropRect }> = [
-      { name: 'procedure', rect: childRect(tableCrop.rect, { x: 0.13, y: 0, width: 0.43, height: 1 }) },
-      { name: 'examDate', rect: childRect(tableCrop.rect, { x: 0.59, y: 0, width: 0.17, height: 1 }) },
-      { name: 'modifiedDate', rect: childRect(tableCrop.rect, { x: 0.78, y: 0, width: 0.21, height: 1 }) },
+      { name: 'procedure', rect: childRect(tableCrop.rect, columnLayout.columns.procedure) },
+      { name: 'examDate', rect: childRect(tableCrop.rect, columnLayout.columns.examDate) },
+      { name: 'modifiedDate', rect: childRect(tableCrop.rect, columnLayout.columns.modifiedDate) },
     ];
     const columns: PowerScribeColumnCrop[] = [];
     for (const column of columnDefinitions) {
@@ -368,7 +517,7 @@ export async function preprocessPowerScribeColumnsForOcr(
         blob: await preprocessedBlobFromBitmapCrop(bitmap, column.rect, outputType),
       });
     }
-    return { tableCrop, columns };
+    return { tableCrop, threeColumnCrop, columns };
   } finally {
     bitmap.close();
   }

@@ -18,6 +18,7 @@
 - [x] Add Windows clipboard OCR helper path that returns structured PowerScribe rows
 - [x] Add ACR CY2026 radiology-active CPT set for default OCR auto-matching
 - [x] Add hard modality filters and XR view normalization before fuzzy CPT matching
+- [x] Crop PowerScribe OCR input to Procedure, Exam Date, and Modified columns before OCR
 
 ---
 
@@ -37,6 +38,7 @@
 - [x] Strip leading PowerScribe row/status junk before procedure parsing and matching
 - [x] Preserve Exam and Read times in OCR review cards
 - [x] Prefer Windows structured PowerScribe clipboard OCR in Electron with browser OCR fallback
+- [x] Detect PowerScribe table column gutters and crop to Procedure / Exam Date / Modified before OCR
 - [ ] Bulk approve high-confidence studies
 - [ ] Unknowns-only review mode
 - [ ] Review later workflow
