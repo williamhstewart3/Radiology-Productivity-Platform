@@ -38,7 +38,9 @@ function canUseDirectCptMatch(rawInput: string, options?: FindMatchOptions): boo
 }
 
 function isProductivityRelevantModifier26(row: CptRvuRow): boolean {
-  return row.modifier === '26' && (row.workRvu ?? 0) > 0;
+  return row.modifier === '26' &&
+    (row.workRvu ?? 0) > 0 &&
+    (row.statusCategory === 'active' || row.statusCategory === 'restricted');
 }
 
 type ModalityLane = Modality | 'CTA' | 'MRA' | 'PET' | 'DXA';

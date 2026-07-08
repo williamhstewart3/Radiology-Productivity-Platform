@@ -67,6 +67,10 @@ function isInstitutionMappingCandidate(candidate: MatchCandidate): boolean {
     candidate.explanation?.source === 'Institution mapping';
 }
 
+function isExactInstitutionMappingCandidate(candidate: MatchCandidate): boolean {
+  return isInstitutionMappingCandidate(candidate) && candidate.confidence >= 0.98;
+}
+
 function selectedDuplicateCptCodes(candidates: MatchCandidate[], directCpt: string | null): string[] {
   if (directCpt) return [directCpt];
   const institution = candidates
@@ -87,9 +91,14 @@ function reviewReasonFor(top: MatchCandidate | undefined, candidates: MatchCandi
   if (duplicateStatus === 'possible') return 'Possible duplicate';
   if (top.confidence < 0.95) return 'Low confidence match';
   const plausible = candidates.filter((candidate) => productivityRelevant(candidate) && candidate.confidence >= 0.65);
+  if (plausible.length > 1 && plausible.every(isExactInstitutionMappingCandidate)) return null;
   if (plausible.length > 1 && plausible.every(isDeterministicProtocolCandidate)) return null;
   if (plausible.length > 1 && top.method !== 'alias_match') return 'Multiple possible CPT matches';
   return null;
+}
+
+export function __testInstitutionMappingReviewReason(candidates: MatchCandidate[], duplicateStatus: DuplicateStatus = null): string | null {
+  return reviewReasonFor(candidates[0], candidates, duplicateStatus);
 }
 
 function cmsDescriptionsFor(candidates: MatchCandidate[]): string {
@@ -159,26 +168,14 @@ export async function runImportPipeline(
     const parserNeedsReview =
       Boolean(study.parserNeedsReview) ||
       (study.extractionConfidence != null && study.extractionConfidence < 0.75);
-    const matchReviewReason = reviewReasonFor(top, candidates, dupStatus);
-    const reviewReason = study.parserReviewReason ?? matchReviewReason;
-    const autoApprovalLevel =
-      !parserNeedsReview && top && isDeterministicProtocolCandidate(top) && dupStatus === null
-        ? 'learned'
-        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= 0.99 && dupStatus === null
-        ? 'silent'
-        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= 0.95 && dupStatus === null
-        ? 'learned'
-        : null;
-    const autoAccept = Boolean(autoApprovalLevel && !reviewReason);
-
     const deterministicSelectedIndices = top && isDeterministicProtocolCandidate(top)
       ? candidates
           .map((candidate, index) => (isDeterministicProtocolCandidate(candidate) && productivityRelevant(candidate) ? index : -1))
           .filter((index) => index >= 0)
       : [];
-    const institutionSelectedIndices = top && isInstitutionMappingCandidate(top)
+    const institutionSelectedIndices = top && isExactInstitutionMappingCandidate(top)
       ? candidates
-          .map((candidate, index) => (isInstitutionMappingCandidate(candidate) && productivityRelevant(candidate) ? index : -1))
+          .map((candidate, index) => (isExactInstitutionMappingCandidate(candidate) && productivityRelevant(candidate) ? index : -1))
           .filter((index) => index >= 0)
       : [];
     const selectedIndex =
@@ -191,6 +188,29 @@ export async function runImportPipeline(
         : deterministicSelectedIndices.length > 0
         ? deterministicSelectedIndices
         : selectedIndex === null ? [] : [selectedIndex];
+    const selectedCandidates = selectedCandidateIndices
+      .map((index) => candidates[index])
+      .filter((candidate): candidate is MatchCandidate => Boolean(candidate));
+    const matchReviewReason = reviewReasonFor(top, candidates, dupStatus);
+    const reviewReason = study.parserReviewReason ?? matchReviewReason;
+    const exactInstitutionAutoAccept =
+      !parserNeedsReview &&
+      dupStatus === null &&
+      institutionSelectedIndices.length > 0 &&
+      selectedCandidates.length === institutionSelectedIndices.length &&
+      selectedCandidates.every((candidate) => isExactInstitutionMappingCandidate(candidate) && productivityRelevant(candidate)) &&
+      !matchReviewReason;
+    const autoApprovalLevel =
+      exactInstitutionAutoAccept
+        ? 'learned'
+        : !parserNeedsReview && top && isDeterministicProtocolCandidate(top) && dupStatus === null
+        ? 'learned'
+        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= 0.99 && dupStatus === null
+        ? 'silent'
+        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= 0.95 && dupStatus === null
+        ? 'learned'
+        : null;
+    const autoAccept = Boolean(autoApprovalLevel && !reviewReason);
 
     const row: PipelineReviewRow = {
       tempId: crypto.randomUUID(),

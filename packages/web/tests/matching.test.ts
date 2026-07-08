@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { CptRvuRow, Modality } from '../src/web/types';
 import type { ImportedStudy } from '../src/web/types/importProvider';
-import { __testProcedureNameFor } from '../src/web/pipeline/importPipeline';
+import { __testInstitutionMappingReviewReason, __testProcedureNameFor } from '../src/web/pipeline/importPipeline';
 import {
   __testAutoMatchRowsFor,
   __testDeterministicCptCodesFor,
@@ -94,5 +94,61 @@ describe('modality-first CPT matching', () => {
     } as ImportedStudy;
 
     expect(__testProcedureNameFor(study)).toBe('CT CHEST ABDOMEN PELVIS W CONTRAST');
+  });
+
+  test('exact institution multi-CPT mapping is not treated as generic CPT ambiguity', () => {
+    const candidates = [
+      {
+        cptCode: '71275',
+        modifier: '26',
+        description: 'CTA chest',
+        workRvu: 1,
+        modality: 'CT' as Modality,
+        confidence: 0.985,
+        method: 'radiology_match' as const,
+        explanation: { rawText: 'CTA CHEST ABDOMEN PELVIS', normalizedText: 'cta chest abdomen pelvis', source: 'Institution mapping', detail: 'institution exact' },
+      },
+      {
+        cptCode: '74174',
+        modifier: '26',
+        description: 'CTA abdomen pelvis',
+        workRvu: 1,
+        modality: 'CT' as Modality,
+        confidence: 0.985,
+        method: 'radiology_match' as const,
+        explanation: { rawText: 'CTA CHEST ABDOMEN PELVIS', normalizedText: 'cta chest abdomen pelvis', source: 'Institution mapping', detail: 'institution exact' },
+      },
+    ];
+
+    expect(__testInstitutionMappingReviewReason(candidates)).toBeNull();
+  });
+
+  test('near institution matches and extra plausible candidates still require review', () => {
+    const nearInstitution = [{
+      cptCode: '70450',
+      modifier: '26',
+      description: 'CT head without contrast',
+      workRvu: 1,
+      modality: 'CT' as Modality,
+      confidence: 0.9,
+      method: 'radiology_match' as const,
+      explanation: { rawText: 'CT HEAD WO', normalizedText: 'ct head wo', source: 'Institution mapping', detail: 'near institution' },
+    }];
+    const exactWithExtra = [
+      { ...nearInstitution[0], confidence: 0.985, explanation: { ...nearInstitution[0].explanation, detail: 'institution exact' } },
+      {
+        cptCode: '70460',
+        modifier: '26',
+        description: 'CT head with contrast',
+        workRvu: 1,
+        modality: 'CT' as Modality,
+        confidence: 0.8,
+        method: 'radiology_match' as const,
+        explanation: { rawText: 'CT HEAD WO', normalizedText: 'ct head wo', source: 'ACR-active CMS fuzzy match', detail: 'cms fuzzy' },
+      },
+    ];
+
+    expect(__testInstitutionMappingReviewReason(nearInstitution)).toBe('Low confidence match');
+    expect(__testInstitutionMappingReviewReason(exactWithExtra)).toBe('Multiple possible CPT matches');
   });
 });
