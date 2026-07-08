@@ -2,6 +2,7 @@ import Papa from 'papaparse';
 import orbitCmeSeedCsv from '../../../../../data/orbit_cme_seed_mappings.csv?raw';
 import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from './acrRadiologyActiveCptSet';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import { spacelessKey } from '../utils/textMatching';
 import type { CptRvuRow, Modality } from '../types';
 
 export interface OrbitCmeSeedMapping {
@@ -82,9 +83,22 @@ export function getOrbitCmeSeedMappings(): OrbitCmeSeedMapping[] {
     .filter((row): row is OrbitCmeSeedMapping => Boolean(row));
 }
 
+let orbitCmeSpacelessIndex: Map<string, OrbitCmeSeedMapping> | null = null;
+
+function getOrbitCmeSpacelessIndex(): Map<string, OrbitCmeSeedMapping> {
+  if (!orbitCmeSpacelessIndex) {
+    orbitCmeSpacelessIndex = new Map(
+      getOrbitCmeSeedMappings().map((row) => [spacelessKey(row.studyName), row]),
+    );
+  }
+  return orbitCmeSpacelessIndex;
+}
+
 export function findOrbitCmeSeedMapping(rawInput: string): OrbitCmeSeedMapping | null {
   const normalized = normalizeRadiologyDescription(rawInput);
-  return getOrbitCmeSeedMappings().find((row) => row.normalizedKey === normalized) ?? null;
+  return getOrbitCmeSeedMappings().find((row) => row.normalizedKey === normalized) ??
+    getOrbitCmeSpacelessIndex().get(spacelessKey(rawInput)) ??
+    null;
 }
 
 export function buildOrbitCmeSeedCptRows(rows = getOrbitCmeSeedMappings()): CptRvuRow[] {

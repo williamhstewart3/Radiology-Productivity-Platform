@@ -41,6 +41,8 @@ describe('modality-first CPT matching', () => {
       .toBe('XR CHEST PORTABLE F/212026 2026');
     expect(__testParseModalityFirst('$9 26 CTANGIOGRAM HEAD NECK W WO CONTRAST').cleanedProcedure)
       .toBe('CT ANGIOGRAM HEAD NECK W WO CONTRAST');
+    expect(__testParseModalityFirst('v10 CTCHEST WCONTRAST').cleanedProcedure)
+      .toBe('CT CHEST WCONTRAST');
     expect(__testParseModalityFirst('ARUREST FURTABLE ... $12 XRWRIST RIGHT PA LATERAL AND OBLIQUE').cleanedProcedure)
       .toBe('XR WRIST RIGHT 3 VIEWS');
   });

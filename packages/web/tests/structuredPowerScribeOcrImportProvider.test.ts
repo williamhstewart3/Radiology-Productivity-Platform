@@ -24,6 +24,7 @@ describe('StructuredPowerScribeOcrImportProvider', () => {
     expect(studies[0].cleanedText).toBe('XR CHEST PORTABLE');
     expect(studies[0].examDateTime).toBe('2026-07-01T17:18:00');
     expect(studies[0].modifiedDateTime).toBe('2026-07-02T07:59:00');
+    expect(studies[0].studyTime).toBe('2026-07-02T07:59:00');
     expect(studies[0].studyDate).toBe('2026-07-01');
     expect(studies[0].modifiedDate).toBe('2026-07-02');
     expect(studies[0].parserNeedsReview).toBe(false);

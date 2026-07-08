@@ -15,6 +15,8 @@
 
 import { parseOcrLines } from '../utils/powerScribeParser';
 import { getDefaultOcrProvider } from '../utils/ocrProvider';
+import { PSM } from 'tesseract.js';
+import { maybeEnhanceOcrWithLlm } from '../services/llmOcrExtractionService';
 import {
   DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
   preprocessPowerScribeColumnsForOcr,
@@ -52,6 +54,21 @@ export interface OCRImportDebugInfo {
 }
 
 type ColumnOcrResults = Record<PowerScribeColumnName, OcrResult>;
+
+const COLUMN_OCR_PARAMS: Record<PowerScribeColumnName, { pageSegMode: PSM; charWhitelist: string }> = {
+  procedure: {
+    pageSegMode: PSM.SINGLE_BLOCK,
+    charWhitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /&-.',
+  },
+  examDate: {
+    pageSegMode: PSM.SINGLE_BLOCK,
+    charWhitelist: '0123456789/: -TAPMapm',
+  },
+  modifiedDate: {
+    pageSegMode: PSM.SINGLE_BLOCK,
+    charWhitelist: '0123456789/: -TAPMapm',
+  },
+};
 
 function lineCenterY(line: OcrPositionedLine): number | null {
   if (!line.bbox) return null;
@@ -155,12 +172,15 @@ export class OCRImportProvider implements ImportProvider {
       ? null
       : await provider.extractText(this.file);
     const columnResults = preprocessed
-      ? Object.fromEntries(
-          await Promise.all(preprocessed.columns.map(async (column) => [column.name, await provider.extractText(column.blob)])),
-        ) as ColumnOcrResults
+      ? {} as ColumnOcrResults
       : null;
+    if (preprocessed && columnResults) {
+      for (const column of preprocessed.columns) {
+        columnResults[column.name] = await provider.extractText(column.blob, COLUMN_OCR_PARAMS[column.name]);
+      }
+    }
     const rowLines = columnResults ? reassembleColumnRows(columnResults) : result?.lines ?? [];
-    const parsed = parseOcrLines(rowLines);
+    const regexParsed = parseOcrLines(rowLines);
     const now = new Date().toISOString();
     const ocrConfidence = columnResults
       ? (columnResults.procedure.confidence + columnResults.examDate.confidence + columnResults.modifiedDate.confidence) / 3
@@ -169,6 +189,15 @@ export class OCRImportProvider implements ImportProvider {
       ? rowLines.join('\n')
       : result?.rawText ?? '';
     const ocrLines = rowLines;
+    const parsed = await maybeEnhanceOcrWithLlm({
+      rawText: ocrText,
+      lines: ocrLines,
+      regexParsed,
+      fallbackStudyDate: this.studyDate,
+      ocrProviderName: provider.constructor.name,
+      ocrConfidence,
+      enabled: false,
+    });
 
     this.debugInfo = {
       crop: preprocessed?.tableCrop ?? null,
@@ -198,7 +227,7 @@ export class OCRImportProvider implements ImportProvider {
         examDate: p.examDate,
         examTime: p.examTime,
         examDateTime: p.examDateTime,
-        studyTime: p.studyDateTime,
+        studyTime: p.modifiedDateTime ?? p.studyDateTime,
         modifiedDate: p.modifiedDate ?? productivityDate,
         modifiedDateTime: p.modifiedDateTime ?? p.studyDateTime,
         modifiedTime: p.modifiedTime ?? p.examTime,

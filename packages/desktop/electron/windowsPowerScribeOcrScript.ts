@@ -176,11 +176,11 @@ function Detect-TableCrop([System.Drawing.Bitmap] $Bitmap) {
 
 function Get-FallbackColumnLayout {
   return [pscustomobject]@{
-    threeColumnRect = [pscustomobject]@{ x = 0.13; y = 0.0; width = 0.86; height = 1.0 }
+    threeColumnRect = [pscustomobject]@{ x = 0.13; y = 0.0; width = 0.865; height = 1.0 }
     columns = [pscustomobject]@{
       procedure = [pscustomobject]@{ x = 0.13; y = 0.0; width = 0.43; height = 1.0 }
-      examDate = [pscustomobject]@{ x = 0.59; y = 0.0; width = 0.17; height = 1.0 }
-      modifiedDate = [pscustomobject]@{ x = 0.78; y = 0.0; width = 0.21; height = 1.0 }
+      examDate = [pscustomobject]@{ x = 0.575; y = 0.0; width = 0.195; height = 1.0 }
+      modifiedDate = [pscustomobject]@{ x = 0.765; y = 0.0; width = 0.23; height = 1.0 }
     }
     confidence = 0.45
     method = 'fallback'
@@ -424,7 +424,7 @@ function Parse-DateTimeText([string] $Text) {
 
 function Clean-Procedure([string] $Text) {
   $cleaned = ($Text -replace '\s+', ' ').Trim()
-  $cleaned = $cleaned -replace '^(?:(?:[+@#*|/\\_\-.:;()[\]{}<>!?~]+|\d{1,4}|vb|vi|vo|vx|v|l|i|o|x|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread|warning|warn|alert|check)\s+)+', ''
+  $cleaned = $cleaned -replace '^(?:(?:[+@#*|/\\_\-.:;()[\]{}<>!?~]+|v\d{1,3}|\d{1,4}|vb|vi|vo|vx|v|l|i|o|x|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread|warning|warn|alert|check)\s+)+', ''
   $cleaned = $cleaned -replace '\b(?:reset\s+filters?|browse|search|filters?|refresh|apply|clear|cancel|save|export|print)\b', ' '
   $cleaned = $cleaned -replace '\s+', ' '
   $cleaned = $cleaned.Trim()

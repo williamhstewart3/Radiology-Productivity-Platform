@@ -1210,7 +1210,11 @@ export function Import({ onImported }: ImportProps) {
             const cptSummary = selected.length > 0
               ? selected.map((candidate) => candidate.cptCode).join(' + ')
               : row.candidates.slice(0, 2).map((candidate) => candidate.cptCode).join(' + ');
-            const examDateTime = formatOcrDateTime(row.source.examDate ?? row.source.studyDate, row.source.examTime, row.source.studyTime);
+            const examDateTime = formatOcrDateTime(
+              row.source.examDate ?? row.source.examDateTime?.slice(0, 10) ?? row.source.studyDate,
+              row.source.examTime ?? row.source.examDateTime?.slice(11, 16),
+              row.source.examDateTime,
+            );
             const readDateTime = formatOcrDateTime(
               row.source.modifiedDate ?? row.source.modifiedDateTime?.slice(0, 10),
               row.source.modifiedTime,

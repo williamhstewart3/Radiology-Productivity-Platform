@@ -1,4 +1,4 @@
-import { createWorker, type Worker } from 'tesseract.js';
+import { createWorker, PSM, type Worker } from 'tesseract.js';
 
 /**
  * OCR provider abstraction. Phase 1 uses Tesseract.js (fully client-side,
@@ -35,16 +35,37 @@ export interface OcrPositionedLine {
   } | null;
 }
 
+export interface OcrProviderParams {
+  pageSegMode?: PSM;
+  charWhitelist?: string;
+}
+
 export interface OcrProvider {
-  extractText(image: File | Blob): Promise<OcrResult>;
+  extractText(image: File | Blob, params?: OcrProviderParams): Promise<OcrResult>;
 }
 
 let tesseractWorker: Worker | null = null;
+let lastAppliedParams: Required<OcrProviderParams> | null = null;
 
 export class TesseractProvider implements OcrProvider {
-  async extractText(image: File | Blob): Promise<OcrResult> {
+  async extractText(image: File | Blob, params: OcrProviderParams = {}): Promise<OcrResult> {
     if (!tesseractWorker) {
       tesseractWorker = await createWorker('eng');
+    }
+
+    const nextParams: Required<OcrProviderParams> = {
+      pageSegMode: params.pageSegMode ?? PSM.AUTO,
+      charWhitelist: params.charWhitelist ?? '',
+    };
+    if (
+      lastAppliedParams?.pageSegMode !== nextParams.pageSegMode ||
+      lastAppliedParams?.charWhitelist !== nextParams.charWhitelist
+    ) {
+      await tesseractWorker.setParameters({
+        tessedit_pageseg_mode: nextParams.pageSegMode,
+        tessedit_char_whitelist: nextParams.charWhitelist,
+      });
+      lastAppliedParams = nextParams;
     }
 
     const { data } = await tesseractWorker.recognize(image);
@@ -78,6 +99,7 @@ export async function terminateOcrWorker() {
   if (tesseractWorker) {
     await tesseractWorker.terminate();
     tesseractWorker = null;
+    lastAppliedParams = null;
   }
 }
 
@@ -87,7 +109,7 @@ export async function terminateOcrWorker() {
  * instantiated -- no changes to matching, review UI, or DB writes.
  */
 export class VisionApiProvider implements OcrProvider {
-  async extractText(_image: File | Blob): Promise<OcrResult> {
+  async extractText(_image: File | Blob, _params?: OcrProviderParams): Promise<OcrResult> {
     throw new Error('VisionApiProvider is not implemented in this build.');
   }
 }

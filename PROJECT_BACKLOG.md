@@ -42,6 +42,9 @@
 - [x] Preserve Exam and Read times in OCR review cards
 - [x] Prefer Windows structured PowerScribe clipboard OCR in Electron with browser OCR fallback
 - [x] Detect PowerScribe table column gutters and crop to Procedure / Exam Date / Modified before OCR
+- [x] Tune column OCR settings and run column OCR sequentially to preserve date-time text
+- [x] Preserve full Exam and Modified/Read date-times end-to-end when visible in OCR
+- [x] Add disabled-by-default LLM OCR cleanup insertion point with no invented time validation
 - [ ] Bulk approve high-confidence studies
 - [ ] Unknowns-only review mode
 - [ ] Review later workflow
@@ -66,6 +69,7 @@
 - [x] Restrict automatic fuzzy CPT matching to ACR radiology-active CPTs by default
 - [x] Strip junk before the first modality token before CPT matching
 - [x] Add deterministic aliases for common PowerScribe OCR study names
+- [x] Add space-insensitive matching for OCR strings with dropped spaces
 
 ---
 

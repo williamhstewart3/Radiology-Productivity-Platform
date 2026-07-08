@@ -270,11 +270,11 @@ interface PowerScribeColumnLayout {
 }
 
 const FALLBACK_COLUMN_LAYOUT: PowerScribeColumnLayout = {
-  threeColumnRect: { x: 0.13, y: 0, width: 0.86, height: 1 },
+  threeColumnRect: { x: 0.13, y: 0, width: 0.865, height: 1 },
   columns: {
     procedure: { x: 0.13, y: 0, width: 0.43, height: 1 },
-    examDate: { x: 0.59, y: 0, width: 0.17, height: 1 },
-    modifiedDate: { x: 0.78, y: 0, width: 0.21, height: 1 },
+    examDate: { x: 0.575, y: 0, width: 0.195, height: 1 },
+    modifiedDate: { x: 0.765, y: 0, width: 0.23, height: 1 },
   },
   confidence: 0.45,
   method: 'fallback',

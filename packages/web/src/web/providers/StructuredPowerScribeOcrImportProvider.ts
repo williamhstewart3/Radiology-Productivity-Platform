@@ -66,7 +66,7 @@ export class StructuredPowerScribeOcrImportProvider implements ImportProvider {
         examDate: exam.date,
         examTime: exam.time,
         examDateTime: exam.dateTime,
-        studyTime: exam.dateTime,
+        studyTime: modified.dateTime ?? exam.dateTime,
         modifiedDate: modified.date ?? productivityDate,
         modifiedDateTime: modified.dateTime ?? exam.dateTime,
         modifiedTime: modified.time,

@@ -1,6 +1,6 @@
 import { db } from '../db/database';
 import type { CptRvuRow, ExamAlias, MatchCandidate, Modality, OcrLearningEntry } from '../types';
-import { combinedSimilarity, normalizeExamText } from './textMatching';
+import { combinedSimilarity, normalizeExamText, spacelessKey } from './textMatching';
 import { normalizeForRadiology } from './examNormalizer';
 import { scoreRadiologyMatch, CONFIDENCE_THRESHOLD } from './examLibrary';
 import {
@@ -77,7 +77,7 @@ interface ModalityFirstParse {
 }
 
 const LEADING_OCR_JUNK_PATTERN =
-  /^(?:(?:[+@#*|/\\_\-.:;()[\]{}<>!?~]+|(?:\u2713|\u2714|\u2611|\u25a0|\u25a1|\u25cf|\u2022)|\d{1,4}|vb|vi|vo|vx|v|l|i|o|x|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread|warning|warn|alert|check)\s+)+/i;
+  /^(?:(?:[+@#*|/\\_\-.:;()[\]{}<>!?~]+|(?:\u2713|\u2714|\u2611|\u25a0|\u25a1|\u25cf|\u2022)|v\d{1,3}|\d{1,4}|vb|vi|vo|vx|v|l|i|o|x|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread|warning|warn|alert|check)\s+)+/i;
 const FIRST_MODALITY_PATTERN =
   /\b(?:CTA|CT\s*ANGIO(?:GRAM|GRAPHY)?|MR\s*ANGIO(?:GRAM|GRAPHY)?|MRA|MRI|MR|X\s*-?\s*RAY|XR|RADIOGRAPH|US|U\/S|ULTRASOUND|SONOGRAM|PET|NM|NUCLEAR|MAMMO|MAMMOGRAM|MAMMOGRAPHY|DXA|DEXA|FLUORO|FLUOROSCOPY)\b|(?:CT(?=ANGIOGRAM|ANGIOGRAPHY|CARDIAC|CHEST|HEAD|ABDOMEN|RENAL|APPENDIX|LDCT))|(?:XR(?=CHEST|ABDOMEN|WRIST|HAND|HIP|SHOULDER|KNEE|ANKLE|FOOT|PELVIS))|(?:MRI(?=PROSTATE|ABDOMEN|BRAIN|SPINE|CHEST|PELVIS|MRCP))|(?:MRA(?=HEAD|NECK|CHEST|ABDOMEN|PELVIS))|(?:US(?=CAROTID|ARTERIAL|OB|ABDOMEN|PELVIS|RENAL))/i;
 const CONCATENATED_MODALITY_REWRITES: Array<[RegExp, string]> = [
@@ -291,6 +291,7 @@ async function candidatesForAlias(alias: ExamAlias, confidence?: number): Promis
 
 async function candidatesForDictionary(rawInput: string, maxResults: number): Promise<MatchCandidate[]> {
   const normalized = normalizeRadiologyDescription(rawInput);
+  const normalizedSpaceless = spacelessKey(rawInput);
   const entries = await db.examDictionary.toArray();
   const exactEntry = entries.find((entry) => {
     const knownNames = [
@@ -299,7 +300,10 @@ async function candidatesForDictionary(rawInput: string, maxResults: number): Pr
       ...entry.hospitalAliases,
       ...entry.powerScribeNames,
     ];
-    return knownNames.some((name) => normalizeRadiologyDescription(name) === normalized);
+    return knownNames.some((name) =>
+      normalizeRadiologyDescription(name) === normalized ||
+      spacelessKey(name) === normalizedSpaceless,
+    );
   });
   if (!exactEntry) return [];
 
@@ -323,13 +327,18 @@ async function candidatesForOrbitCmeSeed(rawInput: string): Promise<MatchCandida
 async function candidatesForOcrLearning(rawInput: string, profileId?: string | null): Promise<MatchCandidate[]> {
   const normalized = normalizeRadiologyDescription(rawInput);
   if (!normalized) return [];
+  const normalizedSpaceless = spacelessKey(rawInput);
 
   const profile = profileId ? await db.radiologistProfiles.get(profileId) : null;
   const siteId = profile?.practiceId ?? null;
-  const entries = (await db.ocrLearningEntries
+  let rawEntries = await db.ocrLearningEntries
     .where('normalizedOcrText')
     .equals(normalized)
-    .toArray())
+    .toArray();
+  if (rawEntries.length === 0) {
+    rawEntries = (await db.ocrLearningEntries.toArray()).filter((entry) => spacelessKey(entry.normalizedOcrText) === normalizedSpaceless);
+  }
+  const entries = rawEntries
     .filter((entry) =>
       (entry.profileId === (profileId ?? null) || entry.profileId == null) &&
       ((entry.siteId ?? null) === siteId || entry.siteId == null),
@@ -543,12 +552,13 @@ export function __testAutoMatchRowsFor(rawInput: string, rows: CptRvuRow[]): Cpt
 }
 
 function aliasNormalizedKeys(alias: ExamAlias): string[] {
-  return [
+  const keys = [
     alias.aliasText,
     normalizeExamText(alias.aliasTextRaw),
     normalizeRadiologyDescription(alias.aliasTextRaw),
     normalizeRadiologyDescription(alias.aliasText),
   ].filter(Boolean);
+  return Array.from(new Set([...keys, ...keys.map((key) => spacelessKey(key))].filter(Boolean)));
 }
 
 function dedupeCandidates(candidates: MatchCandidate[]): MatchCandidate[] {
@@ -587,7 +597,14 @@ export async function findMatchCandidates(
   const radiologyDescriptionKey = normalizeRadiologyDescription(matchInput);
   const radiologyNorm = normalizeForRadiology(matchInput);
   const radiologyNormalizedKey = normalizeExamText(radiologyNorm.normalizedTitle);
-  const exactKeys = new Set([normalizedInput, radiologyNormalizedKey, radiologyDescriptionKey].filter(Boolean));
+  const exactKeys = new Set([
+    normalizedInput,
+    radiologyNormalizedKey,
+    radiologyDescriptionKey,
+    spacelessKey(normalizedInput),
+    spacelessKey(radiologyNormalizedKey),
+    spacelessKey(radiologyDescriptionKey),
+  ].filter(Boolean));
   const modalityLane = parsed.lane;
 
   const allAliases = await db.examAliases.toArray();
