@@ -13,7 +13,7 @@
  * detection. Those run in importPipeline.ts, identically for every source.
  */
 
-import { parseOcrLines } from '../utils/powerScribeParser';
+import { parseOcrLinesWithDebug, type OcrParseDebugInfo } from '../utils/powerScribeParser';
 import { getDefaultOcrProvider } from '../utils/ocrProvider';
 import { PSM } from 'tesseract.js';
 import { maybeEnhanceOcrWithLlm } from '../services/llmOcrExtractionService';
@@ -46,8 +46,16 @@ export interface OCRImportDebugRow extends ParsedLine {
 
 export interface OCRImportDebugInfo {
   crop: DetectedCrop | null;
+  ocrProvider: string;
   ocrText: string;
   ocrLines: string[];
+  rawLineCount: number;
+  cleanedLineCount: number;
+  parsedRowCount: number;
+  rejectedRowCount: number;
+  rejectedRows: OcrParseDebugInfo['rejectedRows'];
+  duplicateSkippedCount?: number;
+  finalReviewRowCount?: number;
   columnText?: Record<PowerScribeColumnName, string>;
   detectedRows: OCRImportDebugRow[];
   ocrConfidence: number;
@@ -143,6 +151,15 @@ function reassembleColumnRows(results: ColumnOcrResults): string[] {
     .filter((line) => line.length > 0);
 }
 
+function reassembleColumnRowsByIndex(results: ColumnOcrResults): string[] {
+  const maxLength = Math.max(results.procedure.lines.length, results.examDate.lines.length, results.modifiedDate.lines.length);
+  return Array.from({ length: maxLength }, (_, index) => [
+    results.procedure.lines[index] ?? 'UNCLEAR POWERSCRIBE ROW',
+    results.examDate.lines[index] ?? '',
+    results.modifiedDate.lines[index] ?? '',
+  ].join(' ').replace(/\s{2,}/g, ' ').trim()).filter(Boolean);
+}
+
 export class OCRImportProvider implements ImportProvider {
   readonly name = 'OCR Screenshot';
   readonly sourceId = 'ocr' as const;
@@ -179,8 +196,17 @@ export class OCRImportProvider implements ImportProvider {
         columnResults[column.name] = await provider.extractText(column.blob, COLUMN_OCR_PARAMS[column.name]);
       }
     }
-    const rowLines = columnResults ? reassembleColumnRows(columnResults) : result?.lines ?? [];
-    const regexParsed = parseOcrLines(rowLines);
+    let rowLines = columnResults ? reassembleColumnRows(columnResults) : result?.lines ?? [];
+    let parsedWithDebug = parseOcrLinesWithDebug(rowLines);
+    if (columnResults && parsedWithDebug.rows.length === 0) {
+      const fallbackLines = reassembleColumnRowsByIndex(columnResults);
+      const fallbackParsed = parseOcrLinesWithDebug(fallbackLines);
+      if (fallbackParsed.rows.length > 0 || fallbackLines.length > rowLines.length) {
+        rowLines = fallbackLines;
+        parsedWithDebug = fallbackParsed;
+      }
+    }
+    const regexParsed = parsedWithDebug.rows;
     const now = new Date().toISOString();
     const ocrConfidence = columnResults
       ? (columnResults.procedure.confidence + columnResults.examDate.confidence + columnResults.modifiedDate.confidence) / 3
@@ -201,8 +227,14 @@ export class OCRImportProvider implements ImportProvider {
 
     this.debugInfo = {
       crop: preprocessed?.tableCrop ?? null,
+      ocrProvider: provider.constructor.name,
       ocrText,
       ocrLines,
+      rawLineCount: parsedWithDebug.debug.rawLineCount,
+      cleanedLineCount: parsedWithDebug.debug.cleanedLineCount,
+      parsedRowCount: parsedWithDebug.debug.parsedRowCount,
+      rejectedRowCount: parsedWithDebug.debug.rejectedRowCount,
+      rejectedRows: parsedWithDebug.debug.rejectedRows,
       columnText: columnResults
         ? {
             procedure: columnResults.procedure.rawText,

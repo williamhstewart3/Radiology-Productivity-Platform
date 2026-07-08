@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseOcrLines } from '../src/web/utils/powerScribeParser';
+import { parseOcrLines, parseOcrLinesWithDebug } from '../src/web/utils/powerScribeParser';
 
 describe('PowerScribe OCR parser date-time preservation', () => {
   test('preserves full exam and modified date-times when OCR includes times', () => {
@@ -50,6 +50,26 @@ describe('PowerScribe OCR parser date-time preservation', () => {
 
     expect(row.procedureName).toBe('XR WRIST RIGHT PA LATERAL AND OBLIQUE');
     expect(row.needsReview).toBe(false);
+  });
+
+  test('keeps noisy rows with a recognizable radiology exam for review', () => {
+    const [row] = parseOcrLines([
+      'AF 11 ARAL FUR IADLD AT a a aaa 1 AM / 12 XRWRIST RIGHT PA LATERAL AND OBLIQUE T2026 212026',
+    ]);
+
+    expect(row.procedureName).toBe('XR WRIST RIGHT PA LATERAL AND OBLIQUE');
+    expect(row.needsReview).toBe(true);
+    expect(row.reviewReason).toContain('date');
+  });
+
+  test('discards metadata-only rows without an exam signal', () => {
+    const result = parseOcrLinesWithDebug([
+      'Reset Filters Browse Search Status Dashboard Signed Study',
+    ]);
+
+    expect(result.rows).toHaveLength(0);
+    expect(result.debug.rejectedRowCount).toBe(1);
+    expect(result.debug.rejectedRows[0].reason).toBe('Metadata or UI-only row');
   });
 
   test('splits multi-modality OCR rows instead of treating them as one clean match', () => {

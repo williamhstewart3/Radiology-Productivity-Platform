@@ -15,6 +15,7 @@ import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNorm
 import { useProfile } from '../hooks/useProfile';
 import { getDesktopAPI } from '../lib/desktop';
 import { todayDateString } from '../utils/calculations';
+import { getImportReviewState } from '../utils/importReviewState';
 import { db, ensureUserSettings } from '../db/database';
 import {
   createTimelineEvent,
@@ -132,13 +133,30 @@ function ExamSearchPanel({ initialQuery, onSelect, onClose }: ExamSearchPanelPro
 
 function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) {
   if (!debug) return null;
+  const debugStats = [
+    ['Provider', debug.ocrProvider],
+    ['Raw lines', debug.rawLineCount ?? debug.ocrLines.length],
+    ['Cleaned lines', debug.cleanedLineCount ?? debug.ocrLines.length],
+    ['Parsed rows', debug.parsedRowCount ?? debug.detectedRows.length],
+    ['Rejected rows', debug.rejectedRowCount ?? 0],
+    ['Duplicates skipped', debug.duplicateSkippedCount ?? 0],
+    ['Review rows', debug.finalReviewRowCount ?? debug.detectedRows.length],
+  ];
 
   return (
     <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs">
       <summary className="cursor-pointer font-semibold text-slate-300">
-        OCR debug: {debug.detectedRows.length} rows, {Math.round(debug.ocrConfidence * 100)}% text confidence
+        OCR debug: {debug.parsedRowCount ?? debug.detectedRows.length} parsed / {debug.rawLineCount ?? debug.ocrLines.length} raw lines, {Math.round(debug.ocrConfidence * 100)}% text confidence
       </summary>
       <div className="mt-3 grid gap-3">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {debugStats.map(([label, value]) => (
+            <div key={label} className="rounded-lg border border-white/8 bg-black/20 p-2">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
+              <p className="mt-1 font-mono text-[11px] text-slate-300">{value}</p>
+            </div>
+          ))}
+        </div>
         {debug.crop && (
           <div className="rounded-lg border border-white/8 bg-black/20 p-2">
             <p className="font-medium text-slate-300">
@@ -169,6 +187,18 @@ function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) 
             )}
           </div>
         </div>
+        {debug.rejectedRows && debug.rejectedRows.length > 0 && (
+          <div className="rounded-lg border border-white/8 bg-black/20 p-2">
+            <p className="font-medium text-slate-300">Rejected rows</p>
+            <div className="mt-2 max-h-32 overflow-y-auto space-y-1">
+              {debug.rejectedRows.map((row, index) => (
+                <p key={`${row.reason}-${row.rawText}-${index}`} className="font-mono text-[11px] text-slate-400">
+                  {index + 1}. {row.reason}: {row.rawText}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="rounded-lg border border-white/8 bg-black/20 p-2">
           <p className="font-medium text-slate-300">OCR text</p>
           <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">
@@ -480,6 +510,7 @@ export function Import({ onImported }: ImportProps) {
   const [reviewMode, setReviewMode] = useState<ReviewMode>('unknowns');
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
+  const [lastExtractedCount, setLastExtractedCount] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [toasts, setToasts] = useState<ImportToast[]>([]);
@@ -594,7 +625,8 @@ export function Import({ onImported }: ImportProps) {
     }, tone === 'danger' ? 7000 : 4800);
   }
 
-  function appendPipelineRows(nextRows: PipelineReviewRow[], nextSkippedRows: PipelineReviewRow[], label: string) {
+  function appendPipelineRows(nextRows: PipelineReviewRow[], nextSkippedRows: PipelineReviewRow[], label: string, extractedCount?: number) {
+    if (extractedCount != null) setLastExtractedCount(extractedCount);
     const merged = mergeReviewSessionRows(reviewRows, skippedRows, nextRows, nextSkippedRows);
     setReviewRows(merged.reviewRows);
     setSkippedRows(merged.skippedRows);
@@ -605,7 +637,9 @@ export function Import({ onImported }: ImportProps) {
     const reviewCount = nextRows.filter((row) => row.needsReview).length;
     pushToast(
       reviewCount > 0 ? 'warning' : 'success',
-      `Ready to review ${readyCount} exam${readyCount === 1 ? '' : 's'}`,
+      readyCount === 0 && nextSkippedRows.length === 0
+        ? 'No studies found'
+        : `Ready to review ${readyCount} exam${readyCount === 1 ? '' : 's'}`,
       `+${estimatedRvu.toFixed(1)} wRVUs pending - ${nextSkippedRows.length} duplicate${nextSkippedRows.length === 1 ? '' : 's'} skipped - ${reviewCount} require review`,
     );
   }
@@ -633,7 +667,7 @@ export function Import({ onImported }: ImportProps) {
       }, { filename: file.name, size: file.size });
       pushToast('info', 'Matching CPT codes...', 'Running aliases, active CPT filters, and review checks.');
       setOcrDebug(processed.ocrDebug ?? null);
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
       setClipboardFile(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'OCR failed - try paste mode instead');
@@ -660,7 +694,7 @@ export function Import({ onImported }: ImportProps) {
       });
       setOcrFile(file);
       setOcrDebug(null);
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
       setClipboardFile(null);
       return true;
     } catch (error) {
@@ -691,7 +725,7 @@ export function Import({ onImported }: ImportProps) {
         sessionId,
         logDate,
       });
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel);
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel, processed.extractedCount);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Processing failed');
       pushToast('danger', 'Processing failed', e instanceof Error ? e.message : 'Could not parse the pasted study list.');
@@ -713,7 +747,7 @@ export function Import({ onImported }: ImportProps) {
         sessionId,
         logDate,
       }, { filename: ocrFile.name, size: ocrFile.size });
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel);
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel, processed.extractedCount);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'OCR failed — try paste mode instead');
     } finally {
@@ -953,6 +987,7 @@ export function Import({ onImported }: ImportProps) {
                 setOcrFile(null);
                 setReviewRows([]);
                 setSkippedRows([]);
+                setLastExtractedCount(0);
                 setShowSkipped(false);
                 sessionStorage.removeItem(WATCHER_REVIEW_KEY);
               }}
@@ -976,6 +1011,15 @@ export function Import({ onImported }: ImportProps) {
 
   // ── Review screen ─────────────────────────────────────────────────────────
   if (step === 'review') {
+    const reviewState = getImportReviewState({
+      extractedCount: lastExtractedCount,
+      reviewRowCount: reviewRows.length,
+      skippedRowCount: skippedRows.length,
+      matchedCount,
+      selectedCodeCount,
+      importing,
+    });
+
     return (
       <>
       <div className="space-y-5 animate-in fade-in duration-300">
@@ -1503,6 +1547,15 @@ export function Import({ onImported }: ImportProps) {
             );
           })}
 
+          {reviewState.isEmptyExtraction && (
+            <div className="text-center py-10">
+              <p className="text-white font-medium">No studies found</p>
+              <p className="text-slate-400 text-sm mt-1">
+                Adjust crop, paste a clearer PowerScribe window grab, or try again.
+              </p>
+            </div>
+          )}
+
           {reviewRows.length === 0 && skippedRows.length > 0 && (
             <div className="text-center py-10">
               <p className="text-2xl mb-3">✓</p>
@@ -1525,19 +1578,11 @@ export function Import({ onImported }: ImportProps) {
           </button>
           <button
             onClick={handleCommit}
-            disabled={
-              importing ||
-              (selectedCodeCount === 0 && reviewRows.length > 0) ||
-              (reviewRows.length === 0 && skippedRows.length > 0 && matchedCount === 0)
-            }
+            disabled={reviewState.commitDisabled}
             className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
             style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
           >
-            {importing
-              ? 'Saving…'
-              : reviewRows.length === 0
-              ? 'All Duplicates — Nothing to Import'
-              : `Finalize Day: ${matchedCount} ${matchedCount === 1 ? 'Study' : 'Studies'} (${selectedCodeCount} CPT${selectedCodeCount === 1 ? '' : 's'})`}
+            {reviewState.commitLabel}
           </button>
         </div>
       </div>

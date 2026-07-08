@@ -46,6 +46,8 @@ function attachOcrMatchDebug(debugInfo: OCRImportDebugInfo | null, result: Pipel
 
   return {
     ...debugInfo,
+    duplicateSkippedCount: result.skippedRows.length,
+    finalReviewRowCount: result.reviewRows.length,
     detectedRows: debugInfo.detectedRows.map((row) => {
       const matched = rowsByRawLine.get(row.rawText);
       if (!matched) return row;

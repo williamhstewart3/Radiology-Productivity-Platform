@@ -29,6 +29,19 @@ export interface ParsedLine {
   reviewReason: string | null;
 }
 
+export interface RejectedOcrRow {
+  rawText: string;
+  reason: string;
+}
+
+export interface OcrParseDebugInfo {
+  rawLineCount: number;
+  cleanedLineCount: number;
+  parsedRowCount: number;
+  rejectedRowCount: number;
+  rejectedRows: RejectedOcrRow[];
+}
+
 const ACCESSION_PATTERN = /\b(?:ACC|ACCESSION)[#:\s]*([A-Z0-9-]{5,})\b/i;
 const STANDALONE_LONG_NUMBER = /\b(\d{7,12})\b/;
 const LEADING_ROW_INDEX_PATTERN = /^\s*(?:#\s*)?(\d{1,4})(?:\s*[|:.)-]\s*|\s+)(.+)$/i;
@@ -77,6 +90,7 @@ const TIME_STRIP_PATTERNS = [
   /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?\b/gi,
   /\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b/g,
 ];
+const COMPACT_OCR_DATE_JUNK_PATTERN = /\b(?:[TF]\d{4,8}|\d{1,2}\d{4})\b/gi;
 
 const OCR_DATE_CHAR_MAP: Record<string, string> = {
   O: '0',
@@ -193,6 +207,7 @@ function stripDatesAndIdentifiers(text: string, dateRanges: Array<{ index: numbe
   let working = replaceRanges(text, dateRanges);
   for (const pattern of DATE_STRIP_PATTERNS) working = working.replace(pattern, ' ');
   for (const pattern of TIME_STRIP_PATTERNS) working = working.replace(pattern, ' ');
+  working = working.replace(COMPACT_OCR_DATE_JUNK_PATTERN, ' ');
 
   let accessionNumber: string | null = null;
   const accMatch = working.match(ACCESSION_PATTERN);
@@ -223,7 +238,11 @@ function reconstructTableRows(lines: string[]): string[] {
   for (const rawLine of lines) {
     const segments = splitJoinedOcrRows(stripUiText(rawLine.trim()));
     for (const line of segments) {
-      if (line.length < 2 || isMetadataOnlyLine(line)) continue;
+      if (line.length < 2) continue;
+      if (isMetadataOnlyLine(line)) {
+        rows.push(line);
+        continue;
+      }
 
       if (rows.length === 0 || shouldStartNewRow(line)) {
         rows.push(line);
@@ -251,14 +270,40 @@ function splitJoinedOcrRows(line: string): string[] {
 }
 
 export function parseOcrLines(lines: string[]): ParsedLine[] {
-  return reconstructTableRows(lines)
-    .map((line) => parseSingleRow(line))
-    .filter((p): p is ParsedLine => p !== null);
+  return parseOcrLinesWithDebug(lines).rows;
+}
+
+export function parseOcrLinesWithDebug(lines: string[]): { rows: ParsedLine[]; debug: OcrParseDebugInfo } {
+  const reconstructedRows = reconstructTableRows(lines);
+  const rows: ParsedLine[] = [];
+  const rejectedRows: RejectedOcrRow[] = [];
+
+  for (const line of reconstructedRows) {
+    const parsed = parseSingleRowWithReason(line);
+    if (parsed.row) rows.push(parsed.row);
+    else rejectedRows.push({ rawText: line, reason: parsed.reason });
+  }
+
+  return {
+    rows,
+    debug: {
+      rawLineCount: lines.length,
+      cleanedLineCount: reconstructedRows.length,
+      parsedRowCount: rows.length,
+      rejectedRowCount: rejectedRows.length,
+      rejectedRows,
+    },
+  };
 }
 
 function parseSingleRow(rawRow: string): ParsedLine | null {
+  return parseSingleRowWithReason(rawRow).row;
+}
+
+function parseSingleRowWithReason(rawRow: string): { row: ParsedLine | null; reason: string } {
   const trimmed = rawRow.trim();
-  if (trimmed.length < 3 || isMetadataOnlyLine(trimmed)) return null;
+  if (trimmed.length < 3) return { row: null, reason: 'Too short after OCR cleanup' };
+  if (isMetadataOnlyLine(trimmed)) return { row: null, reason: 'Metadata or UI-only row' };
 
   const { rowIndex, text: rowWithoutLeftJunk } = stripLeftTableJunk(trimmed);
   const dateText = normalizeOcrDateChars(rowWithoutLeftJunk);
@@ -276,8 +321,8 @@ function parseSingleRow(rawRow: string): ParsedLine | null {
     : dateMatches.length > 0
       ? 'UNCLEAR POWERSCRIBE ROW'
       : '';
-  if (cleanedExamName.length < 2) return null;
-  if (!hasExamContext(cleanedExamName) && dateMatches.length === 0) return null;
+  if (cleanedExamName.length < 2) return { row: null, reason: 'No usable procedure text' };
+  if (!hasExamContext(cleanedExamName) && dateMatches.length === 0) return { row: null, reason: 'No radiology exam signal' };
 
   const studyDateTime = firstDate?.studyDateTime ?? null;
   const studyDate = firstDate?.studyDate ?? null;
@@ -305,24 +350,27 @@ function parseSingleRow(rawRow: string): ParsedLine | null {
     null;
 
   return {
-    rawText: trimmed,
-    procedureName: cleanedExamName,
-    examName: cleanedExamName,
-    cleanedExamName,
-    cleanedText: cleanedExamName,
-    examDate,
-    examTime,
-    examDateTime: studyDateTime,
-    studyDateTime,
-    studyDate,
-    modifiedDateTime,
-    modifiedDate,
-    modifiedTime,
-    accessionNumber: stripped.accessionNumber,
-    rowIndex,
-    dateTimeConfidence,
-    extractionConfidence,
-    needsReview,
-    reviewReason,
+    row: {
+      rawText: trimmed,
+      procedureName: cleanedExamName,
+      examName: cleanedExamName,
+      cleanedExamName,
+      cleanedText: cleanedExamName,
+      examDate,
+      examTime,
+      examDateTime: studyDateTime,
+      studyDateTime,
+      studyDate,
+      modifiedDateTime,
+      modifiedDate,
+      modifiedTime,
+      accessionNumber: stripped.accessionNumber,
+      rowIndex,
+      dateTimeConfidence,
+      extractionConfidence,
+      needsReview,
+      reviewReason,
+    },
+    reason: '',
   };
 }
