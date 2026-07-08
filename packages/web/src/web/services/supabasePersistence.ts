@@ -130,6 +130,7 @@ function toRemoteStudyLog(log: StudyLog, uploadDayId: string | null): Record<str
     profile_id: log.profileId,
     log_date: log.logDate,
     study_date: log.studyDate,
+    exam_datetime: log.examDateTime ?? null,
     study_datetime: log.studyDateTime,
     exam_name_raw: log.examNameRaw,
     exam_title_normalized: log.examTitleNormalized,

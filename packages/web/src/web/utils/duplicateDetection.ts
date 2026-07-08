@@ -47,9 +47,12 @@ export interface StudyCandidate {
   /** Raw exam name (from OCR, paste, CSV, or manual entry) */
   examNameRaw: string;
   cptCode: string | null;
+  cptCodes?: string[] | null;
   modifier: string | null;
   logDate: string;              // YYYY-MM-DD
-  studyDateTime: string | null; // ISO 8601 or null
+  studyDateTime: string | null; // Modified/read ISO 8601 or null
+  performedDateTime?: string | null;
+  modifiedDateTime?: string | null;
   studyDate: string | null;
   accessionNumber: string | null;
   rowIndex: string | null;
@@ -78,6 +81,11 @@ export function buildFingerprint(
   studyDateTime: string | null,
   accessionNumber: string | null,
   modality: string | null,
+  identity?: {
+    cptCodes?: string[] | null;
+    performedDateTime?: string | null;
+    modifiedDateTime?: string | null;
+  },
 ): string {
   // Tier 1: accession number — strongest possible identity
   if (accessionNumber?.trim()) {
@@ -85,19 +93,19 @@ export function buildFingerprint(
   }
 
   const normExam = normalizeExamText(examNameRaw);
-  const cpt = cptCode?.trim() ?? 'nocpt';
+  const cptSet = normalizeCptSet(identity?.cptCodes?.length ? identity.cptCodes : cptCode ? [cptCode] : []);
+  const performedBucket = isoToExactMinuteBucket(identity?.performedDateTime ?? null);
+  const modifiedBucket = isoToExactMinuteBucket(identity?.modifiedDateTime ?? studyDateTime ?? null);
   const date = logDate;
 
-  // Tier 2: exam + CPT + date + minute bucket (0-minute precision)
-  if (studyDateTime) {
-    const minuteBucket = isoToMinuteBucket(studyDateTime);
-    if (minuteBucket !== null) {
-      return `fp:${normExam}|${cpt}|${date}|${minuteBucket}`;
-    }
+  // Tier 2: strict OCR/import identity. Missing either timestamp is not strong enough to auto-skip.
+  if (cptSet && performedBucket && modifiedBucket) {
+    return `strict:${cptSet}|exam:${performedBucket}|read:${modifiedBucket}`;
   }
 
   // Weak fallback only for review context. Missing/uncertain time is not strong enough to
   // auto-skip another same-title same-CPT study from a busy worklist day.
+  const cpt = cptCode?.trim() ?? 'nocpt';
   if (normExam && cpt !== 'nocpt') {
     return `weak:${normExam}|${cpt}|${date}`;
   }
@@ -106,7 +114,7 @@ export function buildFingerprint(
 }
 
 export function isStrongDuplicateFingerprint(fingerprint: string | null | undefined): boolean {
-  return Boolean(fingerprint?.startsWith('acc:') || (fingerprint?.startsWith('fp:') && fingerprint.split('|').length >= 4));
+  return Boolean(fingerprint?.startsWith('acc:') || fingerprint?.startsWith('strict:'));
 }
 
 function batchDuplicateKey(candidate: StudyCandidate): string | null {
@@ -117,6 +125,11 @@ function batchDuplicateKey(candidate: StudyCandidate): string | null {
     candidate.studyDateTime,
     candidate.accessionNumber,
     candidate.modality,
+    {
+      cptCodes: candidate.cptCodes,
+      performedDateTime: candidate.performedDateTime,
+      modifiedDateTime: candidate.modifiedDateTime ?? candidate.studyDateTime,
+    },
   );
   return isStrongDuplicateFingerprint(fingerprint) ? fingerprint : null;
 }
@@ -154,6 +167,34 @@ function isoToDate(iso: string | null): string | null {
   return iso?.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
 }
 
+function isoToExactMinuteBucket(iso: string | null): string | null {
+  if (!iso) return null;
+  const date = isoToDate(iso);
+  const minute = isoToMinuteBucket(iso);
+  return date && minute ? `${date}T${minute}` : null;
+}
+
+function normalizeCptSet(cptCodes: Array<string | null | undefined>): string | null {
+  const normalized = [...new Set(cptCodes.map((code) => code?.trim()).filter((code): code is string => Boolean(code)))].sort();
+  return normalized.length > 0 ? normalized.join('+') : null;
+}
+
+function strictFingerprintForLog(log: StudyLog): string | null {
+  return buildFingerprint(
+    log.examNameRaw,
+    log.cptCode,
+    log.logDate,
+    log.studyDateTime,
+    log.accessionNumber,
+    log.modality,
+    {
+      cptCodes: log.cptCode ? [log.cptCode] : [],
+      performedDateTime: log.examDateTime ?? null,
+      modifiedDateTime: log.studyDateTime,
+    },
+  );
+}
+
 function sameMinute(a: string | null, b: string | null): boolean {
   if (!a || !b) return false;
   return isoToDate(a) === isoToDate(b) && isoToMinuteBucket(a) === isoToMinuteBucket(b);
@@ -186,6 +227,11 @@ export async function checkOneDuplicate(
     candidate.studyDateTime,
     candidate.accessionNumber,
     candidate.modality,
+    {
+      cptCodes: candidate.cptCodes,
+      performedDateTime: candidate.performedDateTime,
+      modifiedDateTime: candidate.modifiedDateTime ?? candidate.studyDateTime,
+    },
   );
 
   const candidateMinutes = isoToMinutes(candidate.studyDateTime);
@@ -209,13 +255,15 @@ export async function checkOneDuplicate(
     // ── Tier 1: exact — full fingerprint match ──────────────────────────
     if (
       isStrongDuplicateFingerprint(candidateFingerprint) &&
-      isStrongDuplicateFingerprint(log.studyFingerprint) &&
-      log.studyFingerprint === candidateFingerprint
+      (
+        (isStrongDuplicateFingerprint(log.studyFingerprint) && log.studyFingerprint === candidateFingerprint) ||
+        strictFingerprintForLog(log) === candidateFingerprint
+      )
     ) {
       return {
         confidence: 'exact',
         existingLog: log,
-        reason: 'Identical study fingerprint',
+        reason: 'Same CPT set, performed time, and read time',
       };
     }
 
@@ -223,9 +271,9 @@ export async function checkOneDuplicate(
     if (normCandidate && normLog === normCandidate) {
       if (sameMinute(candidate.studyDateTime, log.studyDateTime)) {
         return {
-          confidence: 'exact',
+          confidence: 'possible',
           existingLog: log,
-          reason: 'Same exam title and modified timestamp',
+          reason: 'Same exam title and read timestamp without full duplicate identity',
         };
       }
 
@@ -337,6 +385,11 @@ export async function checkBatchDuplicates(
       candidate.studyDateTime,
       candidate.accessionNumber,
       candidate.modality,
+      {
+        cptCodes: candidate.cptCodes,
+        performedDateTime: candidate.performedDateTime,
+        modifiedDateTime: candidate.modifiedDateTime ?? candidate.studyDateTime,
+      },
     );
     const batchKey = isStrongDuplicateFingerprint(fp) ? fp : null;
 
@@ -354,6 +407,7 @@ export async function checkBatchDuplicates(
             cptCode: batchPrior.cptCode,
             logDate: batchPrior.logDate,
             studyDateTime: batchPrior.studyDateTime,
+            examDateTime: batchPrior.performedDateTime ?? null,
             studyDate: batchPrior.studyDate ?? batchPrior.logDate,
             dateTimeConfidence: batchPrior.studyDateTime ? 1 : 0,
             dateTimeSource: batchPrior.studyDateTime ? 'ocr' : 'import_default',

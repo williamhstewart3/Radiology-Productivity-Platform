@@ -11,9 +11,12 @@ function candidate(patch: Partial<StudyCandidate> = {}): StudyCandidate {
   return {
     examNameRaw: 'XR CHEST PORTABLE',
     cptCode: '71045',
+    cptCodes: ['71045'],
     modifier: '26',
     logDate: '2026-07-07',
-    studyDateTime: '2026-07-07T08:19:00',
+    studyDateTime: '2026-07-07T09:00:00',
+    performedDateTime: '2026-07-07T08:19:00',
+    modifiedDateTime: '2026-07-07T09:00:00',
     studyDate: '2026-07-07',
     accessionNumber: null,
     rowIndex: null,
@@ -29,6 +32,7 @@ function log(patch: Partial<StudyLog> = {}): StudyLog {
     profileId: null,
     logDate: base.logDate,
     studyDateTime: base.studyDateTime,
+    examDateTime: base.performedDateTime ?? null,
     studyDate: base.studyDate,
     dateTimeConfidence: 1,
     dateTimeSource: 'ocr',
@@ -59,21 +63,30 @@ function log(patch: Partial<StudyLog> = {}): StudyLog {
 describe('strict duplicate detection', () => {
   test('same CPT/title and same date with different times is not a duplicate', async () => {
     const match = await checkOneDuplicate(
-      candidate({ studyDateTime: '2026-07-07T14:15:00' }),
-      [log({ studyDateTime: '2026-07-07T08:19:00' })],
+      candidate({ performedDateTime: '2026-07-07T14:15:00', modifiedDateTime: '2026-07-07T14:30:00', studyDateTime: '2026-07-07T14:30:00' }),
+      [log({ examDateTime: '2026-07-07T08:19:00', studyDateTime: '2026-07-07T09:00:00' })],
     );
 
     expect(match).toBeNull();
   });
 
+  test('same CPT/title and same date with different modified times is not exact', async () => {
+    const match = await checkOneDuplicate(
+      candidate({ performedDateTime: '2026-07-07T08:19:00', modifiedDateTime: '2026-07-07T14:30:00', studyDateTime: '2026-07-07T14:30:00' }),
+      [log({ examDateTime: '2026-07-07T08:19:00', studyDateTime: '2026-07-07T09:00:00' })],
+    );
+
+    expect(match?.confidence).not.toBe('exact');
+  });
+
   test('same CPT/title and same date with missing time is not exact', async () => {
     const match = await checkOneDuplicate(
-      candidate({ studyDateTime: null }),
-      [log({ studyDateTime: null, dateTimeConfidence: 0.85 })],
+      candidate({ studyDateTime: null, performedDateTime: null, modifiedDateTime: null }),
+      [log({ studyDateTime: null, examDateTime: null, dateTimeConfidence: 0.85 })],
     );
 
     expect(match?.confidence).toBe('possible');
-    expect(__testBatchDuplicateKey(candidate({ studyDateTime: null }))).toBeNull();
+    expect(__testBatchDuplicateKey(candidate({ studyDateTime: null, performedDateTime: null, modifiedDateTime: null }))).toBeNull();
   });
 
   test('same accession is exact duplicate', async () => {
@@ -85,12 +98,48 @@ describe('strict duplicate detection', () => {
     expect(match?.confidence).toBe('exact');
   });
 
-  test('same CPT/title/full datetime is exact and strong enough for batch duplicate detection', async () => {
+  test('same CPT/title/performed datetime/modified datetime is exact and strong enough for batch duplicate detection', async () => {
     const match = await checkOneDuplicate(candidate(), [log()]);
     const key = __testBatchDuplicateKey(candidate());
 
     expect(match?.confidence).toBe('exact');
     expect(key).not.toBeNull();
     expect(isStrongDuplicateFingerprint(key)).toBe(true);
+  });
+
+  test('same multi-CPT set/performed datetime/modified datetime is exact within batch', async () => {
+    const first = candidate({ cptCode: '71260', cptCodes: ['71260', '74177'] });
+    const second = candidate({ cptCode: '71260', cptCodes: ['74177', '71260'] });
+
+    expect(__testBatchDuplicateKey(first)).toBe(__testBatchDuplicateKey(second));
+    expect(__testBatchDuplicateKey(first)).not.toBeNull();
+  });
+
+  test('duplicate skipped count only includes true exact duplicates', async () => {
+    const exact = candidate({ cptCode: '71045', cptCodes: ['71045'] });
+    const differentTime = candidate({
+      cptCode: '71045',
+      cptCodes: ['71045'],
+      performedDateTime: '2026-07-07T14:15:00',
+      modifiedDateTime: '2026-07-07T14:30:00',
+      studyDateTime: '2026-07-07T14:30:00',
+    });
+    const missingTime = candidate({
+      cptCode: '71045',
+      cptCodes: ['71045'],
+      performedDateTime: null,
+      modifiedDateTime: null,
+      studyDateTime: null,
+    });
+    const keys = [exact, exact, differentTime, missingTime].map(__testBatchDuplicateKey);
+    const seen = new Set<string>();
+    const exactDuplicateKeys = keys.filter((key) => {
+      if (!key) return false;
+      if (seen.has(key)) return true;
+      seen.add(key);
+      return false;
+    });
+
+    expect(exactDuplicateKeys).toHaveLength(1);
   });
 });

@@ -274,6 +274,8 @@ export interface StudyLog {
   profileId: string | null;
   logDate: string; // YYYY-MM-DD productivity day, based on Modified/read date when known
   studyDateTime: string | null; // Modified/read ISO 8601 datetime if known, else null
+  /** Performed/exam ISO 8601 datetime if known, distinct from modified/read time. */
+  examDateTime?: string | null;
   /**
    * YYYY-MM-DD extracted from OCR or source data — distinct from logDate so
    * we can show it was OCR-confirmed vs just the import day.

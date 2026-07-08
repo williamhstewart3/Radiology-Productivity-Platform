@@ -61,6 +61,16 @@ function isDeterministicProtocolCandidate(candidate: MatchCandidate): boolean {
     candidate.explanation?.source === 'deterministic protocol mapping';
 }
 
+function selectedDuplicateCptCodes(candidates: MatchCandidate[], directCpt: string | null): string[] {
+  if (directCpt) return [directCpt];
+  const deterministic = candidates
+    .filter((candidate) => productivityRelevant(candidate) && isDeterministicProtocolCandidate(candidate))
+    .map((candidate) => candidate.cptCode);
+  if (deterministic.length > 0) return [...new Set(deterministic)].sort();
+  const top = candidates.find(productivityRelevant);
+  return top ? [top.cptCode] : [];
+}
+
 function reviewReasonFor(top: MatchCandidate | undefined, candidates: MatchCandidate[], duplicateStatus: DuplicateStatus): string | null {
   if (!top) return 'New or unknown exam';
   if (!productivityRelevant(top)) return 'Not modifier 26 productivity RVU';
@@ -109,9 +119,12 @@ export async function runImportPipeline(
   const dupeCandidates: StudyCandidate[] = matched.map(({ study, candidates }) => ({
     examNameRaw: procedureNameFor(study),
     cptCode: study.cpt ?? candidates[0]?.cptCode ?? null,
+    cptCodes: selectedDuplicateCptCodes(candidates, study.cpt),
     modifier: candidates[0]?.modifier ?? null,
     logDate: study.modifiedDate ?? study.modifiedDateTime?.slice(0, 10) ?? study.studyDate ?? logDate,
     studyDateTime: study.modifiedDateTime ?? study.studyTime,
+    performedDateTime: study.examDateTime ?? null,
+    modifiedDateTime: study.modifiedDateTime ?? study.studyTime,
     studyDate: study.studyDate ?? null,
     accessionNumber: study.accessionNumber,
     rowIndex: study.rowIndex ?? null,
@@ -226,6 +239,11 @@ export async function commitPipelineResults(
         modifiedDateTime,
         study.accessionNumber,
         cand.modality,
+        {
+          cptCodes: selectedCandidates.map((candidate) => candidate.cptCode),
+          performedDateTime: study.examDateTime ?? null,
+          modifiedDateTime,
+        },
       );
 
       const existing = isStrongDuplicateFingerprint(fingerprint)
@@ -246,6 +264,7 @@ export async function commitPipelineResults(
         profileId: profileId ?? null,
         logDate: logDateFinal,
         studyDateTime: modifiedDateTime,
+        examDateTime: study.examDateTime ?? null,
         studyDate,
         dateTimeConfidence: study.dateTimeConfidence ?? 0,
         dateTimeSource: study.dateTimeSource ?? 'import_default',
