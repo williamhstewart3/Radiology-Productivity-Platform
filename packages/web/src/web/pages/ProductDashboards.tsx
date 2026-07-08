@@ -214,8 +214,8 @@ export function ActivityTimelinePage() {
 
   return (
     <div className="premium-page">
-      <PageHeader eyebrow="Activity" title="Timeline" subtitle="A replayable view of imports, reviews, duplicates, and productivity gained today." />
-      <Panel title="Today's workstream" subtitle="Most recent events first">
+      <PageHeader eyebrow="Activity" title="Activity Timeline" subtitle="Import, review, duplicate, and productivity events." />
+      <Panel title="Today Activity" subtitle="Most recent events first">
         <div className="premium-timeline">
           {grouped.length === 0 ? (
             <div className="premium-empty">No activity yet today.</div>
@@ -264,7 +264,7 @@ export function AnalyticsPage() {
 
   return (
     <div className="premium-page">
-      <PageHeader eyebrow="Analytics" title="Why today feels different" subtitle="Deeper answers when the HUD raises a question." />
+      <PageHeader eyebrow="Analytics" title="Analytics" subtitle="Productivity trends, workload breakdown, study mix, and tracking confidence." />
       <div className="premium-metric-grid">
         <MetricCard icon={Gauge} label="RVUs / active hour" value={fmt(rvuPerHour)} detail={`${hoursWithWork} productive hours sampled`} />
         <MetricCard icon={Activity} label="Exams / active hour" value={fmt(examsPerHour)} detail={`${totals.studyCount} completed exams`} />
@@ -341,7 +341,7 @@ export function AnalyticsPage() {
           </div>
         </Panel>
       </div>
-      <Panel title="Tracking confidence" subtitle="Quiet automation should stay trustworthy">
+      <Panel title="Tracking Confidence" subtitle="OCR and CPT matching reliability">
         <div className="premium-metric-grid">
           <MetricCard icon={ShieldCheck} label="Average match confidence" value={`${fmt(avgConfidence, 0)}%`} detail="Today's imported studies" />
           <MetricCard icon={CheckCircle2} label="Auto-approved" value={String(autoApproved)} detail="High-confidence learned matches" tone="success" />
@@ -361,7 +361,7 @@ export function StudyMixPage() {
 
   return (
     <div className="premium-page">
-      <PageHeader eyebrow="Study Mix" title="What generated productivity" subtitle="Count and wRVU contribution by modality." />
+      <PageHeader eyebrow="Study Mix" title="Study Mix" subtitle="Count and wRVU contribution by modality." />
       <div className="grid gap-4 xl:grid-cols-[0.95fr_1.25fr]">
         <Panel title="wRVU contribution" subtitle="Share of completed productivity">
           <div className="h-80">
@@ -415,7 +415,7 @@ export function AccuracyPage() {
 
   return (
     <div className="premium-page">
-      <PageHeader eyebrow="Accuracy" title="Trust center" subtitle="OCR and matching quality signals in one calm view." />
+      <PageHeader eyebrow="Accuracy" title="Tracking Accuracy" subtitle="OCR and CPT matching quality metrics." />
       <div className="premium-metric-grid">
         <MetricCard icon={ShieldCheck} label="Average match confidence" value={`${fmt(avgConfidence, 0)}%`} detail="Today's imported studies" />
         <MetricCard icon={CheckCircle2} label="Auto-approved" value={String(autoApproved)} detail="High-confidence learned matches" tone="success" />

@@ -354,7 +354,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             Dashboard
           </h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--theme-text-muted)' }}>
-            How you are doing today - {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            Today - {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -569,7 +569,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-white">Recent activity</p>
-            <p className="text-xs text-slate-500">A quiet replay of what the companion has tracked today.</p>
+            <p className="text-xs text-slate-500">Recent tracked studies and review activity.</p>
           </div>
           <button
             onClick={() => onNavigate('history')}

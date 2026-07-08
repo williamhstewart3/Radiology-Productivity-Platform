@@ -422,7 +422,7 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
         <div className="flex items-center gap-2">
           <button
             onClick={openMiniWindow}
-            title="Open compact companion display on second monitor"
+            title="Open compact productivity HUD on second monitor"
             className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5"
             style={{
               background: 'var(--theme-bg-card)',
@@ -501,7 +501,7 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
           )}
           {metrics.status === 'goal_achieved' && (
             <p style={{ fontSize: '0.875rem', fontWeight: 600, color: theme.colors.goalGold + 'dd' }}>
-              Daily goal complete 🎉
+              Daily goal complete
             </p>
           )}
           {metrics.status === 'before_work' && (
