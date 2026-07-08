@@ -96,7 +96,7 @@ export function buildFingerprint(
     }
   }
 
-  // Weak fallback only. Missing/uncertain time is not strong enough to
+  // Weak fallback only for review context. Missing/uncertain time is not strong enough to
   // auto-skip another same-title same-CPT study from a busy worklist day.
   if (normExam && cpt !== 'nocpt') {
     return `weak:${normExam}|${cpt}|${date}`;
