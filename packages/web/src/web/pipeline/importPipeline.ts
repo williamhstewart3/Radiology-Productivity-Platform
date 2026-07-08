@@ -61,8 +61,18 @@ function isDeterministicProtocolCandidate(candidate: MatchCandidate): boolean {
     candidate.explanation?.source === 'deterministic protocol mapping';
 }
 
+function isInstitutionMappingCandidate(candidate: MatchCandidate): boolean {
+  return candidate.method === 'radiology_match' &&
+    candidate.confidence >= 0.95 &&
+    candidate.explanation?.source === 'Institution mapping';
+}
+
 function selectedDuplicateCptCodes(candidates: MatchCandidate[], directCpt: string | null): string[] {
   if (directCpt) return [directCpt];
+  const institution = candidates
+    .filter((candidate) => productivityRelevant(candidate) && isInstitutionMappingCandidate(candidate))
+    .map((candidate) => candidate.cptCode);
+  if (institution.length > 0) return [...new Set(institution)].sort();
   const deterministic = candidates
     .filter((candidate) => productivityRelevant(candidate) && isDeterministicProtocolCandidate(candidate))
     .map((candidate) => candidate.cptCode);
@@ -166,11 +176,19 @@ export async function runImportPipeline(
           .map((candidate, index) => (isDeterministicProtocolCandidate(candidate) && productivityRelevant(candidate) ? index : -1))
           .filter((index) => index >= 0)
       : [];
+    const institutionSelectedIndices = top && isInstitutionMappingCandidate(top)
+      ? candidates
+          .map((candidate, index) => (isInstitutionMappingCandidate(candidate) && productivityRelevant(candidate) ? index : -1))
+          .filter((index) => index >= 0)
+      : [];
     const selectedIndex =
+      institutionSelectedIndices[0] ??
       deterministicSelectedIndices[0] ??
       (top && top.confidence >= 0.75 && productivityRelevant(top) ? 0 : null);
     const selectedCandidateIndices =
-      deterministicSelectedIndices.length > 0
+      institutionSelectedIndices.length > 0
+        ? institutionSelectedIndices
+        : deterministicSelectedIndices.length > 0
         ? deterministicSelectedIndices
         : selectedIndex === null ? [] : [selectedIndex];
 

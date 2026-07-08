@@ -174,6 +174,10 @@ export interface ExamDictionaryEntry {
   bodyRegion: string | null;
   typicalCombinations: string[];
   timesUsed: number;
+  source?: 'curated' | 'institution' | 'user';
+  institutionSheet?: string | null;
+  institutionProcedureName?: string | null;
+  sourceFileName?: string | null;
   createdAt: string;
   updatedAt: string;
 }

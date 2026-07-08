@@ -385,6 +385,28 @@ export class RvuDatabase extends Dexie {
         if (!('examDateTime' in log)) log.examDateTime = null;
       });
     });
+
+    // v19: optional institution procedure mapping metadata on examDictionary.
+    this.version(19).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, siteId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      ocrLearningEntries: 'id, profileId, siteId, normalizedOcrText, matchedCpt, lastUsedAt',
+      activeReviewSessions: 'id, profileId, readingDate, status, updatedAt',
+      auditLogEntries: 'id, profileId, siteId, sessionId, logDate, action, createdAt',
+      hospitalComparisonReports: 'id, profileId, siteId, reportDate, createdAt',
+      memorySuggestions: 'id, profileId, siteId, normalizedKey, status, createdAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      return trans.table('examDictionary').toCollection().modify((entry) => {
+        if (!('source' in entry)) entry.source = 'curated';
+      });
+    });
   }
 }
 

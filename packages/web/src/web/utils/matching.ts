@@ -1,5 +1,5 @@
 import { db } from '../db/database';
-import type { CptRvuRow, ExamAlias, MatchCandidate, Modality, OcrLearningEntry } from '../types';
+import type { CptRvuRow, ExamAlias, ExamDictionaryEntry, MatchCandidate, Modality, OcrLearningEntry } from '../types';
 import { combinedSimilarity, normalizeExamText, spacelessKey } from './textMatching';
 import { normalizeForRadiology } from './examNormalizer';
 import { scoreRadiologyMatch, CONFIDENCE_THRESHOLD } from './examLibrary';
@@ -217,7 +217,7 @@ function candidateMatchesModalityLane(candidate: MatchCandidate, lane: ModalityL
 function candidateRespectsOrBypassesModalityLane(candidate: MatchCandidate, lane: ModalityLane | null): boolean {
   if (!lane) return true;
   const source = candidate.explanation?.source;
-  if (candidate.method === 'alias_match' || source === 'exam dictionary' || source === 'OCR learning table') return true;
+  if (candidate.method === 'alias_match' || source === 'exam dictionary' || source === 'Institution mapping' || source === 'OCR learning table') return true;
   return candidateMatchesModalityLane(candidate, lane);
 }
 
@@ -292,7 +292,7 @@ async function candidatesForAlias(alias: ExamAlias, confidence?: number): Promis
 async function candidatesForDictionary(rawInput: string, maxResults: number): Promise<MatchCandidate[]> {
   const normalized = normalizeRadiologyDescription(rawInput);
   const normalizedSpaceless = spacelessKey(rawInput);
-  const entries = await db.examDictionary.toArray();
+  const entries = (await db.examDictionary.toArray()).filter((entry) => entry.source !== 'institution');
   const exactEntry = entries.find((entry) => {
     const knownNames = [
       entry.canonicalDisplayName,
@@ -369,6 +369,63 @@ async function candidatesForCommonRadiologyMapping(rawInput: string): Promise<Ma
     for (const row of rows) {
       candidates.push(rowToCandidate(rawInput, row, 0.99, 'radiology_match', 'common radiology mapping'));
     }
+  }
+  return candidates;
+}
+
+function dictionaryKnownNames(entry: Pick<ExamDictionaryEntry, 'canonicalDisplayName' | 'commonSynonyms' | 'hospitalAliases' | 'powerScribeNames'>): string[] {
+  return [
+    entry.canonicalDisplayName,
+    ...entry.commonSynonyms,
+    ...entry.hospitalAliases,
+    ...entry.powerScribeNames,
+  ].filter(Boolean);
+}
+
+async function candidatesForInstitutionMappings(rawInput: string, maxResults: number): Promise<MatchCandidate[]> {
+  const normalized = normalizeRadiologyDescription(rawInput);
+  if (!normalized) return [];
+  const normalizedSpaceless = spacelessKey(rawInput);
+  const entries = (await db.examDictionary.toArray())
+    .filter((entry) => entry.source === 'institution' && entry.cptCodes.length > 0);
+  const scored = entries
+    .map((entry) => {
+      const knownNames = dictionaryKnownNames(entry);
+      const exact = knownNames.some((name) =>
+        normalizeRadiologyDescription(name) === normalized ||
+        spacelessKey(name) === normalizedSpaceless,
+      );
+      const bestScore = exact
+        ? 1
+        : Math.max(...knownNames.map((name) => combinedSimilarity(normalized, normalizeRadiologyDescription(name))), 0);
+      return { entry, exact, score: bestScore };
+    })
+    .filter((item) => item.exact || item.score >= 0.78)
+    .sort((a, b) => Number(b.exact) - Number(a.exact) || b.score - a.score)
+    .slice(0, maxResults);
+
+  const candidates: MatchCandidate[] = [];
+  for (const { entry, exact, score } of scored) {
+    const confidence = exact ? 0.985 : Math.min(0.9, Math.max(0.76, score * 0.92));
+    for (const serialized of entry.cptCodes) {
+      const { cptCode } = parseAliasCode(serialized);
+      const rows = await getModifier26Rows(cptCode);
+      for (const row of rows) {
+        const candidate = rowToCandidate(
+          rawInput,
+          row,
+          confidence,
+          'radiology_match',
+          'Institution mapping',
+        );
+        if (candidate.explanation) {
+          candidate.explanation.detail =
+            `${row.cptCode}${row.modifier ? `-${row.modifier}` : ''} from Institution mapping; spreadsheet procedure: ${entry.institutionProcedureName ?? entry.canonicalDisplayName}; CPT group: ${entry.cptCodes.join(', ')}`;
+        }
+        candidates.push(candidate);
+      }
+    }
+    if (dedupeCandidates(candidates).length >= maxResults && !exact) break;
   }
   return candidates;
 }
@@ -629,6 +686,10 @@ export async function findMatchCandidates(
 
   if (exactAlias) {
     candidates.push(...await candidatesForAlias(exactAlias));
+  }
+
+  if (candidates.length < maxResults) {
+    candidates.push(...await candidatesForInstitutionMappings(matchInput, maxResults));
   }
 
   if (candidates.length < maxResults) {

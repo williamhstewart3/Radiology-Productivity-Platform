@@ -6,6 +6,10 @@ import { importRvuFile } from '../utils/rvuFileImporter';
 import { dedupeCptRvuRowsForBulkPut } from '../utils/cptRowDeduplication';
 import { buildSeedCptRows } from '../data/seedCptData';
 import { normalizeExamText } from '../utils/textMatching';
+import {
+  importInstitutionProcedureMappings,
+  type InstitutionProcedureMappingSummary,
+} from '../utils/institutionProcedureMappingImporter';
 import type { UserSettings, ExamAlias, ExamDictionaryEntry } from '../types';
 import type { ImportResult } from '../utils/rvuFileImporter';
 
@@ -26,6 +30,10 @@ export function Settings({ onNavigate }: SettingsProps) {
   const [importError, setImportError] = useState<string | null>(null);
   const [cptCount, setCptCount] = useState<number | null>(null);
   const rvuFileRef = useRef<HTMLInputElement>(null);
+  const institutionFileRef = useRef<HTMLInputElement>(null);
+  const [institutionImporting, setInstitutionImporting] = useState(false);
+  const [institutionImportError, setInstitutionImportError] = useState<string | null>(null);
+  const [institutionImportSummary, setInstitutionImportSummary] = useState<InstitutionProcedureMappingSummary | null>(null);
 
   useLiveQuery(async () => {
     const count = await db.cptRvuTable.count();
@@ -101,6 +109,7 @@ export function Settings({ onNavigate }: SettingsProps) {
     () => db.examDictionary.orderBy('canonicalDisplayName').toArray(),
     [],
   );
+  const institutionMappings = (examDictionary ?? []).filter((entry) => entry.source === 'institution');
 
   const [aliasSearch, setAliasSearch] = useState('');
   const [editingAlias, setEditingAlias] = useState<ExamAlias | null>(null);
@@ -119,6 +128,30 @@ export function Settings({ onNavigate }: SettingsProps) {
   async function handleDeleteAlias(id: string) {
     if (!confirm('Delete this learned mapping?')) return;
     await db.examAliases.delete(id);
+  }
+
+  async function handleInstitutionMappingImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setInstitutionImporting(true);
+    setInstitutionImportError(null);
+    setInstitutionImportSummary(null);
+    try {
+      const summary = await importInstitutionProcedureMappings(await file.arrayBuffer(), file.name, { replaceExisting: true });
+      setInstitutionImportSummary(summary);
+    } catch (error) {
+      setInstitutionImportError(error instanceof Error ? error.message : 'Institution mapping import failed');
+    } finally {
+      setInstitutionImporting(false);
+      if (institutionFileRef.current) institutionFileRef.current.value = '';
+    }
+  }
+
+  async function handleClearInstitutionMappings() {
+    if (!confirm(`Clear ${institutionMappings.length} institution procedure mappings?`)) return;
+    const ids = institutionMappings.map((entry) => entry.id);
+    if (ids.length > 0) await db.examDictionary.bulkDelete(ids);
+    setInstitutionImportSummary(null);
   }
 
   function startEditAlias(alias: ExamAlias) {
@@ -552,6 +585,81 @@ export function Settings({ onNavigate }: SettingsProps) {
         )}
       </div>
 
+      {/* Institution Procedure Mappings */}
+      <div className="card space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Institution Procedure Mappings</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Upload local MR, US, and CT procedure-to-CPT mappings. These matches outrank generic CMS fuzzy matching.
+            </p>
+          </div>
+          <span className="text-xs text-slate-500 shrink-0">{institutionMappings.length} rows</span>
+        </div>
+
+        <input
+          ref={institutionFileRef}
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          onChange={handleInstitutionMappingImport}
+          className="hidden"
+        />
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => institutionFileRef.current?.click()}
+            disabled={institutionImporting}
+            className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 text-xs font-medium text-white transition-colors"
+          >
+            {institutionImporting ? 'Importing...' : 'Upload .xlsx'}
+          </button>
+          {institutionMappings.length > 0 && (
+            <button
+              onClick={handleClearInstitutionMappings}
+              className="px-3 py-2 rounded-lg border border-red-500/20 text-xs font-medium text-red-300 hover:border-red-500/40 transition-colors"
+            >
+              Clear mappings
+            </button>
+          )}
+        </div>
+
+        {institutionImportError && (
+          <p className="text-xs text-red-400">{institutionImportError}</p>
+        )}
+
+        {institutionImportSummary && (
+          <div className="rounded-xl border border-white/8 bg-black/20 p-3 space-y-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                ['Total rows', institutionImportSummary.totalRows],
+                ['Mapped rows', institutionImportSummary.mappedRows],
+                ['Blank CPT', institutionImportSummary.skippedBlankCptRows],
+                ['Multi-CPT', institutionImportSummary.multiCptRows],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-lg bg-white/5 p-2">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
+                  <p className="mt-1 text-sm font-semibold text-white">{value}</p>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-slate-400">
+              Modality counts:{' '}
+              {Object.entries(institutionImportSummary.modalityCounts)
+                .map(([modality, count]) => `${modality} ${count}`)
+                .join(' - ') || 'None'}
+              {institutionImportSummary.replacedEntries > 0 && ` - replaced ${institutionImportSummary.replacedEntries}`}
+            </p>
+            {institutionImportSummary.warnings.length > 0 && (
+              <div className="space-y-1">
+                {institutionImportSummary.warnings.map((warning) => (
+                  <p key={warning} className="text-xs text-amber-300">{warning}</p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Radiology Exam Dictionary */}
       <div className="card space-y-4">
         <div className="flex items-center justify-between gap-3">
@@ -589,11 +697,17 @@ export function Settings({ onNavigate }: SettingsProps) {
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {entry.cptCodes.map((code) => (
-                      <span key={code} className="font-mono text-[10px] text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded">
-                        {code}
+                    {entry.cptCodes.length === 0 ? (
+                      <span className="text-[10px] text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                        Reference only - no CPT
                       </span>
-                    ))}
+                    ) : (
+                      entry.cptCodes.map((code) => (
+                        <span key={code} className="font-mono text-[10px] text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded">
+                          {code}
+                        </span>
+                      ))
+                    )}
                     {entry.modifier26Wrvu != null && (
                       <span className="text-[10px] text-emerald-400">{entry.modifier26Wrvu.toFixed(2)} wRVU</span>
                     )}
