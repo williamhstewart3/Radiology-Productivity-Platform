@@ -1,5 +1,5 @@
 import { findMatchCandidates, learnAlias } from '../utils/matching';
-import { checkBatchDuplicates, buildFingerprint } from '../utils/duplicateDetection';
+import { checkBatchDuplicates, buildFingerprint, isStrongDuplicateFingerprint } from '../utils/duplicateDetection';
 import { db } from '../db/database';
 import { supabasePersistence } from '../services/supabasePersistence';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
@@ -179,7 +179,7 @@ export async function runImportPipeline(
       autoSkipped: false,
     };
 
-    if (dupStatus === 'exact' || dupStatus === 'very_likely') {
+    if (dupStatus === 'exact') {
       skippedRows.push({ ...row, included: false, autoSkipped: true });
     } else {
       reviewRows.push(row);
@@ -228,7 +228,9 @@ export async function commitPipelineResults(
         cand.modality,
       );
 
-      const existing = await db.studyLogs.where('studyFingerprint').equals(fingerprint).first();
+      const existing = isStrongDuplicateFingerprint(fingerprint)
+        ? await db.studyLogs.where('studyFingerprint').equals(fingerprint).first()
+        : null;
       if (existing && !(existing as any).deletedAt) continue;
 
       const isReview =

@@ -41,7 +41,11 @@ const HEADER_FOOTER_PATTERN =
 const UI_NOISE_PATTERN =
   /\b(?:reset\s+filters?|browse|search|filter|filters|refresh|logout|settings|preferences|dashboard|inbox|outbox|worklist|folder|sort|ascending|descending|click|button|menu|home|apply|clear|cancel|save|export|print|status\s+bar|tabs?)\b/i;
 const LEFT_STATUS_PATTERN =
-  /^\s*(?:(?:[+@|/\\_\-#>*.:;()[\]{}]+|vb|vi|vo|vx|[voxlit]|[0-9]{1,4}|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread|warning|warn|alert|check)\s+){1,10}/i;
+  /^\s*(?:(?:[+@|/\\_\-#>*.:;()[\]{}]+|v\d{1,3}|vb|vi|vo|vx|[voxlit]|[0-9]{1,4}|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread|warning|warn|alert|check)\s+){1,12}/i;
+const MODALITY_START_PATTERN =
+  /\b(?:CTA|CT\s*ANGIO(?:GRAM|GRAPHY)?|MR\s*ANGIO(?:GRAM|GRAPHY)?|MRA|MRI|MR|X\s*-?\s*RAY|XR|RADIOGRAPH|US|U\/S|ULTRASOUND|SONOGRAM|PET|NM|NUCLEAR|MAMMO|MAMMOGRAM|MAMMOGRAPHY|DXA|DEXA|FLUORO|FLUOROSCOPY)\b|(?:CT(?=ANGIOGRAM|ANGIOGRAPHY|CARDIAC|CHEST|HEAD|ABDOMEN|RENAL|APPENDIX|LDCT))|(?:XR(?=CHEST|ABDOMEN|WRIST|HAND|HIP|SHOULDER|KNEE|ANKLE|FOOT|PELVIS))|(?:MRI(?=PROSTATE|ABDOMEN|BRAIN|SPINE|CHEST|PELVIS|MRCP))|(?:MRA(?=HEAD|NECK|CHEST|ABDOMEN|PELVIS))|(?:US(?=CAROTID|ARTERIAL|OB|ABDOMEN|PELVIS|RENAL))/i;
+const EMBEDDED_ROW_START_PATTERN =
+  /\s(?:[+@|/\\_\-#>*.:;()[\]{}]+|[a-z]{1,3})?\s*(?:v\d{1,3}|vb|vi|vo|vx|[voxlit])?\s*\d{1,4}\s+(?=(?:CTA|CT\s*ANGIO|MRA|MRI|MR\s*ANGIO|XR|X\s*-?\s*RAY|US|U\/S|ULTRASOUND|PET|NM|MAMMO|DXA|DEXA|FLUORO|CT(?=ANGIOGRAM|ANGIOGRAPHY|CARDIAC|CHEST|HEAD|ABDOMEN|RENAL|APPENDIX|LDCT)|XR(?=CHEST|ABDOMEN|WRIST|HAND|HIP|SHOULDER|KNEE|ANKLE|FOOT|PELVIS)|MRI(?=PROSTATE|ABDOMEN|BRAIN|SPINE|CHEST|PELVIS|MRCP)|MRA(?=HEAD|NECK|CHEST|ABDOMEN|PELVIS)|US(?=CAROTID|ARTERIAL|OB|ABDOMEN|PELVIS|RENAL)))/gi;
 
 const UI_TEXT_STRIP_PATTERNS = [
   /\breset\s+filters?\b/gi,
@@ -89,6 +93,20 @@ const OCR_DATE_CHAR_MAP: Record<string, string> = {
 
 function hasExamContext(text: string): boolean {
   return EXAM_CONTEXT_PATTERN.test(text);
+}
+
+function firstModalityIndex(text: string): number {
+  const match = text.match(MODALITY_START_PATTERN);
+  return match?.index ?? -1;
+}
+
+function countModalityStarts(text: string): number {
+  let count = 0;
+  const pattern = new RegExp(MODALITY_START_PATTERN.source, 'gi');
+  for (const match of text.matchAll(pattern)) {
+    if ((match.index ?? 0) >= 0) count++;
+  }
+  return count;
 }
 
 function stripUiText(text: string): string {
@@ -163,6 +181,11 @@ function stripLeftTableJunk(text: string): { rowIndex: string | null; text: stri
     working = rowIndexResult.text;
   }
 
+  const modalityStart = firstModalityIndex(working);
+  if (modalityStart > 0) {
+    working = working.slice(modalityStart).trim();
+  }
+
   return { rowIndex, text: working };
 }
 
@@ -198,17 +221,33 @@ function reconstructTableRows(lines: string[]): string[] {
   const rows: string[] = [];
 
   for (const rawLine of lines) {
-    const line = stripUiText(rawLine.trim());
-    if (line.length < 2 || isMetadataOnlyLine(line)) continue;
+    const segments = splitJoinedOcrRows(stripUiText(rawLine.trim()));
+    for (const line of segments) {
+      if (line.length < 2 || isMetadataOnlyLine(line)) continue;
 
-    if (rows.length === 0 || shouldStartNewRow(line)) {
-      rows.push(line);
-    } else {
-      rows[rows.length - 1] = `${rows[rows.length - 1]} ${line}`.replace(/\s{2,}/g, ' ').trim();
+      if (rows.length === 0 || shouldStartNewRow(line)) {
+        rows.push(line);
+      } else {
+        rows[rows.length - 1] = `${rows[rows.length - 1]} ${line}`.replace(/\s{2,}/g, ' ').trim();
+      }
     }
   }
 
   return rows;
+}
+
+function splitJoinedOcrRows(line: string): string[] {
+  if (!line) return [];
+  const starts = [0];
+  EMBEDDED_ROW_START_PATTERN.lastIndex = 0;
+  for (const match of line.matchAll(EMBEDDED_ROW_START_PATTERN)) {
+    const index = match.index ?? -1;
+    if (index > 8) starts.push(index);
+  }
+  return starts
+    .sort((a, b) => a - b)
+    .map((start, index) => line.slice(start, starts[index + 1] ?? line.length).trim())
+    .filter(Boolean);
 }
 
 export function parseOcrLines(lines: string[]): ParsedLine[] {
@@ -238,6 +277,7 @@ function parseSingleRow(rawRow: string): ParsedLine | null {
       ? 'UNCLEAR POWERSCRIBE ROW'
       : '';
   if (cleanedExamName.length < 2) return null;
+  if (!hasExamContext(cleanedExamName) && dateMatches.length === 0) return null;
 
   const studyDateTime = firstDate?.studyDateTime ?? null;
   const studyDate = firstDate?.studyDate ?? null;
@@ -248,14 +288,17 @@ function parseSingleRow(rawRow: string): ParsedLine | null {
   const modifiedTime = lastDate?.studyTime ?? null;
   const dateTimeConfidence = lastDate?.confidence ?? firstDate?.confidence ?? 0;
   const hasContext = hasExamContext(cleanedExamName);
+  const modalityCount = countModalityStarts(cleanedExamName);
   const hasDateColumns = dateMatches.length > 0;
   const extractionConfidence =
+    modalityCount > 1 ? 0.45 :
     hasContext && hasDateColumns ? 0.92 :
     hasContext ? 0.72 :
     hasDateColumns ? 0.38 :
     0.2;
-  const needsReview = extractionConfidence < 0.75 || dateTimeConfidence < 0.5 || !hasContext;
+  const needsReview = extractionConfidence < 0.75 || dateTimeConfidence < 0.5 || !hasContext || modalityCount > 1;
   const reviewReason =
+    modalityCount > 1 ? 'Possible joined PowerScribe rows in OCR text' :
     !hasContext ? 'Low-confidence PowerScribe row text' :
     dateTimeConfidence < 0.5 ? 'Missing or unclear PowerScribe date columns' :
     extractionConfidence < 0.75 ? 'PowerScribe row needs review' :

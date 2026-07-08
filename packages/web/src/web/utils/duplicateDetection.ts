@@ -96,13 +96,33 @@ export function buildFingerprint(
     }
   }
 
-  // Tier 3: exam + CPT + date (no time)
+  // Weak fallback only. Missing/uncertain time is not strong enough to
+  // auto-skip another same-title same-CPT study from a busy worklist day.
   if (normExam && cpt !== 'nocpt') {
-    return `fp:${normExam}|${cpt}|${date}`;
+    return `weak:${normExam}|${cpt}|${date}`;
   }
 
-  // Tier 4: modality + CPT + date (weakest)
-  return `fp:${modality ?? 'nomod'}|${cpt}|${date}`;
+  return `weak:${modality ?? 'nomod'}|${cpt}|${date}`;
+}
+
+export function isStrongDuplicateFingerprint(fingerprint: string | null | undefined): boolean {
+  return Boolean(fingerprint?.startsWith('acc:') || (fingerprint?.startsWith('fp:') && fingerprint.split('|').length >= 4));
+}
+
+function batchDuplicateKey(candidate: StudyCandidate): string | null {
+  const fingerprint = buildFingerprint(
+    candidate.examNameRaw,
+    candidate.cptCode,
+    candidate.logDate,
+    candidate.studyDateTime,
+    candidate.accessionNumber,
+    candidate.modality,
+  );
+  return isStrongDuplicateFingerprint(fingerprint) ? fingerprint : null;
+}
+
+export function __testBatchDuplicateKey(candidate: StudyCandidate): string | null {
+  return batchDuplicateKey(candidate);
 }
 
 /** Converts an ISO datetime to "YYYY-MM-DD|HH:MM" minute bucket. */
@@ -187,7 +207,11 @@ export async function checkOneDuplicate(
     }
 
     // ── Tier 1: exact — full fingerprint match ──────────────────────────
-    if (log.studyFingerprint && log.studyFingerprint === candidateFingerprint) {
+    if (
+      isStrongDuplicateFingerprint(candidateFingerprint) &&
+      isStrongDuplicateFingerprint(log.studyFingerprint) &&
+      log.studyFingerprint === candidateFingerprint
+    ) {
       return {
         confidence: 'exact',
         existingLog: log,
@@ -205,7 +229,7 @@ export async function checkOneDuplicate(
         };
       }
 
-      if (candidate.studyDate && log.studyDate && candidate.studyDate === log.studyDate) {
+      if (!candidate.studyDateTime && !log.studyDateTime && candidate.studyDate && log.studyDate && candidate.studyDate === log.studyDate) {
         return {
           confidence: 'possible',
           existingLog: log,
@@ -233,9 +257,9 @@ export async function checkOneDuplicate(
       const diffMin = Math.abs(candidateMinutes - logMinutes);
       if (diffMin <= 3) {
         return {
-          confidence: 'very_likely',
+          confidence: 'possible',
           existingLog: log,
-          reason: `Same CPT (${candidate.cptCode}), same date, study time ${diffMin === 0 ? 'identical' : `${diffMin} min apart`}`,
+          reason: `Same CPT (${candidate.cptCode}), same date, study time ${diffMin} min apart`,
         };
       }
 
@@ -314,9 +338,10 @@ export async function checkBatchDuplicates(
       candidate.accessionNumber,
       candidate.modality,
     );
+    const batchKey = isStrongDuplicateFingerprint(fp) ? fp : null;
 
     // Within-batch duplicate check
-    const batchPrior = batchSeen.get(fp);
+    const batchPrior = batchKey ? batchSeen.get(batchKey) : null;
     if (batchPrior) {
       results.push({
         candidate,
@@ -354,7 +379,9 @@ export async function checkBatchDuplicates(
       continue;
     }
 
-    batchSeen.set(fp, candidate);
+    if (batchKey) {
+      batchSeen.set(batchKey, candidate);
+    }
 
     const candidateLogDate = candidate.logDate || logDate;
     const existingLogs = [

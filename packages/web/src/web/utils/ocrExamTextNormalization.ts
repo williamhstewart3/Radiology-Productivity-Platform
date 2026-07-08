@@ -1,7 +1,8 @@
 const MODALITY_PREFIX_SPACING: Array<[RegExp, string]> = [
   [/\bCTA(?=ABD(?:OMEN)?\b)/gi, 'CTA '],
   [/\bCTA(?=CHEST\b|HEAD\b|NECK\b|PELVIS\b|PE\b)/gi, 'CTA '],
-  [/\bCT(?=CHEST\b|ABD(?:OMEN)?\b|PELVIS\b|HEAD\b|BRAIN\b|NECK\b|SPINE\b|CAP\b)/gi, 'CT '],
+  [/\bCT(?=CHEST\b|ABD(?:OMEN)?\b|PELVIS\b|HEAD\b|BRAIN\b|NECK\b|SPINE\b|CAP\b|LDCT\b|CARDIAC\b|RENAL\b|APPENDIX\b)/gi, 'CT '],
+  [/\bXR(?=CHEST\b|ABDOMEN\b|WRIST\b|HAND\b|HIP\b|SHOULDER\b|KNEE\b|ANKLE\b|FOOT\b|PELVIS\b)/gi, 'XR '],
   [/\bMRI(?=BRAIN\b|ABD(?:OMEN)?\b|PELVIS\b|LUMBAR\b|CERVICAL\b|THORACIC\b|BREAST\b|SPINE\b)/gi, 'MRI '],
   [/\bMRA(?=HEAD\b|NECK\b|BRAIN\b|CHEST\b|ABD(?:OMEN)?\b|PELVIS\b)/gi, 'MRA '],
   [/\bUS(?=BREAST\b|ABD(?:OMEN)?\b|PELVIS\b|THYROID\b|SCROTUM\b|RENAL\b|KIDNEY\b|RUQ\b)/gi, 'US '],

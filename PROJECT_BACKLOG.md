@@ -45,6 +45,7 @@
 - [x] Tune column OCR settings and run column OCR sequentially to preserve date-time text
 - [x] Preserve full Exam and Modified/Read date-times end-to-end when visible in OCR
 - [x] Add disabled-by-default LLM OCR cleanup insertion point with no invented time validation
+- [x] Split joined PowerScribe OCR rows and strip gutter/status text before CPT matching
 - [ ] Bulk approve high-confidence studies
 - [ ] Unknowns-only review mode
 - [ ] Review later workflow
@@ -70,6 +71,7 @@
 - [x] Strip junk before the first modality token before CPT matching
 - [x] Add deterministic aliases for common PowerScribe OCR study names
 - [x] Add space-insensitive matching for OCR strings with dropped spaces
+- [x] Tighten duplicate detection so same-title/CPT same-day studies are not auto-skipped without accession or full datetime match
 
 ---
 
