@@ -1,7 +1,31 @@
 import { describe, expect, test } from 'bun:test';
-import { parseOcrLines, parseOcrLinesWithDebug } from '../src/web/utils/powerScribeParser';
+import { detectMultipleModalityStarts, parseOcrLines, parseOcrLinesWithDebug } from '../src/web/utils/powerScribeParser';
 
 describe('PowerScribe OCR parser date-time preservation', () => {
+  test.each([
+    'CT CHEST ABDOMEN PELVIS W CONTRAST CT CARDIAC SCORING',
+    'CTCHESTABDOMEN PELVIS W CONTRAST CT CARDIAC SCORING',
+    'XR CHEST PORTABLE XR ABDOMEN AP',
+    'XRCHESTPORTABLE XR ABDOMEN AP',
+    'MRI BRAIN WO CONTRAST MRA HEAD WO CONTRAST',
+    'US ABDOMEN COMPLETE US PELVIS COMPLETE',
+  ])('detects merged modality starts in %s', (raw) => {
+    expect(detectMultipleModalityStarts(raw).hasMultiple).toBe(true);
+  });
+
+  test.each([
+    'CT CHEST ABDOMEN PELVIS W CONTRAST',
+    'CTA CHEST ABDOMEN PELVIS W WO CONTRAST',
+    'PET CT SKULL BASE TO MID THIGH',
+    'PET/CT SKULL BASE TO MID THIGH',
+    'SPECT CT',
+    'NM BONE SCAN WHOLE BODY',
+    'US OB < 14 WEEKS SINGLE OR FIRST GESTATION',
+    'XR CHEST PA AND LATERAL',
+  ])('does not falsely detect merged modality starts in %s', (raw) => {
+    expect(detectMultipleModalityStarts(raw).hasMultiple).toBe(false);
+  });
+
   test('preserves full exam and modified date-times when OCR includes times', () => {
     const [row] = parseOcrLines([
       'CT CHEST ABDOMEN PELVIS W CONTRAST 7/7/26 8:14 AM 7/7/26 9:24 AM',
@@ -149,5 +173,19 @@ describe('PowerScribe OCR parser date-time preservation', () => {
     expect(rows).toHaveLength(2);
     expect(rows[0].procedureName).toBe('CT CARDIAC SCORE SPECIAL');
     expect(rows[1].procedureName).toBe('CT LDCT LUNG CANCER SCREENING');
+  });
+
+  test('splits row-contaminated modality starts before matching', () => {
+    const rows = parseOcrLines([
+      'CTCHESTABDUOMEN PELVIS W CONTRAST v 28 CT CARDIAC SCORING 08',
+    ]);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].procedureName).toBe('CT CHEST ABDOMEN PELVIS W CONTRAST');
+    expect(rows[0].needsReview).toBe(true);
+    expect(rows[0].reviewReason).toContain('date');
+    expect(rows[1].procedureName).toBe('CT CARDIAC SCORING');
+    expect(rows[1].needsReview).toBe(true);
+    expect(rows[1].reviewReason).toContain('date');
   });
 });

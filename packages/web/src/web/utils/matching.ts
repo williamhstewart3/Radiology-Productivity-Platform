@@ -8,6 +8,7 @@ import {
   normalizeRadiologyDescription,
 } from './radiologyDescriptionNormalization';
 import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
+import { detectMultipleModalityStarts } from './powerScribeParser';
 import { findOrbitCmeSeedMapping } from '../data/orbitCmeSeedMappings';
 import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from '../data/acrRadiologyActiveCptSet';
 
@@ -807,6 +808,10 @@ export function __testHasClinicallyMeaningfulInstitutionDifference(rawInput: str
   return hasClinicallyMeaningfulInstitutionDifference(rawInput, dictionaryName);
 }
 
+export function __testShouldSuppressMergedProcedureMatching(rawInput: string): boolean {
+  return detectMultipleModalityStarts(stripLeadingOcrJunk(rawInput)).hasMultiple;
+}
+
 function aliasNormalizedKeys(alias: ExamAlias): string[] {
   const keys = [
     alias.aliasText,
@@ -849,6 +854,7 @@ export async function findMatchCandidates(
 
   const parsed = parseModalityFirst(trimmed);
   const matchInput = parsed.cleanedProcedure || trimmed;
+  if (detectMultipleModalityStarts(matchInput).hasMultiple) return [];
   const normalizedInput = normalizeExamText(matchInput);
   const radiologyDescriptionKey = normalizeRadiologyDescription(matchInput);
   const radiologyNorm = normalizeForRadiology(matchInput);

@@ -60,6 +60,8 @@ const LEFT_STATUS_PATTERN =
   /^\s*(?:(?:[+@|/\\_\-#>*.:;()[\]{}]+|v\d{1,3}|vb|vi|vo|vx|[voxlit]|[0-9]{1,4}|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread|warning|warn|alert|check)\s+){1,12}/i;
 const MODALITY_START_PATTERN =
   /\b(?:CTA|CT\s*ANGIO(?:GRAM|GRAPHY)?|MR\s*ANGIO(?:GRAM|GRAPHY)?|MRA|MRI|MR|X\s*-?\s*RAY|XR|RADIOGRAPH|US|U\/S|ULTRASOUND|SONOGRAM|PET|NM|NUCLEAR|MAMMO|MAMMOGRAM|MAMMOGRAPHY|DXA|DEXA|FLUORO|FLUOROSCOPY)\b|(?:CT(?=ANGIOGRAM|ANGIOGRAPHY|CARDIAC|CHEST|HEAD|ABDOMEN|RENAL|APPENDIX|LDCT))|(?:XR(?=CHEST|ABDOMEN|WRIST|HAND|HIP|SHOULDER|KNEE|ANKLE|FOOT|PELVIS))|(?:MRI(?=PROSTATE|ABDOMEN|BRAIN|SPINE|CHEST|PELVIS|MRCP))|(?:MRA(?=HEAD|NECK|CHEST|ABDOMEN|PELVIS))|(?:US(?=CAROTID|ARTERIAL|OB|ABDOMEN|PELVIS|RENAL))/i;
+const MODALITY_START_SCAN_PATTERN =
+  /\b(?:CTA|MRA|MRI|MAMMO|MG|PET|SPECT|DEXA|DXA|NM|IR|FL|US|XR|MR|CT)\b|(?:CT(?=ANGIOGRAM|ANGIOGRAPHY|CARDIAC|CHEST|HEAD|ABDOMEN|ABD|PELVIS|RENAL|APPENDIX|LDCT))|(?:XR(?=CHEST|ABDOMEN|WRIST|HAND|HIP|SHOULDER|KNEE|ANKLE|FOOT|PELVIS))|(?:MRI(?=PROSTATE|ABDOMEN|BRAIN|SPINE|CHEST|PELVIS|MRCP))|(?:MRA(?=HEAD|NECK|CHEST|ABDOMEN|PELVIS))|(?:US(?=CAROTID|ARTERIAL|VENOUS|OB|ABDOMEN|PELVIS|RENAL))/gi;
 const EMBEDDED_ROW_START_PATTERN =
   /\s(?:[+@|/\\_\-#>*.:;()[\]{}]+|[a-z]{1,3})?\s*(?:v\d{1,3}|vb|vi|vo|vx|[voxlit])?\s*\d{1,4}\s+(?=(?:CTA|CT\s*ANGIO|MRA|MRI|MR\s*ANGIO|XR|X\s*-?\s*RAY|US|U\/S|ULTRASOUND|PET|NM|MAMMO|DXA|DEXA|FLUORO|CT(?=ANGIOGRAM|ANGIOGRAPHY|CARDIAC|CHEST|HEAD|ABDOMEN|RENAL|APPENDIX|LDCT)|XR(?=CHEST|ABDOMEN|WRIST|HAND|HIP|SHOULDER|KNEE|ANKLE|FOOT|PELVIS)|MRI(?=PROSTATE|ABDOMEN|BRAIN|SPINE|CHEST|PELVIS|MRCP)|MRA(?=HEAD|NECK|CHEST|ABDOMEN|PELVIS)|US(?=CAROTID|ARTERIAL|OB|ABDOMEN|PELVIS|RENAL)))/gi;
 
@@ -118,12 +120,67 @@ function firstModalityIndex(text: string): number {
 }
 
 function countModalityStarts(text: string): number {
-  let count = 0;
-  const pattern = new RegExp(MODALITY_START_PATTERN.source, 'gi');
-  for (const match of text.matchAll(pattern)) {
-    if ((match.index ?? 0) >= 0) count++;
+  return detectMultipleModalityStarts(text).starts.length;
+}
+
+export interface ModalityStartDetection {
+  hasMultiple: boolean;
+  starts: Array<{ token: string; index: number }>;
+  proposedSplitSegments: string[];
+}
+
+function isAllowedEmbeddedModality(text: string, token: string, index: number): boolean {
+  if (token !== 'CT') return false;
+  const before = text.slice(Math.max(0, index - 12), index).replace(/[^A-Z]+/g, ' ').trim();
+  const after = text.slice(index, index + 28);
+  if (/\b(?:PET|SPECT)\s*$/.test(before)) return true;
+  if (/^CT\s+ATTENUATION\b/.test(after)) return true;
+  return false;
+}
+
+function splitNoiseBeforeModality(text: string, index: number): number {
+  const prefix = text.slice(0, index);
+  const noise = prefix.match(/\s+(?:[vV]\s*)?\d{1,4}\s*$/);
+  if (noise?.index != null) return noise.index;
+  const statusNoise = prefix.match(/\s+(?:[vV]|[|/_\\#>*.:;()[\]{}+-])\s*$/);
+  if (statusNoise?.index != null) return statusNoise.index;
+  return index;
+}
+
+export function detectMultipleModalityStarts(procedureText: string): ModalityStartDetection {
+  const normalized = normalizeOcrExamTextForMatching(procedureText)
+    .replace(/\bABDUOMEN\b/gi, 'ABDOMEN')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  const starts: Array<{ token: string; index: number }> = [];
+
+  MODALITY_START_SCAN_PATTERN.lastIndex = 0;
+  for (const match of normalized.matchAll(MODALITY_START_SCAN_PATTERN)) {
+    const index = match.index ?? -1;
+    if (index < 0) continue;
+    const token = match[0].toUpperCase();
+    if (isAllowedEmbeddedModality(normalized, token, index)) continue;
+    starts.push({ token, index });
   }
-  return count;
+
+  const uniqueStarts = starts.filter((start, index) =>
+    index === 0 || start.index - starts[index - 1].index > 2,
+  );
+  const splitPoints = uniqueStarts
+    .slice(1)
+    .map((start) => splitNoiseBeforeModality(normalized, start.index))
+    .filter((index) => index > 4);
+  const proposedSplitSegments = [0, ...splitPoints]
+    .sort((a, b) => a - b)
+    .map((start, index, points) => normalized.slice(start, points[index + 1] ?? normalized.length).trim())
+    .filter(Boolean);
+
+  return {
+    hasMultiple: uniqueStarts.length > 1,
+    starts: uniqueStarts,
+    proposedSplitSegments,
+  };
 }
 
 function stripUiText(text: string): string {
@@ -260,9 +317,20 @@ function splitJoinedOcrRows(line: string): string[] {
     const index = match.index ?? -1;
     if (index > 8) starts.push(index);
   }
-  return starts
+  const rowNumberSplit = starts
     .sort((a, b) => a - b)
     .map((start, index) => line.slice(start, starts[index + 1] ?? line.length).trim())
+    .filter(Boolean);
+
+  const modalitySplit = rowNumberSplit.flatMap((segment) => {
+    const detection = detectMultipleModalityStarts(segment);
+    return detection.hasMultiple && detection.proposedSplitSegments.length > 1
+      ? detection.proposedSplitSegments
+      : [segment];
+  });
+
+  return modalitySplit
+    .map((segment) => segment.trim())
     .filter(Boolean);
 }
 

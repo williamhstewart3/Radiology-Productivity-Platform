@@ -7,6 +7,7 @@ import {
   __testDeterministicCptCodesFor,
   __testHasClinicallyMeaningfulInstitutionDifference,
   __testParseModalityFirst,
+  __testShouldSuppressMergedProcedureMatching,
   resolveInstitutionProcedure,
 } from '../src/web/utils/matching';
 
@@ -121,6 +122,12 @@ describe('modality-first CPT matching', () => {
 
     const candidates = __testAutoMatchRowsFor('XRCHESTFORTABLE', rows);
     expect(candidates.map((row) => row.cptCode)).toEqual(['71045']);
+  });
+
+  test('suppresses full-string matching for contaminated merged procedure rows', () => {
+    expect(__testShouldSuppressMergedProcedureMatching(
+      'CTCHESTABDUOMEN PELVIS W CONTRAST v 28 CT CARDIAC SCORING 08',
+    )).toBe(true);
   });
 
   test('keeps CT cardiac scoring out of the cardiac MRI lane', () => {

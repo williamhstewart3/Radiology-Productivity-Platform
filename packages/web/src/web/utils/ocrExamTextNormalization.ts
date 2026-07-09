@@ -17,7 +17,10 @@ const RADIOLOGY_OCR_CORRECTIONS: Array<[RegExp, string]> = [
   [/\bWO\s*CONTRST\b/gi, 'WO CONTRAST'],
   [/\bWOCONTRAST\b/gi, 'WO CONTRAST'],
   [/\bPORTBLE\b/gi, 'PORTABLE'],
+  [/\bCT\s*CHEST\s*ABDU?OMEN\b/gi, 'CT CHEST ABDOMEN'],
   [/\bABDCOMEN\b/gi, 'ABDOMEN'],
+  [/\bABDUOMEN\b/gi, 'ABDOMEN'],
+  [/\bCHEST\s*ABDU?OMEN\b/gi, 'CHEST ABDOMEN'],
   [/\bABDOMN\b/gi, 'ABDOMEN'],
   [/\bPELVS\b/gi, 'PELVIS'],
   [/\bLATERL\b/gi, 'LATERAL'],
@@ -40,6 +43,7 @@ function stripTrailingOcrDateTimeGarbage(raw: string): string {
       .replace(/\s+\b[A-Z]?\d{0,2}20\d{2}\b$/i, '')
       .replace(/\s+\b[TF]\d{4,8}\b$/i, '')
       .replace(/\s+\b\d{5,8}\b$/i, '')
+      .replace(/\s+\b\d{1,2}\b$/i, '')
       .replace(/\s+\b\d{3,4}\s*(?:AM|PM)\b$/i, '')
       .replace(/\s+\b\d{1,2}\d{4}\b$/i, '')
       .replace(/\s{2,}/g, ' ')
