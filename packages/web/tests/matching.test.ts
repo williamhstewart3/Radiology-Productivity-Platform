@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { CptRvuRow, Modality } from '../src/web/types';
+import type { CptRvuRow, ExamDictionaryEntry, Modality } from '../src/web/types';
 import type { ImportedStudy } from '../src/web/types/importProvider';
 import { __testInstitutionMappingReviewReason, __testProcedureNameFor } from '../src/web/pipeline/importPipeline';
 import {
@@ -7,6 +7,7 @@ import {
   __testDeterministicCptCodesFor,
   __testHasClinicallyMeaningfulInstitutionDifference,
   __testParseModalityFirst,
+  resolveInstitutionProcedure,
 } from '../src/web/utils/matching';
 
 function cptRow(cptCode: string, description: string, modality: Modality, includeInAutoMatch = true): CptRvuRow {
@@ -31,6 +32,30 @@ function cptRow(cptCode: string, description: string, modality: Modality, includ
     includeInAutoMatch,
     autoMatchSource: includeInAutoMatch ? 'test active set' : null,
     isUserVerified: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+function institutionEntry(procedureType: string, cptCodes: string[], modality: Modality = 'XR'): ExamDictionaryEntry {
+  return {
+    id: `institution_${procedureType.replace(/\W+/g, '_').toLowerCase()}`,
+    canonicalDisplayName: procedureType,
+    normalizedKey: procedureType,
+    commonSynonyms: [procedureType],
+    hospitalAliases: [procedureType],
+    powerScribeNames: [procedureType],
+    cmsDescription: null,
+    cptCodes,
+    modifier26Wrvu: null,
+    modality,
+    bodyRegion: null,
+    typicalCombinations: [],
+    timesUsed: 0,
+    source: 'institution',
+    institutionSheet: modality === 'MRI' ? 'MR' : modality,
+    institutionProcedureName: procedureType,
+    sourceFileName: 'CPT Codes for Procedures.xlsx',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
@@ -188,6 +213,41 @@ describe('modality-first CPT matching', () => {
     expect(__testHasClinicallyMeaningfulInstitutionDifference('CT ABDCOMEN WCONTRAST', 'CT ABDOMEN W CONTRAST')).toBe(false);
   });
 
+  test.each([
+    'XRCHESTPORFABLE',
+    'XRCHESTFORTABLE',
+    'XRCHESTPORTABLE',
+    'XR CHEST PORTBLE',
+    'XR CHESTPORTABLE',
+  ])('institution resolver maps %s to XR CHEST PORTABLE', (raw) => {
+    const result = resolveInstitutionProcedure(raw, [
+      institutionEntry('XR CHEST PORTABLE', ['71045']),
+    ]);
+
+    expect(['exact_institution_match', 'ocr_tolerant_institution_match']).toContain(result.matchType);
+    expect(result.candidates[0].procedureType).toBe('XR CHEST PORTABLE');
+    expect(result.candidates[0].entry.cptCodes).toEqual(['71045']);
+  });
+
+  test('institution resolver repairs supported OCR spelling in known procedure titles', () => {
+    const result = resolveInstitutionProcedure('XR WRIST RIGHT PA LATERAL AND OBLIGUE', [
+      institutionEntry('XR WRIST RIGHT PA LATERAL AND OBLIQUE', ['73110']),
+    ]);
+
+    expect(['exact_institution_match', 'ocr_tolerant_institution_match']).toContain(result.matchType);
+    expect(result.candidates[0].procedureType).toBe('XR WRIST RIGHT PA LATERAL AND OBLIQUE');
+  });
+
+  test('ambiguous institution resolver output stays explicit for review', () => {
+    const result = resolveInstitutionProcedure('XR WRIST RIGHT PA LATERAL OBLIQUE', [
+      institutionEntry('XR WRIST RIGHT PA LATERAL AND OBLIQUE', ['73110']),
+      institutionEntry('XR WRIST RIGHT PA LATERAL OBLIQUE WITH SCAPHOID', ['73110']),
+    ]);
+
+    expect(result.matchType).toBe('ambiguous_institution_match');
+    expect(result.candidates.length).toBeGreaterThan(1);
+  });
+
   test('institution dictionary near matches do not cross clinical safety boundaries', () => {
     expect(__testHasClinicallyMeaningfulInstitutionDifference('CT CHEST W CONTRAST', 'CT CHEST WO CONTRAST')).toBe(true);
     expect(__testHasClinicallyMeaningfulInstitutionDifference('CT CHEST WO CONTRAST', 'CT CHEST W CONTRAST')).toBe(true);
@@ -195,5 +255,25 @@ describe('modality-first CPT matching', () => {
     expect(__testHasClinicallyMeaningfulInstitutionDifference('XR WRIST LEFT 3 VIEWS', 'XR WRIST RIGHT 3 VIEWS')).toBe(true);
     expect(__testHasClinicallyMeaningfulInstitutionDifference('US LEG UNILATERAL', 'US LEG BILATERAL')).toBe(true);
     expect(__testHasClinicallyMeaningfulInstitutionDifference('XR CHEST 1 VIEW', 'XR CHEST 2 VIEWS')).toBe(true);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('CT CHEST', 'CTA CHEST')).toBe(true);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('MRI BRAIN', 'MRA BRAIN')).toBe(true);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('US LEG ARTERIAL', 'US LEG VENOUS')).toBe(true);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('XR CHEST PORTABLE', 'XR CHEST PA AND LATERAL')).toBe(true);
+  });
+
+  test('institution resolver does not resolve across hard clinical distinctions', () => {
+    const contrast = resolveInstitutionProcedure('CT CHEST W CONTRAST', [
+      institutionEntry('CT CHEST WO CONTRAST', ['71250'], 'CT'),
+    ]);
+    const limited = resolveInstitutionProcedure('US ABDOMEN LIMITED', [
+      institutionEntry('US ABDOMEN COMPLETE', ['76700'], 'US'),
+    ]);
+    const views = resolveInstitutionProcedure('XR CHEST PORTABLE', [
+      institutionEntry('XR CHEST PA AND LATERAL', ['71046'], 'XR'),
+    ]);
+
+    expect(contrast.matchType).toBe('no_institution_match');
+    expect(limited.matchType).toBe('no_institution_match');
+    expect(views.matchType).toBe('no_institution_match');
   });
 });

@@ -1,6 +1,6 @@
 import { db } from '../db/database';
 import type { CptRvuRow, ExamAlias, ExamDictionaryEntry, MatchCandidate, Modality, OcrLearningEntry } from '../types';
-import { combinedSimilarity, normalizeExamText, spacelessKey } from './textMatching';
+import { combinedSimilarity, normalizeExamText, spacelessKey, stringSimilarity, tokenize, tokenOverlapScore } from './textMatching';
 import { normalizeForRadiology } from './examNormalizer';
 import { scoreRadiologyMatch, CONFIDENCE_THRESHOLD } from './examLibrary';
 import {
@@ -391,34 +391,156 @@ function dictionaryKnownNames(entry: Pick<ExamDictionaryEntry, 'canonicalDisplay
   ].filter(Boolean);
 }
 
+export type InstitutionResolverMatchType =
+  | 'exact_institution_match'
+  | 'ocr_tolerant_institution_match'
+  | 'ambiguous_institution_match'
+  | 'no_institution_match';
+
+export interface InstitutionResolverCandidate {
+  entry: ExamDictionaryEntry;
+  procedureType: string;
+  matchType: Exclude<InstitutionResolverMatchType, 'no_institution_match'>;
+  confidence: number;
+  score: number;
+  exact: boolean;
+  corrections: string[];
+  hardConflicts: string[];
+}
+
+export interface InstitutionResolverResult {
+  matchType: InstitutionResolverMatchType;
+  candidates: InstitutionResolverCandidate[];
+  alternatives: InstitutionResolverCandidate[];
+}
+
+function ocrTolerantInstitutionKey(raw: string): string {
+  return normalizeRadiologyDescription(raw)
+    .replace(/\bOBLIGUE\b/g, 'OBLIQUE')
+    .replace(/\bABDCOMEN\b/g, 'ABDOMEN')
+    .replace(/\bCONTRST\b/g, 'CONTRAST')
+    .replace(/\bWCONTRAST\b/g, 'W CONTRAST')
+    .replace(/\bWOCONTRAST\b/g, 'WO CONTRAST')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function institutionNameKeys(name: string): { normalized: string; spaceless: string; tolerant: string; tolerantSpaceless: string; tokens: string[] } {
+  const normalized = normalizeRadiologyDescription(name);
+  const tolerant = ocrTolerantInstitutionKey(name);
+  return {
+    normalized,
+    spaceless: normalized.replace(/\s+/g, ''),
+    tolerant,
+    tolerantSpaceless: tolerant.replace(/\s+/g, ''),
+    tokens: tokenize(normalizeExamText(tolerant)),
+  };
+}
+
+function institutionCorrections(rawInput: string, procedureType: string): string[] {
+  const raw = normalizeOcrExamTextForMatching(rawInput).toUpperCase();
+  const known = normalizeOcrExamTextForMatching(procedureType).toUpperCase();
+  const corrections: string[] = [];
+  if (raw.replace(/\s+/g, '') !== known.replace(/\s+/g, '')) corrections.push('spacing/spelling normalized');
+  if (/\b(?:PORFABLE|FORTABLE|PORTBLE)\b/.test(raw) && /\bPORTABLE\b/.test(known)) corrections.push('portable OCR spelling corrected');
+  if (/\bOBLIGUE\b/.test(raw) && /\bOBLIQUE\b/.test(known)) corrections.push('oblique OCR spelling corrected');
+  if (/\bABDCOMEN\b/.test(raw) && /\bABDOMEN\b/.test(known)) corrections.push('abdomen OCR spelling corrected');
+  if (/\b(?:WCONTRAST|WOCONTRAST|CONTRST)\b/.test(raw) && /\bCONTRAST\b/.test(known)) corrections.push('contrast OCR spacing/spelling corrected');
+  return Array.from(new Set(corrections));
+}
+
+function institutionHardConflicts(rawInput: string, procedureType: string): string[] {
+  return hasClinicallyMeaningfulInstitutionDifference(rawInput, procedureType)
+    ? ['clinically meaningful distinction differs']
+    : [];
+}
+
+function scoreInstitutionEntry(rawInput: string, entry: ExamDictionaryEntry): InstitutionResolverCandidate {
+  const inputKeys = institutionNameKeys(rawInput);
+  const inputLane = detectModalityLane(rawInput);
+  const knownNames = dictionaryKnownNames(entry);
+  let best = {
+    procedureType: entry.institutionProcedureName ?? entry.canonicalDisplayName,
+    normalizedScore: 0,
+    spacelessScore: 0,
+    tolerantScore: 0,
+    tokenScore: 0,
+    exact: false,
+  };
+
+  for (const name of knownNames) {
+    const keys = institutionNameKeys(name);
+    const exact = keys.normalized === inputKeys.normalized || keys.spaceless === inputKeys.spaceless || keys.tolerantSpaceless === inputKeys.tolerantSpaceless;
+    const normalizedScore = stringSimilarity(inputKeys.normalized, keys.normalized);
+    const spacelessScore = stringSimilarity(inputKeys.spaceless, keys.spaceless);
+    const tolerantScore = stringSimilarity(inputKeys.tolerantSpaceless, keys.tolerantSpaceless);
+    const tokenScore = tokenOverlapScore(inputKeys.tokens, keys.tokens);
+    const score = exact ? 1 : Math.max(normalizedScore * 0.78, spacelessScore * 0.95, tolerantScore * 0.98, tokenScore * 0.82);
+    const current = best.exact ? 1 : Math.max(best.normalizedScore * 0.78, best.spacelessScore * 0.95, best.tolerantScore * 0.98, best.tokenScore * 0.82);
+    if (score > current) {
+      best = { procedureType: name, normalizedScore, spacelessScore, tolerantScore, tokenScore, exact };
+    }
+  }
+
+  const modalityBonus = inputLane && entry.modality && rowMatchesModalityLane({ modality: entry.modality, description: entry.canonicalDisplayName, cptCode: entry.cptCodes[0] ?? '', modifier: '26', workRvu: 1, statusCategory: 'active' } as CptRvuRow, inputLane)
+    ? 0.03
+    : 0;
+  const hardConflicts = institutionHardConflicts(rawInput, best.procedureType);
+  const baseScore = best.exact ? 1 : Math.max(best.normalizedScore * 0.78, best.spacelessScore * 0.95, best.tolerantScore * 0.98, best.tokenScore * 0.82) + modalityBonus;
+  const score = hardConflicts.length > 0 ? Math.min(baseScore, 0.72) : Math.min(1, baseScore);
+  const matchType: InstitutionResolverCandidate['matchType'] = best.exact
+    ? 'exact_institution_match'
+    : 'ocr_tolerant_institution_match';
+
+  return {
+    entry,
+    procedureType: best.procedureType,
+    matchType,
+    confidence: best.exact ? 0.985 : Math.min(0.96, Math.max(0.72, score * 0.96)),
+    score,
+    exact: best.exact,
+    corrections: institutionCorrections(rawInput, best.procedureType),
+    hardConflicts,
+  };
+}
+
+export function resolveInstitutionProcedure(rawInput: string, entries: ExamDictionaryEntry[], maxResults = 5): InstitutionResolverResult {
+  const institutionEntries = entries.filter((entry) => entry.source === 'institution' && entry.cptCodes.length > 0);
+  if (!rawInput.trim() || institutionEntries.length === 0) {
+    return { matchType: 'no_institution_match', candidates: [], alternatives: [] };
+  }
+
+  const scored = institutionEntries
+    .map((entry) => scoreInstitutionEntry(rawInput, entry))
+    .filter((candidate) => candidate.exact || (candidate.score >= 0.80 && candidate.hardConflicts.length === 0))
+    .sort((a, b) => Number(b.exact) - Number(a.exact) || b.score - a.score);
+  if (scored.length === 0) return { matchType: 'no_institution_match', candidates: [], alternatives: [] };
+
+  const top = scored[0];
+  const close = scored.filter((candidate) => candidate.entry.id !== top.entry.id && top.score - candidate.score <= 0.10);
+  if (!top.exact && close.length > 0) {
+    return {
+      matchType: 'ambiguous_institution_match',
+      candidates: [top, ...close].slice(0, maxResults).map((candidate) => ({ ...candidate, matchType: 'ambiguous_institution_match' })),
+      alternatives: [top, ...close].slice(0, maxResults),
+    };
+  }
+
+  return {
+    matchType: top.exact ? 'exact_institution_match' : 'ocr_tolerant_institution_match',
+    candidates: scored.slice(0, maxResults),
+    alternatives: scored.slice(1, maxResults),
+  };
+}
+
 async function candidatesForInstitutionMappings(rawInput: string, maxResults: number): Promise<MatchCandidate[]> {
-  const normalized = normalizeRadiologyDescription(rawInput);
-  if (!normalized) return [];
-  const normalizedSpaceless = spacelessKey(rawInput);
   const entries = (await db.examDictionary.toArray())
     .filter((entry) => entry.source === 'institution' && entry.cptCodes.length > 0);
-  const scored = entries
-    .map((entry) => {
-      const knownNames = dictionaryKnownNames(entry);
-      const exact = knownNames.some((name) =>
-        normalizeRadiologyDescription(name) === normalized ||
-        spacelessKey(name) === normalizedSpaceless,
-      );
-      const bestScore = exact
-        ? 1
-        : Math.max(...knownNames.map((name) => combinedSimilarity(normalized, normalizeRadiologyDescription(name))), 0);
-      const bestName = knownNames
-        .map((name) => ({ name, score: combinedSimilarity(normalized, normalizeRadiologyDescription(name)) }))
-        .sort((a, b) => b.score - a.score)[0]?.name ?? entry.canonicalDisplayName;
-      return { entry, exact, score: bestScore, bestName };
-    })
-    .filter((item) => item.exact || (item.score >= 0.78 && !hasClinicallyMeaningfulInstitutionDifference(rawInput, item.bestName)))
-    .sort((a, b) => Number(b.exact) - Number(a.exact) || b.score - a.score)
-    .slice(0, maxResults);
+  const resolution = resolveInstitutionProcedure(rawInput, entries, maxResults);
+  const scored = resolution.candidates.slice(0, maxResults);
 
   const candidates: MatchCandidate[] = [];
-  for (const { entry, exact, score } of scored) {
-    const confidence = exact ? 0.985 : Math.min(0.9, Math.max(0.76, score * 0.92));
+  for (const { entry, confidence, matchType, procedureType, corrections, hardConflicts } of scored) {
     for (const serialized of entry.cptCodes) {
       const { cptCode } = parseAliasCode(serialized);
       const rows = await getModifier26Rows(cptCode);
@@ -432,12 +554,12 @@ async function candidatesForInstitutionMappings(rawInput: string, maxResults: nu
         );
         if (candidate.explanation) {
           candidate.explanation.detail =
-            `${exact ? 'institution exact' : 'near institution'}; ${row.cptCode}${row.modifier ? `-${row.modifier}` : ''} from Institution procedure dictionary; spreadsheet procedure: ${entry.institutionProcedureName ?? entry.canonicalDisplayName}; CPT group: ${entry.cptCodes.join(', ')}`;
+            `${matchType}; ${row.cptCode}${row.modifier ? `-${row.modifier}` : ''} from Institution procedure dictionary; spreadsheet procedure: ${entry.institutionProcedureName ?? procedureType}; CPT group: ${entry.cptCodes.join(', ')}${corrections.length ? `; corrections: ${corrections.join(', ')}` : ''}${hardConflicts.length ? `; conflicts: ${hardConflicts.join(', ')}` : ''}`;
         }
         candidates.push(candidate);
       }
     }
-    if (dedupeCandidates(candidates).length >= maxResults && !exact) break;
+    if (dedupeCandidates(candidates).length >= maxResults && matchType !== 'exact_institution_match') break;
   }
   return candidates;
 }
@@ -477,6 +599,7 @@ function hasClinicallyMeaningfulInstitutionDifference(rawInput: string, dictiona
     [/\bLEFT\b/, /\bRIGHT\b/],
     [/\bLIMITED\b/, /\bCOMPLETE\b/],
     [/\bUNILATERAL\b/, /\bBILATERAL\b/],
+    [/\bARTERIAL\b/, /\bVENOUS\b/],
   ];
   for (const [a, b] of pairedChecks) {
     if ((hasWord(raw, a) && hasWord(known, b)) || (hasWord(raw, b) && hasWord(known, a))) return true;
@@ -485,6 +608,19 @@ function hasClinicallyMeaningfulInstitutionDifference(rawInput: string, dictiona
   const rawViews = viewCountSignature(raw);
   const knownViews = viewCountSignature(known);
   if (rawViews && knownViews && rawViews !== knownViews) return true;
+
+  const exclusiveBodyPairs: Array<[RegExp, RegExp]> = [
+    [/\bCHEST\b/, /\bRIBS?\b/],
+    [/\bABDOMEN\b|\bABD\b/, /\bPELVIS\b|\bPEL\b/],
+    [/\bHEAD\b/, /\bNECK\b/],
+  ];
+  for (const [a, b] of exclusiveBodyPairs) {
+    const rawA = hasWord(raw, a);
+    const rawB = hasWord(raw, b);
+    const knownA = hasWord(known, a);
+    const knownB = hasWord(known, b);
+    if (rawA !== knownA && rawB !== knownB) return true;
+  }
 
   return false;
 }

@@ -9,7 +9,7 @@ const MODALITY_PREFIX_SPACING: Array<[RegExp, string]> = [
 ];
 
 const RADIOLOGY_OCR_CORRECTIONS: Array<[RegExp, string]> = [
-  [/\bXR\s*CHEST\s*[- ]?\s*(?:PORTABLE|FORTABLE|PORTBLE)\b/gi, 'XR CHEST PORTABLE'],
+  [/\bXR\s*CHEST\s*[- ]?\s*(?:PORTABLE|PORFABLE|FORTABLE|PORTBLE)\b/gi, 'XR CHEST PORTABLE'],
   [/\bOBLIGUE\b/gi, 'OBLIQUE'],
   [/\bCONTRST\b/gi, 'CONTRAST'],
   [/\bCONTRASTT\b/gi, 'CONTRAST'],
