@@ -64,6 +64,13 @@ export interface OCRImportDebugInfo {
 
 type ColumnOcrResults = Record<PowerScribeColumnName, OcrResult>;
 
+interface ReassembledColumnRow {
+  line: string;
+  rawProcedureColumnText: string;
+  rawExamDateColumnText: string;
+  rawModifiedDateColumnText: string;
+}
+
 const COLUMN_OCR_PARAMS: Record<PowerScribeColumnName, { pageSegMode: PSM; charWhitelist: string }> = {
   procedure: {
     pageSegMode: PSM.SINGLE_BLOCK,
@@ -132,7 +139,7 @@ function nearbyColumnText(lines: OcrPositionedLine[], y: number, tolerance: numb
   return parts.join(' ').replace(/\s{2,}/g, ' ').trim();
 }
 
-function reassembleColumnRows(results: ColumnOcrResults): string[] {
+function reassembleColumnRowsWithDebug(results: ColumnOcrResults): ReassembledColumnRow[] {
   const procedureLines = results.procedure.positionedLines;
   const examLines = results.examDate.positionedLines;
   const modifiedLines = results.modifiedDate.positionedLines;
@@ -163,26 +170,42 @@ function reassembleColumnRows(results: ColumnOcrResults): string[] {
 
   if (rowCenters.length === 0) {
     const maxLength = Math.max(results.procedure.lines.length, results.examDate.lines.length, results.modifiedDate.lines.length);
-    return Array.from({ length: maxLength }, (_, index) => [
-      results.procedure.lines[index] ?? 'UNCLEAR POWERSCRIBE ROW',
-      results.examDate.lines[index] ?? '',
-      results.modifiedDate.lines[index] ?? '',
-    ].join(' ').trim());
+    return Array.from({ length: maxLength }, (_, index) => {
+      const rawProcedureColumnText = normalizeColumnLineText(results.procedure.lines[index] ?? 'UNCLEAR POWERSCRIBE ROW');
+      const rawExamDateColumnText = normalizeColumnLineText(results.examDate.lines[index] ?? '');
+      const rawModifiedDateColumnText = normalizeColumnLineText(results.modifiedDate.lines[index] ?? '');
+      return {
+        line: [rawProcedureColumnText, rawExamDateColumnText, rawModifiedDateColumnText].join(' ').trim(),
+        rawProcedureColumnText,
+        rawExamDateColumnText,
+        rawModifiedDateColumnText,
+      };
+    });
   }
 
   return rowCenters
     .sort((a, b) => a - b)
     .map((center) => {
       const procedure = nearestLine(procedureLines, center, tolerance);
-      const examDate = nearbyColumnText(examLines, center, tolerance);
-      const modifiedDate = nearbyColumnText(modifiedLines, center, tolerance);
-      return [
-        normalizeColumnLineText(procedure?.text ?? 'UNCLEAR POWERSCRIBE ROW'),
-        examDate,
-        modifiedDate,
-      ].join(' ').replace(/\s{2,}/g, ' ').trim();
+      const rawProcedureColumnText = normalizeColumnLineText(procedure?.text ?? 'UNCLEAR POWERSCRIBE ROW');
+      const rawExamDateColumnText = nearbyColumnText(examLines, center, tolerance);
+      const rawModifiedDateColumnText = nearbyColumnText(modifiedLines, center, tolerance);
+      return {
+        line: [
+          rawProcedureColumnText,
+          rawExamDateColumnText,
+          rawModifiedDateColumnText,
+        ].join(' ').replace(/\s{2,}/g, ' ').trim(),
+        rawProcedureColumnText,
+        rawExamDateColumnText,
+        rawModifiedDateColumnText,
+      };
     })
-    .filter((line) => line.length > 0);
+    .filter((row) => row.line.length > 0);
+}
+
+function reassembleColumnRows(results: ColumnOcrResults): string[] {
+  return reassembleColumnRowsWithDebug(results).map((row) => row.line);
 }
 
 export function __testReassembleColumnRows(results: ColumnOcrResults): string[] {
@@ -234,17 +257,34 @@ export class OCRImportProvider implements ImportProvider {
         columnResults[column.name] = await provider.extractText(column.blob, COLUMN_OCR_PARAMS[column.name]);
       }
     }
-    let rowLines = columnResults ? reassembleColumnRows(columnResults) : result?.lines ?? [];
+    let columnDebugRows = columnResults ? reassembleColumnRowsWithDebug(columnResults) : [];
+    let rowLines = columnResults ? columnDebugRows.map((row) => row.line) : result?.lines ?? [];
     let parsedWithDebug = parseOcrLinesWithDebug(rowLines);
     if (columnResults && parsedWithDebug.rows.length === 0) {
       const fallbackLines = reassembleColumnRowsByIndex(columnResults);
       const fallbackParsed = parseOcrLinesWithDebug(fallbackLines);
       if (fallbackParsed.rows.length > 0 || fallbackLines.length > rowLines.length) {
         rowLines = fallbackLines;
+        columnDebugRows = fallbackLines.map((line) => ({
+          line,
+          rawProcedureColumnText: '',
+          rawExamDateColumnText: '',
+          rawModifiedDateColumnText: '',
+        }));
         parsedWithDebug = fallbackParsed;
       }
     }
-    const regexParsed = parsedWithDebug.rows;
+    const columnDebugByLine = new Map(columnDebugRows.map((row) => [row.line, row]));
+    const regexParsed = parsedWithDebug.rows.map((row) => {
+      const debugRow = columnDebugByLine.get(row.rawText);
+      return {
+        ...row,
+        rawProcedureColumnText: debugRow?.rawProcedureColumnText ?? row.rawProcedureColumnText ?? null,
+        rawExamDateColumnText: debugRow?.rawExamDateColumnText ?? row.rawExamDateColumnText ?? null,
+        rawModifiedDateColumnText: debugRow?.rawModifiedDateColumnText ?? row.rawModifiedDateColumnText ?? null,
+        accessionNumber: null,
+      };
+    });
     const now = new Date().toISOString();
     const ocrConfidence = columnResults
       ? (columnResults.procedure.confidence + columnResults.examDate.confidence + columnResults.modifiedDate.confidence) / 3
@@ -302,7 +342,7 @@ export class OCRImportProvider implements ImportProvider {
         modifiedDateTime: p.modifiedDateTime ?? p.studyDateTime,
         modifiedTime: p.modifiedTime ?? p.examTime,
         modality: null,
-        accessionNumber: p.accessionNumber,
+        accessionNumber: null,
         patientMRN: null,
         rowIndex: p.rowIndex,
         cleanedExamName: p.cleanedExamName,

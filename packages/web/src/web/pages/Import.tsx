@@ -176,8 +176,12 @@ function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) 
               debug.detectedRows.map((row, index) => (
                 <p key={`${row.rawText}-${index}`} className="font-mono text-[11px] text-slate-400">
                   {index + 1}. {row.cleanedExamName ?? row.examName}
+                  {row.rawProcedureColumnText ? ` | proc "${row.rawProcedureColumnText}"` : ''}
+                  {row.rawExamDateColumnText ? ` | exam raw "${row.rawExamDateColumnText}"` : ''}
+                  {row.rawModifiedDateColumnText ? ` | read raw "${row.rawModifiedDateColumnText}"` : ''}
                   {` | exam ${row.examDateTime ?? row.examDate ?? row.studyDate ?? 'none'}`}
                   {` | read ${row.modifiedDateTime ?? row.modifiedDate ?? 'none'}`}
+                  {` | acc ${row.accessionNumber ?? 'none'}`}
                   {` | log ${row.modifiedDateTime ?? row.studyDateTime ?? 'none'}`}
                   {` | parser ${Math.round((row.extractionConfidence ?? 0) * 100)}%`}
                   {row.matchResult?.topCandidate ? ` | match ${row.matchResult.topCandidate}` : ' | no match'}
@@ -229,6 +233,10 @@ function candidateKey(candidate: MatchCandidate): string {
 }
 function procedureNameForSource(source: { procedureName?: string | null; cleanedExamName?: string | null; cleanedText?: string | null; examTitle: string }): string {
   return (source.procedureName ?? source.cleanedExamName ?? source.cleanedText ?? source.examTitle).trim();
+}
+
+export function shouldShowAccession(accessionNumber?: string | null): boolean {
+  return Boolean(accessionNumber?.trim());
 }
 
 function formatOcrTime(time: string): string {
@@ -1280,7 +1288,7 @@ export function Import({ onImported }: ImportProps) {
                     {cptSummary && (
                       <p className="mt-0.5 text-xs font-mono text-sky-300">{cptSummary}</p>
                     )}
-                    {row.source.accessionNumber && (
+                    {shouldShowAccession(row.source.accessionNumber) && (
                       <p className="text-xs text-slate-500">Acc: {row.source.accessionNumber}</p>
                     )}
                     {row.source.rowIndex && (

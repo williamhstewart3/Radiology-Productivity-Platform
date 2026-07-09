@@ -38,6 +38,8 @@ function stripTrailingOcrDateTimeGarbage(raw: string): string {
       .replace(/\s+\b[A-Z]?\/\d{4,8}\b$/i, '')
       .replace(/\s+\b[A-Z]?\d{0,2}20\d{2}\b$/i, '')
       .replace(/\s+\b[TF]\d{4,8}\b$/i, '')
+      .replace(/\s+\b\d{5,8}\b$/i, '')
+      .replace(/\s+\b\d{3,4}\s*(?:AM|PM)\b$/i, '')
       .replace(/\s+\b\d{1,2}\d{4}\b$/i, '')
       .replace(/\s{2,}/g, ' ')
       .trim();

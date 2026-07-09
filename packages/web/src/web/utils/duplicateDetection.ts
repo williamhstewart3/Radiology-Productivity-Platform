@@ -88,8 +88,9 @@ export function buildFingerprint(
   },
 ): string {
   // Tier 1: accession number — strongest possible identity
-  if (accessionNumber?.trim()) {
-    return `acc:${accessionNumber.trim().toUpperCase()}`;
+  const accessionAnchor = normalizeAccessionAnchor(accessionNumber);
+  if (accessionAnchor) {
+    return `acc:${accessionAnchor}`;
   }
 
   const normExam = normalizeExamText(examNameRaw);
@@ -179,6 +180,15 @@ function normalizeCptSet(cptCodes: Array<string | null | undefined>): string | n
   return normalized.length > 0 ? normalized.join('+') : null;
 }
 
+function normalizeAccessionAnchor(accessionNumber: string | null | undefined): string | null {
+  const accession = accessionNumber?.trim().toUpperCase();
+  if (!accession) return null;
+  const compact = accession.replace(/[\s-]/g, '');
+  if (/^\d{3,4}(?:AM|PM)?$/.test(compact)) return null;
+  if (/^\d{5,8}$/.test(compact) && (/20\d{2}/.test(compact) || compact.length === 8)) return null;
+  return accession;
+}
+
 function strictFingerprintForLog(log: StudyLog): string | null {
   return buildFingerprint(
     log.examNameRaw,
@@ -240,10 +250,10 @@ export async function checkOneDuplicate(
   for (const log of logs) {
     // ── Tier 1: exact — accession number match ──────────────────────────
     if (
-      candidate.accessionNumber?.trim() &&
-      log.accessionNumber?.trim() &&
-      candidate.accessionNumber.trim().toUpperCase() ===
-        log.accessionNumber.trim().toUpperCase()
+      normalizeAccessionAnchor(candidate.accessionNumber) &&
+      normalizeAccessionAnchor(log.accessionNumber) &&
+      normalizeAccessionAnchor(candidate.accessionNumber) ===
+        normalizeAccessionAnchor(log.accessionNumber)
     ) {
       return {
         confidence: 'exact',

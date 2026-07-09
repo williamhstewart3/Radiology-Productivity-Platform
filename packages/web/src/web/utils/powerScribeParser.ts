@@ -9,6 +9,9 @@ import { parseDateTimeFromOcr, parseDateTimeMatchesFromOcr } from './studyDatePa
 
 export interface ParsedLine {
   rawText: string;
+  rawProcedureColumnText?: string | null;
+  rawExamDateColumnText?: string | null;
+  rawModifiedDateColumnText?: string | null;
   procedureName: string;
   examName: string;
   cleanedExamName: string;
@@ -214,12 +217,6 @@ function stripDatesAndIdentifiers(text: string, dateRanges: Array<{ index: numbe
   if (accMatch) {
     accessionNumber = accMatch[1];
     working = working.replace(accMatch[0], ' ');
-  } else {
-    const fallback = working.match(STANDALONE_LONG_NUMBER);
-    if (fallback) {
-      accessionNumber = fallback[1];
-      working = working.replace(fallback[0], ' ');
-    }
   }
 
   return { text: stripUiText(working), accessionNumber };

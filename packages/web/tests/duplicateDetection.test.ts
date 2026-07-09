@@ -98,6 +98,31 @@ describe('strict duplicate detection', () => {
     expect(match?.confidence).toBe('exact');
   });
 
+  test('date-like numeric OCR fragments are not accession duplicate anchors', async () => {
+    const match = await checkOneDuplicate(
+      candidate({
+        accessionNumber: '1112026',
+        studyDateTime: null,
+        performedDateTime: null,
+        modifiedDateTime: null,
+      }),
+      [log({
+        accessionNumber: '1112026',
+        studyDateTime: null,
+        examDateTime: null,
+        dateTimeConfidence: 0.85,
+      })],
+    );
+
+    expect(match?.confidence).not.toBe('exact');
+    expect(__testBatchDuplicateKey(candidate({
+      accessionNumber: '1112026',
+      studyDateTime: null,
+      performedDateTime: null,
+      modifiedDateTime: null,
+    }))).toBeNull();
+  });
+
   test('same CPT/title/performed datetime/modified datetime is exact and strong enough for batch duplicate detection', async () => {
     const match = await checkOneDuplicate(candidate(), [log()]);
     const key = __testBatchDuplicateKey(candidate());

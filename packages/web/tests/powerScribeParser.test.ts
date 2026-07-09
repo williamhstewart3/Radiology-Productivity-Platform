@@ -59,6 +59,24 @@ describe('PowerScribe OCR parser date-time preservation', () => {
     ]);
   });
 
+  test('does not treat damaged PowerScribe date/time fragments as accessions', () => {
+    const rows = parseOcrLines([
+      'XR ABDOMEN AP 1112026',
+      'XR CHEST PORTABLE 1212026',
+      'XR CHEST PORTABLE 7182026',
+      'XR CHEST PORTABLE 07082026',
+      'XR CHEST PORTABLE 22026',
+      'XR CHEST PORTABLE 212026',
+      'XR CHEST PORTABLE 819AM',
+      'XR CHEST PORTABLE 819',
+      'XR CHEST PORTABLE 215PM',
+    ]);
+
+    expect(rows).toHaveLength(9);
+    expect(rows.every((row) => row.accessionNumber === null)).toBe(true);
+    expect(rows[0].procedureName).toBe('XR ABDOMEN AP');
+  });
+
   test('splits joined neighboring OCR rows instead of matching merged procedure text', () => {
     const rows = parseOcrLines([
       've 51 XR CHEST PA AND LATERAL 7/2/2026 2:16 PM 7/2/2026 2:36 PM / 52 XRCHEST PORTABLE 7/2/2026 3:00 PM 7/2/2026 3:12 PM',

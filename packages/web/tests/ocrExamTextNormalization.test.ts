@@ -19,6 +19,8 @@ describe('OCR exam text normalization', () => {
     ['XR ABDOMEN AP A2026 AT AM', 'XR ABDOMEN AP'],
     ['XR WRIST RIGHT PA LATERAL AND OBLIGUE T2026 212026', 'XR WRIST RIGHT PA LATERAL AND OBLIQUE'],
     ['CT HEAD WO CONTRAST T212026', 'CT HEAD WO CONTRAST'],
+    ['XR ABDOMEN AP 1112026', 'XR ABDOMEN AP'],
+    ['XR CHEST PORTABLE 819AM', 'XR CHEST PORTABLE'],
   ])('%s', (raw, expected) => {
     expect(normalizeOcrExamTextForMatching(raw)).toBe(expected);
   });
