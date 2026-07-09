@@ -14,6 +14,8 @@ import type {
   HospitalComparisonReport,
   MemorySuggestion,
   OcrLearningEntry,
+  FeedbackEvent,
+  CorrectionAction,
 } from '../types';
 import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from '../data/acrRadiologyActiveCptSet';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
@@ -39,6 +41,8 @@ export class RvuDatabase extends Dexie {
   hospitalComparisonReports!: Table<HospitalComparisonReport, string>;
   memorySuggestions!: Table<MemorySuggestion, string>;
   ocrLearningEntries!: Table<OcrLearningEntry, string>;
+  feedbackEvents!: Table<FeedbackEvent, string>;
+  correctionActions!: Table<CorrectionAction, string>;
 
   constructor() {
     super('rvu_tracker_db');
@@ -406,6 +410,26 @@ export class RvuDatabase extends Dexie {
       return trans.table('examDictionary').toCollection().modify((entry) => {
         if (!('source' in entry)) entry.source = 'curated';
       });
+    });
+
+    // v20: in-app AI Review Assistant feedback and user-approved correction audit.
+    this.version(20).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, siteId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      ocrLearningEntries: 'id, profileId, siteId, normalizedOcrText, matchedCpt, lastUsedAt',
+      activeReviewSessions: 'id, profileId, readingDate, status, updatedAt',
+      auditLogEntries: 'id, profileId, siteId, sessionId, logDate, action, createdAt',
+      hospitalComparisonReports: 'id, profileId, siteId, reportDate, createdAt',
+      memorySuggestions: 'id, profileId, siteId, normalizedKey, status, createdAt',
+      feedbackEvents: 'id, profileId, sessionId, category, severity, status, createdAt',
+      correctionActions: 'id, feedbackEventId, targetRowId, actionType, createdAt, appliedAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
     });
   }
 }

@@ -31,9 +31,16 @@ import {
   type TimelineEvent,
 } from '../services/reviewSessionService';
 import { rememberCorrectedExam } from '../services/memoryLearningService';
+import {
+  buildCorrectedTitleRow,
+  buildSplitRows,
+  createAssistantArtifacts,
+  generateFeedbackSummary,
+  type AssistantResponse,
+} from '../services/aiReviewAssistantService';
 import { processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
-import type { DuplicateStatus, MatchCandidate } from '../types';
+import type { CorrectionAction, FeedbackEvent, FeedbackEventCategory, DuplicateStatus, MatchCandidate } from '../types';
 
 // ─── ExamSearchPanel ─────────────────────────────────────────────────────────
 
@@ -471,6 +478,15 @@ type Step = 'input' | 'review' | 'done';
 type ReviewMode = 'unknowns' | 'everything' | 'auto' | 'low';
 type ImportToastTone = 'info' | 'success' | 'warning' | 'danger';
 
+type AssistantQuickOption = { label: string; category: FeedbackEventCategory; prompt: string };
+
+interface AssistantPanelState {
+  rowId: string;
+  response: AssistantResponse;
+  feedbackEvent: FeedbackEvent;
+  actions: CorrectionAction[];
+}
+
 interface ImportToast {
   id: string;
   tone: ImportToastTone;
@@ -502,6 +518,19 @@ function ImportToastStack({ toasts }: { toasts: ImportToast[] }) {
   );
 }
 
+const ASSISTANT_QUICK_OPTIONS: AssistantQuickOption[] = [
+  { label: 'Wrong CPT', category: 'wrong_cpt', prompt: 'The selected CPT is wrong.' },
+  { label: 'Not a duplicate', category: 'wrong_duplicate', prompt: 'This is not a duplicate.' },
+  { label: 'Should be duplicate', category: 'wrong_duplicate', prompt: 'This should be marked as a duplicate.' },
+  { label: 'Missing time', category: 'missing_datetime', prompt: 'The exam or read time is missing or wrong.' },
+  { label: 'Bad OCR text', category: 'bad_ocr', prompt: 'The OCR text is wrong.' },
+  { label: 'Bad cleanup', category: 'bad_exam_cleanup', prompt: 'The normalized exam name is wrong.' },
+  { label: 'Two exams merged', category: 'merged_ocr_rows', prompt: 'This is two exams recognized as one. The second modality starts a new row.' },
+  { label: 'Should auto-approve', category: 'should_auto_approve', prompt: 'This should auto-approve.' },
+  { label: 'Should require review', category: 'bad_auto_approval', prompt: 'This should require review.' },
+  { label: 'Add mapping', category: 'institution_mapping_needed', prompt: 'This should have matched the institution dictionary.' },
+];
+
 export function Import({ onImported }: ImportProps) {
   const { activeProfile, activePractice } = useProfile();
   const [mode, setMode]           = useState<Mode>('ocr');
@@ -526,6 +555,13 @@ export function Import({ onImported }: ImportProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [toasts, setToasts] = useState<ImportToast[]>([]);
+  const [assistantTempId, setAssistantTempId] = useState<string | null>(null);
+  const [assistantPrompt, setAssistantPrompt] = useState('');
+  const [assistantPanel, setAssistantPanel] = useState<AssistantPanelState | null>(null);
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [feedbackQueueOpen, setFeedbackQueueOpen] = useState(false);
+  const [feedbackEvents, setFeedbackEvents] = useState<FeedbackEvent[]>([]);
+  const [feedbackSummary, setFeedbackSummary] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const processingRef = useRef(false);
   const lastClipboardImageHashRef = useRef<string | null>(null);
@@ -565,6 +601,19 @@ export function Import({ onImported }: ImportProps) {
       else setReviewMode('unknowns');
     });
   }, []);
+
+  useEffect(() => {
+    if (!feedbackQueueOpen) return;
+    db.feedbackEvents
+      .orderBy('createdAt')
+      .reverse()
+      .limit(100)
+      .toArray()
+      .then((events) => {
+        setFeedbackEvents(events);
+        setFeedbackSummary(null);
+      });
+  }, [feedbackQueueOpen]);
 
   useEffect(() => {
     processingRef.current = processing;
@@ -944,6 +993,145 @@ export function Import({ onImported }: ImportProps) {
     setSearchPanelTempId(null);
   }
 
+  async function askAssistant(
+    row: PipelineReviewRow,
+    rowIndex: number,
+    requestText: string,
+    categoryHint?: FeedbackEventCategory,
+  ) {
+    const trimmed = requestText.trim();
+    if (!trimmed) return;
+    setAssistantBusy(true);
+    setError(null);
+    try {
+      const artifacts = createAssistantArtifacts({
+        requestText: trimmed,
+        categoryHint,
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+        row,
+        rowIndex,
+        rows: reviewRows,
+      });
+      await db.feedbackEvents.add(artifacts.feedbackEvent);
+      if (feedbackQueueOpen) {
+        setFeedbackEvents((events) => [artifacts.feedbackEvent, ...events]);
+      }
+      if (artifacts.correctionActions.length > 0) {
+        await db.correctionActions.bulkAdd(artifacts.correctionActions);
+      }
+      setAssistantPanel({
+        rowId: row.tempId,
+        response: artifacts.response,
+        feedbackEvent: artifacts.feedbackEvent,
+        actions: artifacts.correctionActions,
+      });
+      setAssistantTempId(row.tempId);
+      pushToast('info', 'Assistant reviewed row', artifacts.response.explanation);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Assistant failed');
+      pushToast('danger', 'Assistant failed', e instanceof Error ? e.message : 'Could not create feedback.');
+    } finally {
+      setAssistantBusy(false);
+    }
+  }
+
+  async function applyAssistantAction(action: CorrectionAction) {
+    const row = reviewRows.find((item) => item.tempId === action.targetRowId);
+    if (!row) return;
+
+    setAssistantBusy(true);
+    try {
+      if (action.actionType === 'correct_exam_title') {
+        const proposed = action.proposedRowJson ? JSON.parse(action.proposedRowJson) as { procedureName?: string } : {};
+        if (!proposed.procedureName) throw new Error('No corrected title was proposed.');
+        const corrected = await buildCorrectedTitleRow(row, proposed.procedureName, activeProfile?.id ?? null);
+        setReviewRows((rows) => rows.map((item) => item.tempId === row.tempId ? corrected : item));
+      } else if (action.actionType === 'correct_cpt') {
+        const proposed = action.proposedRowJson ? JSON.parse(action.proposedRowJson) as { cptCodes?: string[] } : {};
+        const codes = proposed.cptCodes ?? [];
+        const candidates: MatchCandidate[] = [];
+        for (const code of codes) {
+          const results = await searchExamLibrary(code, 4);
+          const valid = results.find((candidate) => candidate.cptCode === code && candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0);
+          if (valid) candidates.push(valid);
+        }
+        if (candidates.length === 0) throw new Error('No modifier 26 RVU row was found for the requested CPT.');
+        const patch = buildManualSelectionPatch(row, candidates, true);
+        updateRow(row.tempId, {
+          ...patch,
+          needsReview: false,
+          reviewReason: 'Corrected by AI Assistant / user approved',
+          duplicateStatus: null,
+          duplicateReason: null,
+          duplicateExistingLogId: null,
+          autoApproved: false,
+          autoApprovalLevel: null,
+        });
+      } else if (action.actionType === 'split_merged_row') {
+        const proposedRows = action.proposedNewRowsJson
+          ? JSON.parse(action.proposedNewRowsJson) as Array<{ procedureName: string; examDateTime: string | null; modifiedDateTime: string | null; dateTimePairingConfidence: number; reviewReason: string }>
+          : [];
+        if (proposedRows.length === 0) throw new Error('No split rows were proposed.');
+        const splitRows = await buildSplitRows(row, proposedRows, activeProfile?.id ?? null);
+        setReviewRows((rows) => rows.flatMap((item) => item.tempId === row.tempId ? splitRows : [item]));
+      } else if (action.actionType === 'mark_not_duplicate') {
+        updateRow(row.tempId, {
+          duplicateStatus: null,
+          duplicateReason: null,
+          duplicateExistingLogId: null,
+          autoSkipped: false,
+          included: true,
+          needsReview: true,
+          reviewReason: 'Marked not duplicate by AI Assistant / user approved',
+        });
+      } else if (action.actionType === 'mark_duplicate') {
+        updateRow(row.tempId, {
+          duplicateStatus: 'exact',
+          duplicateReason: 'Marked duplicate by user-approved assistant correction',
+          included: false,
+          needsReview: true,
+          reviewReason: 'Marked duplicate by AI Assistant / user approved',
+        });
+      }
+
+      await db.correctionActions.update(action.id, {
+        approvedByUser: true,
+        appliedAt: new Date().toISOString(),
+      });
+      addTimeline(`Assistant correction applied: ${action.actionType.replace(/_/g, ' ')}`);
+      pushToast('success', 'Assistant correction applied', action.explanation);
+      setAssistantPanel((panel) =>
+        panel
+          ? {
+              ...panel,
+              actions: panel.actions.map((item) =>
+                item.id === action.id ? { ...item, approvedByUser: true, appliedAt: new Date().toISOString() } : item,
+              ),
+            }
+          : panel,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Correction failed');
+      pushToast('danger', 'Correction failed', e instanceof Error ? e.message : 'The row was not changed.');
+    } finally {
+      setAssistantBusy(false);
+    }
+  }
+
+  function saveAssistantFeedbackOnly() {
+    setAssistantPanel(null);
+    setAssistantPrompt('');
+    pushToast('success', 'Feedback saved', 'No review rows were changed.');
+  }
+
+  function showFeedbackSummary() {
+    const summary = generateFeedbackSummary(feedbackEvents);
+    setFeedbackSummary(summary.codexPrompt);
+  }
+
   const includedCount = reviewRows.filter((r) => r.included).length;
   const matchedCount = reviewRows.filter((r) => r.included && getSelectedCandidates(r).length > 0).length;
   const selectedCodeCount = reviewRows
@@ -1045,12 +1233,65 @@ export function Import({ onImported }: ImportProps) {
             </p>
           </div>
           <button
+            onClick={() => setFeedbackQueueOpen((open) => !open)}
+            className="text-xs px-3 py-1.5 rounded-lg border border-sky-500/25 text-sky-300 hover:bg-sky-500/10 transition-colors"
+          >
+            Feedback Queue
+          </button>
+          <button
             onClick={() => setStep('input')}
             className="text-sm text-slate-400 hover:text-white transition-colors"
           >
             ← Back
           </button>
         </div>
+
+        {feedbackQueueOpen && (
+          <div className="card space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-white">Feedback Queue</p>
+                <p className="text-xs text-slate-500">Structured OCR review feedback saved locally for later mapping, issue, or Codex prompt generation.</p>
+              </div>
+              <button
+                onClick={showFeedbackSummary}
+                disabled={feedbackEvents.length === 0}
+                className="btn-ghost text-xs disabled:opacity-40"
+              >
+                Generate developer summary
+              </button>
+            </div>
+            <div className="grid gap-2 md:grid-cols-4">
+              {(['wrong_duplicate', 'missing_datetime', 'merged_ocr_rows', 'wrong_cpt'] as FeedbackEventCategory[]).map((category) => (
+                <div key={category} className="rounded-lg border border-white/8 bg-white/3 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500">{category.replace(/_/g, ' ')}</p>
+                  <p className="text-lg font-bold text-white">{feedbackEvents.filter((event) => event.category === category).length}</p>
+                </div>
+              ))}
+            </div>
+            <div className="max-h-48 overflow-y-auto space-y-2">
+              {feedbackEvents.length === 0 ? (
+                <p className="text-xs text-slate-500">No feedback captured yet.</p>
+              ) : feedbackEvents.map((event) => (
+                <div key={event.id} className="rounded-lg border border-white/8 bg-black/15 px-3 py-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-slate-300">{event.category.replace(/_/g, ' ')}</span>
+                    <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-500">{event.severity}</span>
+                    <span className="ml-auto text-slate-500">{new Date(event.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+                  </div>
+                  <p className="mt-1 text-slate-300">{event.userComment}</p>
+                  {event.cleanedExamTitle && <p className="mt-1 font-mono text-[11px] text-slate-500">{event.cleanedExamTitle}</p>}
+                </div>
+              ))}
+            </div>
+            {feedbackSummary && (
+              <div className="rounded-lg border border-white/8 bg-black/20 p-3">
+                <p className="text-xs font-semibold text-slate-300">Codex-ready summary</p>
+                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">{feedbackSummary}</pre>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Date picker */}
         <div className="card">
@@ -1383,6 +1624,113 @@ export function Import({ onImported }: ImportProps) {
                 {isPossibleDupe && row.included && (
                   <div className="mb-2 px-3 py-2 rounded-lg bg-orange-500/8 border border-orange-500/20 text-xs text-orange-300/80">
                     {row.duplicateReason} — verify before saving or exclude this row.
+                  </div>
+                )}
+
+                {row.included && (
+                  <div className="mb-2 rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setAssistantTempId(assistantTempId === row.tempId ? null : row.tempId);
+                          setAssistantPrompt('');
+                          setAssistantPanel(null);
+                        }}
+                        className="text-xs px-2.5 py-1 rounded-lg border border-sky-500/25 text-sky-300 hover:bg-sky-500/10 transition-colors"
+                      >
+                        Ask Assistant / Fix
+                      </button>
+                      <span className="text-[11px] text-slate-500">Report / Teach:</span>
+                      {ASSISTANT_QUICK_OPTIONS.slice(0, 6).map((option) => (
+                        <button
+                          key={`${row.tempId}-${option.category}-${option.label}`}
+                          onClick={() => askAssistant(row, i, option.prompt, option.category)}
+                          disabled={assistantBusy}
+                          className="text-[11px] px-2 py-0.5 rounded-lg border border-white/10 text-slate-400 hover:border-white/25 hover:text-white disabled:opacity-40"
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {assistantTempId === row.tempId && (
+                      <div className="mt-3 space-y-3">
+                        <div className="flex gap-2">
+                          <input
+                            value={assistantPrompt}
+                            onChange={(event) => setAssistantPrompt(event.target.value)}
+                            placeholder="Tell the assistant what is wrong with this row..."
+                            className="input min-w-0 flex-1 text-xs"
+                          />
+                          <button
+                            onClick={() => askAssistant(row, i, assistantPrompt)}
+                            disabled={assistantBusy || !assistantPrompt.trim()}
+                            className="px-3 py-1.5 rounded-lg border border-sky-500/35 text-xs font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-40"
+                          >
+                            Ask
+                          </button>
+                        </div>
+
+                        {assistantPanel?.rowId === row.tempId && (
+                          <div className="rounded-xl border border-sky-500/20 bg-sky-500/8 p-3 text-xs">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <p className="font-semibold text-sky-200">Assistant interpretation</p>
+                                <p className="mt-1 text-slate-300">{assistantPanel.response.explanation}</p>
+                              </div>
+                              <button
+                                onClick={saveAssistantFeedbackOnly}
+                                className="rounded-lg border border-white/12 px-2 py-1 text-[11px] text-slate-300 hover:border-white/25"
+                              >
+                                Save feedback only
+                              </button>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
+                                {assistantPanel.response.problemType.replace(/_/g, ' ')}
+                              </span>
+                              <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
+                                {Math.round(assistantPanel.response.confidence * 100)}% confidence
+                              </span>
+                              {assistantPanel.response.requiresUserApproval && (
+                                <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-amber-300">
+                                  approval required
+                                </span>
+                              )}
+                            </div>
+                            {assistantPanel.response.safetyConcerns.length > 0 && (
+                              <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/8 px-2 py-1.5 text-amber-200/80">
+                                {assistantPanel.response.safetyConcerns.join(' ')}
+                              </div>
+                            )}
+                            {assistantPanel.actions.length > 0 && (
+                              <div className="mt-3 space-y-2">
+                                {assistantPanel.actions.map((action) => (
+                                  <div key={action.id} className="rounded-lg border border-white/10 bg-black/15 px-2.5 py-2">
+                                    <p className="font-semibold text-slate-200">{action.actionType.replace(/_/g, ' ')}</p>
+                                    <p className="mt-1 text-slate-400">{action.explanation}</p>
+                                    {action.proposedNewRowsJson && (
+                                      <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-black/20 p-2 font-mono text-[11px] text-slate-400">
+                                        {JSON.stringify(JSON.parse(action.proposedNewRowsJson), null, 2)}
+                                      </pre>
+                                    )}
+                                    <div className="mt-2 flex justify-end">
+                                      <button
+                                        onClick={() => applyAssistantAction(action)}
+                                        disabled={assistantBusy || action.approvedByUser || action.actionType === 'ignore'}
+                                        className="rounded-lg border border-emerald-500/30 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40"
+                                      >
+                                        {action.approvedByUser ? 'Applied' : 'Apply'}
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 

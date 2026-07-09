@@ -201,6 +201,84 @@ export interface ActiveReviewSession {
   finalizedAt: string | null;
 }
 
+export type FeedbackEventCategory =
+  | 'wrong_cpt'
+  | 'wrong_duplicate'
+  | 'missing_datetime'
+  | 'bad_ocr'
+  | 'bad_exam_cleanup'
+  | 'merged_ocr_rows'
+  | 'bad_auto_approval'
+  | 'should_auto_approve'
+  | 'institution_mapping_needed'
+  | 'ui_issue'
+  | 'other';
+
+export type FeedbackEventSeverity = 'low' | 'medium' | 'high' | 'blocking';
+export type FeedbackEventStatus = 'new' | 'reviewed' | 'converted_to_mapping' | 'converted_to_issue' | 'ignored' | 'resolved';
+
+export interface FeedbackEvent {
+  id: string;
+  createdAt: string;
+  profileId: string | null;
+  sessionId: string | null;
+  importId: string | null;
+  rowTempId: string | null;
+  studyLogId: string | null;
+  category: FeedbackEventCategory;
+  severity: FeedbackEventSeverity;
+  userComment: string;
+  rawOcrText: string | null;
+  rawProcedureText: string | null;
+  rawExamDateText: string | null;
+  rawModifiedDateText: string | null;
+  cleanedExamTitle: string | null;
+  normalizedExamTitle: string | null;
+  selectedCptCodes: string[];
+  candidateCpts: string[];
+  examDateTime: string | null;
+  modifiedDateTime: string | null;
+  duplicateStatus: DuplicateStatus;
+  duplicateReason: string | null;
+  duplicateFingerprint: string | null;
+  ocrProvider: string | null;
+  ocrConfidence: number | null;
+  llmCleanupUsed: boolean;
+  llmCleanupOutput: string | null;
+  expectedCorrectionJson: string | null;
+  assistantContextJson?: string | null;
+  assistantResponseJson?: string | null;
+  status: FeedbackEventStatus;
+}
+
+export type CorrectionActionType =
+  | 'correct_exam_title'
+  | 'correct_cpt'
+  | 'split_merged_row'
+  | 'correct_datetime'
+  | 'mark_not_duplicate'
+  | 'mark_duplicate'
+  | 'add_learned_alias'
+  | 'add_institution_mapping'
+  | 'ignore';
+
+export interface CorrectionAction {
+  id: string;
+  feedbackEventId: string;
+  createdAt: string;
+  actionType: CorrectionActionType;
+  targetRowId: string | null;
+  originalRowJson: string | null;
+  proposedRowJson: string | null;
+  proposedNewRowsJson: string | null;
+  explanation: string;
+  confidence: number;
+  requiresUserApproval: boolean;
+  approvedByUser: boolean;
+  appliedAt: string | null;
+  revertedAt: string | null;
+}
+
 export interface AuditLogEntry {
   id: string;
   profileId: string | null;
