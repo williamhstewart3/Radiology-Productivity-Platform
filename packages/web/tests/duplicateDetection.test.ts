@@ -167,4 +167,47 @@ describe('strict duplicate detection', () => {
 
     expect(exactDuplicateKeys).toHaveLength(1);
   });
+
+  test('initial repeated-CPT PowerScribe batch has zero exact duplicates when times differ', async () => {
+    const rows = [
+      candidate({
+        performedDateTime: '2026-07-01T17:18:00',
+        modifiedDateTime: '2026-07-02T07:59:00',
+        studyDateTime: '2026-07-02T07:59:00',
+      }),
+      candidate({
+        performedDateTime: '2026-07-01T19:06:00',
+        modifiedDateTime: '2026-07-02T08:03:00',
+        studyDateTime: '2026-07-02T08:03:00',
+      }),
+      candidate({
+        performedDateTime: '2026-07-01T19:54:00',
+        modifiedDateTime: '2026-07-02T08:04:00',
+        studyDateTime: '2026-07-02T08:04:00',
+      }),
+    ];
+
+    const keys = rows.map(__testBatchDuplicateKey);
+
+    expect(new Set(keys).size).toBe(3);
+  });
+
+  test('same multi-CPT set with different modified datetime is not duplicate', async () => {
+    const match = await checkOneDuplicate(
+      candidate({
+        cptCode: '71260',
+        cptCodes: ['71260', '74177'],
+        performedDateTime: '2026-07-07T08:19:00',
+        modifiedDateTime: '2026-07-07T14:30:00',
+        studyDateTime: '2026-07-07T14:30:00',
+      }),
+      [log({
+        cptCode: '71260',
+        examDateTime: '2026-07-07T08:19:00',
+        studyDateTime: '2026-07-07T09:00:00',
+      })],
+    );
+
+    expect(match?.confidence).not.toBe('exact');
+  });
 });

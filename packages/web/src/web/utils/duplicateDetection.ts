@@ -210,6 +210,10 @@ function sameMinute(a: string | null, b: string | null): boolean {
   return isoToDate(a) === isoToDate(b) && isoToMinuteBucket(a) === isoToMinuteBucket(b);
 }
 
+function hasStrictDateTimeIdentity(candidate: StudyCandidate): boolean {
+  return Boolean(candidate.performedDateTime && (candidate.modifiedDateTime ?? candidate.studyDateTime));
+}
+
 // ─── Core duplicate check ────────────────────────────────────────────────────
 
 /**
@@ -283,7 +287,9 @@ export async function checkOneDuplicate(
         return {
           confidence: 'possible',
           existingLog: log,
-          reason: 'Same exam title and read timestamp without full duplicate identity',
+          reason: hasStrictDateTimeIdentity(candidate)
+            ? 'Same exam title and read timestamp without full duplicate identity'
+            : 'Possible duplicate - missing time',
         };
       }
 
@@ -291,7 +297,7 @@ export async function checkOneDuplicate(
         return {
           confidence: 'possible',
           existingLog: log,
-          reason: 'Same exam title and performed exam date',
+          reason: 'Possible duplicate - missing time',
         };
       }
 
@@ -345,7 +351,9 @@ export async function checkOneDuplicate(
         return {
           confidence: 'possible',
           existingLog: log,
-          reason: `Same CPT (${candidate.cptCode}), same date, similar exam name`,
+          reason: hasStrictDateTimeIdentity(candidate)
+            ? `Same CPT (${candidate.cptCode}), same date, similar exam name`
+            : 'Possible duplicate - missing time',
         };
       }
     }

@@ -17,6 +17,7 @@ import { parseOcrLinesWithDebug, type OcrParseDebugInfo } from '../utils/powerSc
 import { getDefaultOcrProvider } from '../utils/ocrProvider';
 import { PSM } from 'tesseract.js';
 import { maybeEnhanceOcrWithLlm } from '../services/llmOcrExtractionService';
+import { parseDateTimeFromOcr } from '../utils/studyDateParser';
 import {
   DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
   preprocessPowerScribeColumnsForOcr,
@@ -221,6 +222,30 @@ function reassembleColumnRowsByIndex(results: ColumnOcrResults): string[] {
   ].join(' ').replace(/\s{2,}/g, ' ').trim()).filter(Boolean);
 }
 
+function applyColumnDateOverrides(row: ParsedLine, debugRow: ReassembledColumnRow | undefined): ParsedLine {
+  if (!debugRow) return row;
+  const exam = parseDateTimeFromOcr(debugRow.rawExamDateColumnText);
+  const modified = parseDateTimeFromOcr(debugRow.rawModifiedDateColumnText);
+  const examDateTime = exam?.studyDateTime ?? row.examDateTime;
+  const modifiedDateTime = modified?.studyDateTime ?? row.modifiedDateTime;
+
+  return {
+    ...row,
+    rawProcedureColumnText: debugRow.rawProcedureColumnText,
+    rawExamDateColumnText: debugRow.rawExamDateColumnText,
+    rawModifiedDateColumnText: debugRow.rawModifiedDateColumnText,
+    examDate: exam?.studyDate ?? row.examDate,
+    examTime: exam?.studyTime ?? row.examTime,
+    examDateTime,
+    studyDate: exam?.studyDate ?? row.studyDate,
+    studyDateTime: examDateTime,
+    modifiedDate: modified?.studyDate ?? row.modifiedDate,
+    modifiedTime: modified?.studyTime ?? row.modifiedTime,
+    modifiedDateTime,
+    dateTimeConfidence: Math.max(row.dateTimeConfidence, exam?.confidence ?? 0, modified?.confidence ?? 0),
+  };
+}
+
 export class OCRImportProvider implements ImportProvider {
   readonly name = 'OCR Screenshot';
   readonly sourceId = 'ocr' as const;
@@ -278,10 +303,7 @@ export class OCRImportProvider implements ImportProvider {
     const regexParsed = parsedWithDebug.rows.map((row) => {
       const debugRow = columnDebugByLine.get(row.rawText);
       return {
-        ...row,
-        rawProcedureColumnText: debugRow?.rawProcedureColumnText ?? row.rawProcedureColumnText ?? null,
-        rawExamDateColumnText: debugRow?.rawExamDateColumnText ?? row.rawExamDateColumnText ?? null,
-        rawModifiedDateColumnText: debugRow?.rawModifiedDateColumnText ?? row.rawModifiedDateColumnText ?? null,
+        ...applyColumnDateOverrides(row, debugRow),
         accessionNumber: null,
       };
     });

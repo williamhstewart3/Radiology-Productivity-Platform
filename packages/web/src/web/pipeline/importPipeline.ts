@@ -85,10 +85,10 @@ function selectedDuplicateCptCodes(candidates: MatchCandidate[], directCpt: stri
   return top ? [top.cptCode] : [];
 }
 
-function reviewReasonFor(top: MatchCandidate | undefined, candidates: MatchCandidate[], duplicateStatus: DuplicateStatus): string | null {
+function reviewReasonFor(top: MatchCandidate | undefined, candidates: MatchCandidate[], duplicateStatus: DuplicateStatus, duplicateReason?: string | null): string | null {
   if (!top) return 'New or unknown exam';
   if (!productivityRelevant(top)) return 'Not modifier 26 productivity RVU';
-  if (duplicateStatus === 'possible') return 'Possible duplicate';
+  if (duplicateStatus === 'possible') return duplicateReason ?? 'Possible duplicate';
   if (top.confidence < 0.95) return 'Low confidence match';
   const plausible = candidates.filter((candidate) => productivityRelevant(candidate) && candidate.confidence >= 0.65);
   if (plausible.length > 1 && plausible.every(isExactInstitutionMappingCandidate)) return null;
@@ -191,7 +191,7 @@ export async function runImportPipeline(
     const selectedCandidates = selectedCandidateIndices
       .map((index) => candidates[index])
       .filter((candidate): candidate is MatchCandidate => Boolean(candidate));
-    const matchReviewReason = reviewReasonFor(top, candidates, dupStatus);
+    const matchReviewReason = reviewReasonFor(top, candidates, dupStatus, dupReason);
     const reviewReason = study.parserReviewReason ?? matchReviewReason;
     const exactInstitutionAutoAccept =
       !parserNeedsReview &&

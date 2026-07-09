@@ -40,13 +40,44 @@ export function normalizedExamKey(row: PipelineReviewRow): string {
 }
 
 export function reviewSessionRowKey(row: PipelineReviewRow): string {
+  const selectedCptSet = getSelectedCandidates(row)
+    .map((candidate) => candidate.cptCode)
+    .filter(Boolean)
+    .sort()
+    .join('+');
+  if (selectedCptSet && row.source.examDateTime && row.source.modifiedDateTime) {
+    return [
+      'strict',
+      selectedCptSet,
+      row.source.examDateTime.slice(0, 16),
+      row.source.modifiedDateTime.slice(0, 16),
+    ].join('|');
+  }
+
   return [
+    'review',
     normalizedExamKey(row),
     row.source.modifiedDateTime ?? row.source.studyTime ?? '',
     row.source.modifiedDate ?? '',
     row.source.studyDate ?? '',
     row.source.accessionNumber ?? '',
     row.source.rowIndex ?? '',
+  ].join('|');
+}
+
+function reviewSessionExactDuplicateKey(row: PipelineReviewRow): string | null {
+  const selectedCptSet = getSelectedCandidates(row)
+    .map((candidate) => candidate.cptCode)
+    .filter(Boolean)
+    .sort()
+    .join('+');
+  const normalizedTitle = normalizedExamKey(row);
+  const identity = selectedCptSet || normalizedTitle;
+  if (!identity || !row.source.examDateTime || !row.source.modifiedDateTime) return null;
+  return [
+    identity,
+    row.source.examDateTime.slice(0, 16),
+    row.source.modifiedDateTime.slice(0, 16),
   ].join('|');
 }
 
@@ -75,22 +106,22 @@ export function mergeReviewSessionRows(
   nextRows: PipelineReviewRow[],
   nextSkippedRows: PipelineReviewRow[],
 ): { reviewRows: PipelineReviewRow[]; skippedRows: PipelineReviewRow[] } {
-  const existingKeys = new Set(currentRows.map(reviewSessionRowKey));
+  const existingKeys = new Set(currentRows.map(reviewSessionExactDuplicateKey).filter((key): key is string => Boolean(key)));
   const appendRows: PipelineReviewRow[] = [];
   const duplicateRows: PipelineReviewRow[] = [];
 
   for (const row of nextRows) {
-    const key = reviewSessionRowKey(row);
-    if (existingKeys.has(key)) {
+    const key = reviewSessionExactDuplicateKey(row);
+    if (key && existingKeys.has(key)) {
       duplicateRows.push({
         ...row,
         included: false,
         autoSkipped: true,
-        duplicateStatus: row.duplicateStatus ?? 'very_likely',
-        duplicateReason: row.duplicateReason ?? 'Duplicate already exists in this active review session',
+        duplicateStatus: 'exact',
+        duplicateReason: row.duplicateReason ?? 'Same CPT/title, exam time, and read time already exist in this active review session',
       });
     } else {
-      existingKeys.add(key);
+      if (key) existingKeys.add(key);
       appendRows.push(row);
     }
   }
