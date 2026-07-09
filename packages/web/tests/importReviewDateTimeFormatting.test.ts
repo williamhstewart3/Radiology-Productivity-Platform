@@ -6,7 +6,88 @@ import {
   formatOcrDateTime,
   shouldShowAccession,
   shouldAutoProcessPowerScribeCaptures,
+  approvalButtonLabel,
+  buildUserApprovalPatch,
+  canApproveReviewRow,
+  hasValidSelectedProductivityRvu,
+  reviewRowStatusLabel,
+  summarizeReviewApproval,
 } from '../src/web/pages/Import';
+import type { PipelineReviewRow } from '../src/web/pipeline/importPipeline';
+import type { ImportedStudy } from '../src/web/types/importProvider';
+import type { MatchCandidate, Modality } from '../src/web/types';
+
+function candidate(patch: Partial<MatchCandidate> = {}): MatchCandidate {
+  return {
+    cptCode: '71045',
+    modifier: '26',
+    description: 'XR Chest 1 View',
+    workRvu: 0.18,
+    modality: 'XR' as Modality,
+    confidence: 0.94,
+    method: 'radiology_match',
+    explanation: {
+      rawText: 'XR CHEST PORTABLE',
+      normalizedText: 'XR CHEST PORTABLE',
+      source: 'test',
+      detail: 'test',
+    },
+    ...patch,
+  };
+}
+
+function row(patch: Partial<PipelineReviewRow> = {}): PipelineReviewRow {
+  const source: ImportedStudy = {
+    source: 'ocr',
+    examTitle: 'XR CHEST PORTABLE',
+    procedureName: 'XR CHEST PORTABLE',
+    canonicalExam: null,
+    cpt: null,
+    workRvu: null,
+    studyDate: '2026-07-08',
+    studyTime: '2026-07-08T08:19',
+    examDate: '2026-07-08',
+    examTime: '08:19',
+    examDateTime: '2026-07-08T08:19',
+    modifiedDate: '2026-07-08',
+    modifiedTime: '08:25',
+    modifiedDateTime: '2026-07-08T08:25',
+    modality: 'XR',
+    accessionNumber: null,
+    patientMRN: null,
+    rowIndex: null,
+    cleanedExamName: 'XR CHEST PORTABLE',
+    cleanedText: 'XR CHEST PORTABLE',
+    extractionConfidence: 1,
+    parserNeedsReview: false,
+    parserReviewReason: null,
+    parserRawLine: 'XR CHEST PORTABLE',
+    ocrConfidence: 1,
+    importedAt: '2026-07-08T08:30:00.000Z',
+    dateTimeConfidence: 1,
+    dateTimeSource: 'ocr',
+  };
+
+  return {
+    tempId: 'row-1',
+    source,
+    candidates: [candidate()],
+    selectedCandidateIndex: 0,
+    selectedCandidateIndices: [0],
+    displayTitle: 'XR CHEST PORTABLE',
+    needsReview: true,
+    duplicateStatus: null,
+    duplicateExistingLogId: null,
+    duplicateReason: null,
+    included: true,
+    autoSkipped: false,
+    autoApproved: false,
+    autoApprovalLevel: null,
+    approvalStatus: 'pending',
+    reviewReason: null,
+    ...patch,
+  };
+}
 
 describe('import review date-time formatting', () => {
   test('displays fallback datetime time when separate date is present', () => {
@@ -39,5 +120,61 @@ describe('import review date-time formatting', () => {
     expect(shouldAutoProcessPowerScribeCaptures({ alwaysProcessPowerScribeClipboard: true })).toBe(true);
     expect(shouldAutoProcessPowerScribeCaptures({ alwaysProcessPowerScribeClipboard: false })).toBe(false);
     expect(shouldAutoProcessPowerScribeCaptures(null)).toBe(false);
+  });
+});
+
+describe('import review approval workflow', () => {
+  test('review row with selected CPT/RVU shows universal approval state', () => {
+    const reviewRow = row();
+
+    expect(hasValidSelectedProductivityRvu(reviewRow)).toBe(true);
+    expect(canApproveReviewRow(reviewRow)).toBe(true);
+    expect(approvalButtonLabel(reviewRow)).toBe('Approve');
+    expect(reviewRowStatusLabel(reviewRow)).toBe('Pending approval');
+  });
+
+  test('possible duplicate can be approved as new', () => {
+    const reviewRow = row({
+      duplicateStatus: 'possible',
+      duplicateReason: 'Possible duplicate - missing time',
+    });
+
+    expect(approvalButtonLabel(reviewRow)).toBe('Approve as new');
+    const patch = buildUserApprovalPatch(reviewRow);
+
+    expect(patch).toMatchObject({
+      needsReview: false,
+      duplicateStatus: null,
+      approvalStatus: 'approved_as_new',
+    });
+  });
+
+  test('rows without valid modifier 26 RVU require CPT assignment', () => {
+    const reviewRow = row({
+      candidates: [candidate({ modifier: 'TC', workRvu: 0 })],
+    });
+
+    expect(hasValidSelectedProductivityRvu(reviewRow)).toBe(false);
+    expect(canApproveReviewRow(reviewRow)).toBe(false);
+    expect(approvalButtonLabel(reviewRow)).toBe('Add CPT');
+    expect(reviewRowStatusLabel(reviewRow)).toBe('Missing CPT/RVU');
+  });
+
+  test('approval summary separates finalizable and pending RVUs', () => {
+    const approved = row({ tempId: 'approved', needsReview: false, approvalStatus: 'manual_approved' });
+    const pending = row({ tempId: 'pending', needsReview: true });
+    const possible = row({ tempId: 'possible', needsReview: true, duplicateStatus: 'possible' });
+    const excluded = row({ tempId: 'excluded', included: false, approvalStatus: 'excluded' });
+    const exactSkipped = row({ tempId: 'skipped', included: false, duplicateStatus: 'exact', autoSkipped: true });
+
+    const summary = summarizeReviewApproval([approved, pending, possible, excluded], [exactSkipped]);
+
+    expect(summary.finalizableRows).toBe(1);
+    expect(summary.finalizableWrvu).toBe(0.18);
+    expect(summary.pendingRows).toBe(2);
+    expect(summary.pendingWrvu).toBe(0.36);
+    expect(summary.possibleDuplicateRows).toBe(1);
+    expect(summary.exactDuplicateRows).toBe(1);
+    expect(summary.excludedRows).toBe(1);
   });
 });

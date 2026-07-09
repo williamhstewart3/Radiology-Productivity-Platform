@@ -22,6 +22,7 @@ export interface PipelineReviewRow {
   autoSkipped: boolean;
   autoApproved: boolean;
   autoApprovalLevel: 'silent' | 'learned' | null;
+  approvalStatus?: 'pending' | 'manual_approved' | 'approved_as_new' | 'auto_approved' | 'excluded' | 'exact_duplicate_skipped';
   reviewReason: string | null;
 }
 
@@ -223,6 +224,7 @@ export async function runImportPipeline(
       needsReview: parserNeedsReview || (!autoAccept && Boolean(reviewReason ?? (candidates.length === 0 || !top || top.confidence < 0.75))),
       autoApproved: autoAccept,
       autoApprovalLevel,
+      approvalStatus: autoAccept ? 'auto_approved' : 'pending',
       reviewReason,
       duplicateStatus: dupStatus,
       duplicateExistingLogId: dupLogId,
@@ -232,7 +234,7 @@ export async function runImportPipeline(
     };
 
     if (dupStatus === 'exact') {
-      skippedRows.push({ ...row, included: false, autoSkipped: true });
+      skippedRows.push({ ...row, included: false, autoSkipped: true, approvalStatus: 'exact_duplicate_skipped' });
     } else {
       reviewRows.push(row);
     }
@@ -256,7 +258,14 @@ export async function commitPipelineResults(
   for (const row of reviewRows) {
     if (!row.included) continue;
     const selectedCandidates = selectedCandidatesForRow(row).filter(productivityRelevant);
-    if (selectedCandidates.length === 0) continue;
+    if (selectedCandidates.length === 0) {
+      reviewNeededCount++;
+      continue;
+    }
+    if (row.needsReview) {
+      reviewNeededCount++;
+      continue;
+    }
 
     const study = row.source;
     const procedureName = procedureNameFor(study);
@@ -268,7 +277,6 @@ export async function commitPipelineResults(
     const productivityDate = study.modifiedDate ?? modifiedDateTime?.slice(0, 10) ?? performedDate;
     const rowSessionId = crypto.randomUUID();
     let rowCommitted = false;
-    let rowNeedsReview = false;
 
     for (const cand of selectedCandidates) {
       const fingerprint = buildFingerprint(
@@ -290,10 +298,7 @@ export async function commitPipelineResults(
         : null;
       if (existing && !(existing as any).deletedAt) continue;
 
-      const isReview =
-        cand.confidence < 0.75 ||
-        row.needsReview ||
-        row.duplicateStatus === 'possible';
+      const isReview = cand.confidence < 0.75 || row.needsReview;
 
       const studyDate = performedDate;
       const logDateFinal = productivityDate;
@@ -332,7 +337,6 @@ export async function commitPipelineResults(
       await db.studyLogs.add(log);
       committedLogs.push(log);
       rowCommitted = true;
-      if (isReview) rowNeedsReview = true;
     }
 
     if (rowCommitted) {
@@ -351,7 +355,6 @@ export async function commitPipelineResults(
         action: row.autoApproved ? 'confirm' : row.needsReview ? 'correct' : 'confirm',
       });
       importedCount++;
-      if (rowNeedsReview) reviewNeededCount++;
     }
   }
 

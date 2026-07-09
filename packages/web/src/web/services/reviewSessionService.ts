@@ -119,6 +119,7 @@ export function mergeReviewSessionRows(
         autoSkipped: true,
         duplicateStatus: 'exact',
         duplicateReason: row.duplicateReason ?? 'Same CPT/title, exam time, and read time already exist in this active review session',
+        approvalStatus: 'exact_duplicate_skipped',
       });
     } else {
       if (key) existingKeys.add(key);

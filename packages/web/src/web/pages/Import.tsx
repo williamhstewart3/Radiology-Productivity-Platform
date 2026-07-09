@@ -425,11 +425,81 @@ function manualReviewReason(row: PipelineReviewRow): string | null {
   return null;
 }
 
+export function hasValidSelectedProductivityRvu(row: PipelineReviewRow): boolean {
+  return row.included && getSelectedCandidates(row).some(isProductivityCandidate);
+}
+
+export function canApproveReviewRow(row: PipelineReviewRow): boolean {
+  return hasValidSelectedProductivityRvu(row) && row.duplicateStatus !== 'exact';
+}
+
+export function approvalButtonLabel(row: PipelineReviewRow): string {
+  if (!hasValidSelectedProductivityRvu(row)) return 'Add CPT';
+  if (row.duplicateStatus === 'possible') return 'Approve as new';
+  return 'Approve';
+}
+
+export function reviewRowStatusLabel(row: PipelineReviewRow): string {
+  if (!row.included) return row.duplicateStatus === 'exact' ? 'Exact duplicate skipped' : 'Excluded';
+  if (!hasValidSelectedProductivityRvu(row)) return 'Missing CPT/RVU';
+  if (!row.needsReview) {
+    if (row.approvalStatus === 'approved_as_new') return 'Approved as new';
+    if (row.approvalStatus === 'manual_approved') return 'Manually approved';
+    return row.autoApproved ? 'Auto-approved' : 'Approved';
+  }
+  if (row.duplicateStatus === 'possible') return 'Possible duplicate pending approval';
+  return 'Pending approval';
+}
+
+export function buildUserApprovalPatch(row: PipelineReviewRow): Partial<PipelineReviewRow> | null {
+  if (!canApproveReviewRow(row)) return null;
+  const selectedIndices = getSelectedCandidateIndices(row);
+  if (selectedIndices.length === 0) return null;
+  const priorDuplicateReason = row.duplicateReason;
+  return {
+    needsReview: false,
+    included: true,
+    duplicateStatus: row.duplicateStatus === 'possible' ? null : row.duplicateStatus,
+    duplicateReason: row.duplicateStatus === 'possible' ? null : row.duplicateReason,
+    duplicateExistingLogId: row.duplicateStatus === 'possible' ? null : row.duplicateExistingLogId,
+    approvalStatus: row.duplicateStatus === 'possible' ? 'approved_as_new' : 'manual_approved',
+    reviewReason: row.duplicateStatus === 'possible'
+      ? `Approved as new despite possible duplicate warning${priorDuplicateReason ? `: ${priorDuplicateReason}` : ''}`
+      : row.reviewReason,
+  };
+}
+
+export function summarizeReviewApproval(rows: PipelineReviewRow[], skippedRows: PipelineReviewRow[]) {
+  const included = rows.filter((row) => row.included);
+  const approvedRows = included.filter((row) => !row.needsReview && hasValidSelectedProductivityRvu(row));
+  const pendingRows = included.filter((row) => row.needsReview && hasValidSelectedProductivityRvu(row));
+  const possibleDuplicateRows = pendingRows.filter((row) => row.duplicateStatus === 'possible');
+  const noValidCptRows = included.filter((row) => !hasValidSelectedProductivityRvu(row));
+  const excludedRows = rows.filter((row) => !row.included);
+  const exactSkippedRows = skippedRows.filter((row) => row.duplicateStatus === 'exact' || row.autoSkipped);
+
+  return {
+    approvedRows: approvedRows.length,
+    approvedWrvu: approvedRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+    pendingRows: pendingRows.length,
+    pendingWrvu: pendingRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+    possibleDuplicateRows: possibleDuplicateRows.length,
+    possibleDuplicateWrvu: possibleDuplicateRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+    exactDuplicateRows: exactSkippedRows.length,
+    exactDuplicateWrvu: exactSkippedRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+    excludedRows: excludedRows.length,
+    excludedWrvu: excludedRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+    noValidCptRows: noValidCptRows.length,
+    finalizableRows: approvedRows.length,
+    finalizableWrvu: approvedRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+  };
+}
+
 function buildManualSelectionPatch(
   row: PipelineReviewRow,
   candidatesToSelect: MatchCandidate[],
   forceReviewed = false,
-): Pick<PipelineReviewRow, 'candidates' | 'selectedCandidateIndex' | 'selectedCandidateIndices' | 'needsReview'> {
+): Pick<PipelineReviewRow, 'candidates' | 'selectedCandidateIndex' | 'selectedCandidateIndices' | 'needsReview' | 'approvalStatus'> {
   const updatedCandidates = [...row.candidates];
   const existingKeys = new Set(updatedCandidates.map(candidateKey));
   for (const candidate of candidatesToSelect) {
@@ -451,15 +521,16 @@ function buildManualSelectionPatch(
     selectedCandidateIndex: selectedCandidateIndices[0] ?? null,
     selectedCandidateIndices,
     needsReview: forceReviewed ? false : Boolean(manualReviewReason(nextRow)),
+    approvalStatus: forceReviewed ? 'manual_approved' : 'pending',
   };
 }
 
-function buildApprovalPatch(row: PipelineReviewRow): Pick<PipelineReviewRow, 'selectedCandidateIndex' | 'selectedCandidateIndices' | 'needsReview'> | null {
+function buildApprovalPatch(row: PipelineReviewRow): Pick<PipelineReviewRow, 'selectedCandidateIndex' | 'selectedCandidateIndices' | 'needsReview' | 'approvalStatus'> | null {
   const candidate = safeAutoApprovalCandidate(row);
   if (!candidate) return null;
   const index = row.candidates.findIndex((existing) => candidateKey(existing) === candidateKey(candidate));
   if (index < 0) return null;
-  return { selectedCandidateIndex: index, selectedCandidateIndices: [index], needsReview: false };
+  return { selectedCandidateIndex: index, selectedCandidateIndices: [index], needsReview: false, approvalStatus: 'manual_approved' };
 }
 
 function getCandidatesFromPatch(
@@ -878,7 +949,15 @@ export function Import({ onImported }: ImportProps) {
     setSkippedRows((s) => s.filter((x) => x.tempId !== tempId));
     setReviewRows((rows) => [
       ...rows,
-      { ...skipped, duplicateStatus: null as DuplicateStatus, needsReview: true, included: true, autoSkipped: false },
+      {
+        ...skipped,
+        duplicateStatus: null as DuplicateStatus,
+        duplicateReason: skipped.duplicateReason ? `Imported anyway despite duplicate warning: ${skipped.duplicateReason}` : null,
+        needsReview: false,
+        included: true,
+        autoSkipped: false,
+        approvalStatus: 'manual_approved',
+      },
     ]);
   }
 
@@ -887,7 +966,7 @@ export function Import({ onImported }: ImportProps) {
     setError(null);
     try {
       const selectedRvu = reviewRows
-        .filter((row) => row.included)
+        .filter((row) => row.included && !row.needsReview)
         .reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
       const result = await finalizeReviewSession({
         sessionId,
@@ -957,6 +1036,37 @@ export function Import({ onImported }: ImportProps) {
         return patch ? { ...row, ...patch } : row;
       }),
     );
+  }
+
+  function approveReviewRow(tempId: string) {
+    const row = reviewRows.find((item) => item.tempId === tempId);
+    if (!row) return;
+    const patch = buildUserApprovalPatch(row);
+    if (!patch) {
+      setSearchPanelTempId(tempId);
+      return;
+    }
+    updateRow(tempId, patch);
+    pushToast('success', row.duplicateStatus === 'possible' ? 'Approved as new' : 'Study approved', `${getSelectedWorkRvu(row).toFixed(1)} wRVUs added to finalizable total.`);
+  }
+
+  function approveAllReviewable(includeWarnings: boolean) {
+    let approved = 0;
+    let approvedWrvu = 0;
+    setReviewRows((rows) =>
+      rows.map((row) => {
+        if (!row.needsReview) return row;
+        if (!includeWarnings && row.duplicateStatus === 'possible') return row;
+        const patch = buildUserApprovalPatch(row);
+        if (!patch) return row;
+        approved++;
+        approvedWrvu += getSelectedWorkRvu(row);
+        return { ...row, ...patch };
+      }),
+    );
+    if (approved > 0) {
+      pushToast('success', `Approved ${approved} reviewable stud${approved === 1 ? 'y' : 'ies'}`, `+${approvedWrvu.toFixed(1)} wRVUs now finalizable.`);
+    }
   }
 
   function approveHighConfidence() {
@@ -1128,7 +1238,8 @@ export function Import({ onImported }: ImportProps) {
           duplicateExistingLogId: null,
           autoSkipped: false,
           included: true,
-          needsReview: true,
+          needsReview: false,
+          approvalStatus: 'approved_as_new',
           reviewReason: 'Marked not duplicate by AI Assistant / user approved',
         });
       } else if (action.actionType === 'mark_duplicate') {
@@ -1136,6 +1247,7 @@ export function Import({ onImported }: ImportProps) {
           duplicateStatus: 'exact',
           duplicateReason: 'Marked duplicate by user-approved assistant correction',
           included: false,
+          approvalStatus: 'exact_duplicate_skipped',
           needsReview: true,
           reviewReason: 'Marked duplicate by AI Assistant / user approved',
         });
@@ -1188,6 +1300,9 @@ export function Import({ onImported }: ImportProps) {
   const priorMappingCount = reviewRows.filter(isPriorApprovedMappingRow).length;
   const autoCodedCount = reviewRows.filter((row) => row.included && !row.needsReview).length;
   const requiresReviewCount = reviewRows.filter((row) => row.included && row.needsReview).length;
+  const approvalSummary = summarizeReviewApproval(reviewRows, skippedRows);
+  const reviewableWarningCount = reviewRows.filter((row) => row.needsReview && row.duplicateStatus === 'possible' && canApproveReviewRow(row)).length;
+  const reviewableCleanCount = reviewRows.filter((row) => row.needsReview && row.duplicateStatus !== 'possible' && canApproveReviewRow(row)).length;
   const autoCodingPct = includedCount ? (autoCodedCount / includedCount) * 100 : 0;
   const estimatedMinutesSaved = Math.round(autoCodedCount * 0.35);
   const visibleReviewRows = reviewRows.filter((row) => {
@@ -1377,21 +1492,21 @@ export function Import({ onImported }: ImportProps) {
               <p className="text-lg font-bold text-white">{includedCount}</p>
             </div>
             <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-emerald-500/80">Confirmed</p>
+              <p className="text-[10px] uppercase tracking-wider text-emerald-500/80">Approved RVUs</p>
               <p className="text-lg font-bold text-emerald-300">
-                {reviewRows.filter((row) => row.included && !row.needsReview).reduce((sum, row) => sum + getSelectedWorkRvu(row), 0).toFixed(1)}
+                {approvalSummary.approvedWrvu.toFixed(1)}
               </p>
             </div>
             <div className="rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-amber-500/80">Pending est.</p>
+              <p className="text-[10px] uppercase tracking-wider text-amber-500/80">Pending RVUs</p>
               <p className="text-lg font-bold text-amber-300">
-                {reviewRows.filter((row) => row.included && row.needsReview).reduce((sum, row) => sum + getSelectedWorkRvu(row), 0).toFixed(1)}
+                {approvalSummary.pendingWrvu.toFixed(1)}
               </p>
             </div>
             <div className="rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-sky-500/80">Projected</p>
+              <p className="text-[10px] uppercase tracking-wider text-sky-500/80">Finalizable</p>
               <p className="text-lg font-bold text-sky-300">
-                {reviewRows.filter((row) => row.included).reduce((sum, row) => sum + getSelectedWorkRvu(row), 0).toFixed(1)}
+                {approvalSummary.finalizableWrvu.toFixed(1)}
               </p>
             </div>
             <div className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2">
@@ -1403,9 +1518,37 @@ export function Import({ onImported }: ImportProps) {
               <p className="text-lg font-bold text-orange-300">{skippedRows.length + possibleDupes}</p>
             </div>
           </div>
+          <div className="grid gap-2 md:grid-cols-5">
+            {[
+              ['Possible dup RVUs pending', approvalSummary.possibleDuplicateWrvu.toFixed(1)],
+              ['Exact dup RVUs skipped', approvalSummary.exactDuplicateWrvu.toFixed(1)],
+              ['Excluded RVUs', approvalSummary.excludedWrvu.toFixed(1)],
+              ['Rows missing CPT/RVU', approvalSummary.noValidCptRows.toLocaleString()],
+              ['Will save now', `${approvalSummary.finalizableRows} rows`],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
+                <p className="text-sm font-bold text-slate-200">{value}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="card flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => approveAllReviewable(false)}
+            disabled={reviewableCleanCount === 0}
+            className="btn-primary text-xs disabled:opacity-40"
+          >
+            Approve all reviewable studies ({reviewableCleanCount})
+          </button>
+          <button
+            onClick={() => approveAllReviewable(true)}
+            disabled={reviewableWarningCount === 0}
+            className="btn-ghost text-xs disabled:opacity-40"
+          >
+            Approve all warning rows as new ({reviewableWarningCount})
+          </button>
           <button
             onClick={approveHighConfidence}
             disabled={safeApprovalCount === 0}
@@ -1421,7 +1564,7 @@ export function Import({ onImported }: ImportProps) {
             Approve all prior mappings ({priorMappingCount})
           </button>
           <span className="text-xs text-slate-500 ml-auto">
-            Low-confidence, ambiguous, procedure, 0.0 wRVU, and non-7xxxx rows stay in review.
+            Pending rows are not saved until approved.
           </span>
         </div>
 
@@ -1546,7 +1689,8 @@ export function Import({ onImported }: ImportProps) {
             const selectedTotal = getSelectedWorkRvu(row);
             const label = confidenceLabel(row);
             const reviewReason = manualReviewReason(row);
-            const canApproveSame = Boolean(buildApprovalPatch(row));
+            const canApproveRow = canApproveReviewRow(row);
+            const rowStatus = reviewRowStatusLabel(row);
             const procedureName = procedureNameForSource(row.source);
             const cptSummary = selected.length > 0
               ? selected.map((candidate) => candidate.cptCode).join(' + ')
@@ -1594,6 +1738,14 @@ export function Import({ onImported }: ImportProps) {
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+                        !row.included ? 'border-slate-500/25 bg-slate-500/10 text-slate-300' :
+                        !row.needsReview ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300' :
+                        row.duplicateStatus === 'possible' ? 'border-orange-500/25 bg-orange-500/10 text-orange-300' :
+                        'border-amber-500/25 bg-amber-500/10 text-amber-300'
+                      }`}>
+                        {rowStatus}
+                      </span>
                       {/* Source confidence badge */}
                       {row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) >= 1.0 ? (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 font-medium">
@@ -1644,16 +1796,28 @@ export function Import({ onImported }: ImportProps) {
                         Review
                       </span>
                     )}
-                    {canApproveSame && row.included && (
+                    {canApproveRow && row.included && (
                       <button
-                        onClick={() => approveSameNormalizedDescription(row.tempId)}
-                        className="text-xs px-2 py-1 rounded-lg border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                        onClick={() => approveReviewRow(row.tempId)}
+                        className="text-xs px-2 py-1 rounded-lg border border-emerald-500/35 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/18 transition-colors"
                       >
-                        Approve same
+                        {approvalButtonLabel(row)}
+                      </button>
+                    )}
+                    {!hasValidSelectedProductivityRvu(row) && row.included && (
+                      <button
+                        onClick={() => setSearchPanelTempId(row.tempId)}
+                        className="text-xs px-2 py-1 rounded-lg border border-sky-500/35 text-sky-300 hover:bg-sky-500/10 transition-colors"
+                      >
+                        Add CPT
                       </button>
                     )}
                     <button
-                      onClick={() => updateRow(row.tempId, { included: !row.included })}
+                      onClick={() => updateRow(row.tempId, {
+                        included: !row.included,
+                        approvalStatus: row.included ? 'excluded' : 'pending',
+                        needsReview: row.included ? row.needsReview : true,
+                      })}
                       className={`text-xs px-2 py-1 rounded-lg border transition-colors ${
                         row.included
                           ? 'bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25'
@@ -1982,11 +2146,11 @@ export function Import({ onImported }: ImportProps) {
           </button>
           <button
             onClick={handleCommit}
-            disabled={reviewState.commitDisabled}
+            disabled={importing || approvalSummary.finalizableRows === 0}
             className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
             style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
           >
-            {reviewState.commitLabel}
+            {importing ? 'Saving...' : approvalSummary.finalizableRows > 0 ? `Finalize ${approvalSummary.finalizableRows} studies - ${approvalSummary.finalizableWrvu.toFixed(1)} wRVU` : reviewState.commitLabel}
           </button>
         </div>
       </div>
