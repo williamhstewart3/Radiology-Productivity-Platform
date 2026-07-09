@@ -64,7 +64,8 @@ function isDeterministicProtocolCandidate(candidate: MatchCandidate): boolean {
 function isInstitutionMappingCandidate(candidate: MatchCandidate): boolean {
   return candidate.method === 'radiology_match' &&
     candidate.confidence >= 0.95 &&
-    candidate.explanation?.source === 'Institution mapping';
+    (candidate.explanation?.source === 'Institution procedure dictionary' ||
+      candidate.explanation?.source === 'Institution mapping');
 }
 
 function isExactInstitutionMappingCandidate(candidate: MatchCandidate): boolean {

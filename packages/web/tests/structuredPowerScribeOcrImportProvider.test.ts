@@ -73,4 +73,49 @@ describe('StructuredPowerScribeOcrImportProvider', () => {
     expect(studies[0].modifiedDateTime).toBe('2026-07-08T21:05:00');
     expect(studies[0].studyTime).toBe('2026-07-08T21:05:00');
   });
+
+  test('maps row-specific exam and modified date-times from separate columns', async () => {
+    const provider = new StructuredPowerScribeOcrImportProvider([
+      {
+        procedureName: 'XR ABDOMEN AP',
+        examDateTime: null,
+        modifiedDateTime: null,
+        rawProcedureText: 'XR ABDOMEN AP',
+        rawExamDateText: '7/1/2026 8:28 PM',
+        rawModifiedText: '7/2/2026 8:17 AM',
+        confidence: 0.9,
+        needsReview: false,
+        reviewReason: null,
+      },
+    ], '2026-07-08');
+
+    const studies = await provider.importStudies();
+    expect(studies[0].examDateTime).toBe('2026-07-01T20:28:00');
+    expect(studies[0].modifiedDateTime).toBe('2026-07-02T08:17:00');
+    expect(studies[0].studyTime).toBe('2026-07-02T08:17:00');
+    expect(studies[0].examDateTime).not.toBe('2026-07-11T20:28:00');
+    expect(studies[0].modifiedDateTime).not.toBe(studies[0].examDateTime);
+  });
+
+  test('does not copy examDateTime into modifiedDateTime when modified column is missing', async () => {
+    const provider = new StructuredPowerScribeOcrImportProvider([
+      {
+        procedureName: 'XR ABDOMEN AP',
+        examDateTime: null,
+        modifiedDateTime: null,
+        rawProcedureText: 'XR ABDOMEN AP',
+        rawExamDateText: '7/1/2026 8:28 PM',
+        rawModifiedText: '',
+        confidence: 0.62,
+        needsReview: true,
+        reviewReason: null,
+      },
+    ], '2026-07-08');
+
+    const studies = await provider.importStudies();
+    expect(studies[0].examDateTime).toBe('2026-07-01T20:28:00');
+    expect(studies[0].modifiedDateTime).toBeNull();
+    expect(studies[0].studyTime).toBeNull();
+    expect(studies[0].parserNeedsReview).toBe(true);
+  });
 });

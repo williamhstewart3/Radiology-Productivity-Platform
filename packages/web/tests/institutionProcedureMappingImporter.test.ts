@@ -52,6 +52,8 @@ function workbookFixture(): ArrayBuffer {
       ['Procedure Type', 'CPT Code'],
       ['CT HEAD WO CONTRAST', '70450'],
       ['CTA CHEST ABDOMEN PELVIS', '71275/74174'],
+      ['CTA CHEST PLUS PELVIS', '71275 + 72191'],
+      ['CTA CHEST SPACE PELVIS', '71275 72191'],
     ])),
   };
   return zipSync(files).buffer as ArrayBuffer;
@@ -63,11 +65,15 @@ describe('institution procedure mapping workbook parsing', () => {
 
     const ctHead = rows.find((row) => row.procedureType === 'CT HEAD WO CONTRAST');
     const cta = rows.find((row) => row.procedureType === 'CTA CHEST ABDOMEN PELVIS');
+    const plus = rows.find((row) => row.procedureType === 'CTA CHEST PLUS PELVIS');
+    const space = rows.find((row) => row.procedureType === 'CTA CHEST SPACE PELVIS');
 
     expect(ctHead?.modality).toBe('CT');
     expect(ctHead?.cptCodes).toEqual(['70450']);
     expect(cta?.cptCodes).toEqual(['71275', '74174']);
-    expect(summary.multiCptRows).toBe(1);
+    expect(plus?.cptCodes).toEqual(['71275', '72191']);
+    expect(space?.cptCodes).toEqual(['71275', '72191']);
+    expect(summary.multiCptRows).toBe(3);
   });
 
   test('maps MR and US sheets to application modalities', () => {
@@ -75,7 +81,7 @@ describe('institution procedure mapping workbook parsing', () => {
 
     expect(rows.find((row) => row.procedureType === 'MRI BRAIN W WO CONTRAST')?.modality).toBe('MRI');
     expect(rows.find((row) => row.procedureType === 'US ABDOMEN LIMITED')?.modality).toBe('US');
-    expect(summary.modalityCounts).toMatchObject({ MRI: 1, US: 2, CT: 2 });
+    expect(summary.modalityCounts).toMatchObject({ MRI: 1, US: 2, CT: 4 });
   });
 
   test('keeps blank CPT rows as reference-only mappings', () => {
@@ -84,6 +90,6 @@ describe('institution procedure mapping workbook parsing', () => {
 
     expect(blank?.cptCodes).toEqual([]);
     expect(summary.skippedBlankCptRows).toBe(1);
-    expect(summary.mappedRows).toBe(4);
+    expect(summary.mappedRows).toBe(6);
   });
 });

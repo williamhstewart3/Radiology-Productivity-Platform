@@ -226,21 +226,21 @@ function applyColumnDateOverrides(row: ParsedLine, debugRow: ReassembledColumnRo
   if (!debugRow) return row;
   const exam = parseDateTimeFromOcr(debugRow.rawExamDateColumnText);
   const modified = parseDateTimeFromOcr(debugRow.rawModifiedDateColumnText);
-  const examDateTime = exam?.studyDateTime ?? row.examDateTime;
-  const modifiedDateTime = modified?.studyDateTime ?? row.modifiedDateTime;
+  const examDateTime = exam?.studyDateTime ?? null;
+  const modifiedDateTime = modified?.studyDateTime ?? null;
 
   return {
     ...row,
     rawProcedureColumnText: debugRow.rawProcedureColumnText,
     rawExamDateColumnText: debugRow.rawExamDateColumnText,
     rawModifiedDateColumnText: debugRow.rawModifiedDateColumnText,
-    examDate: exam?.studyDate ?? row.examDate,
-    examTime: exam?.studyTime ?? row.examTime,
+    examDate: exam?.studyDate ?? null,
+    examTime: exam?.studyTime ?? null,
     examDateTime,
-    studyDate: exam?.studyDate ?? row.studyDate,
+    studyDate: exam?.studyDate ?? null,
     studyDateTime: examDateTime,
-    modifiedDate: modified?.studyDate ?? row.modifiedDate,
-    modifiedTime: modified?.studyTime ?? row.modifiedTime,
+    modifiedDate: modified?.studyDate ?? null,
+    modifiedTime: modified?.studyTime ?? null,
     modifiedDateTime,
     dateTimeConfidence: Math.max(row.dateTimeConfidence, exam?.confidence ?? 0, modified?.confidence ?? 0),
   };
@@ -359,10 +359,10 @@ export class OCRImportProvider implements ImportProvider {
         examDate: p.examDate,
         examTime: p.examTime,
         examDateTime: p.examDateTime,
-        studyTime: p.modifiedDateTime ?? p.studyDateTime,
+        studyTime: p.modifiedDateTime,
         modifiedDate: p.modifiedDate ?? productivityDate,
-        modifiedDateTime: p.modifiedDateTime ?? p.studyDateTime,
-        modifiedTime: p.modifiedTime ?? p.examTime,
+        modifiedDateTime: p.modifiedDateTime,
+        modifiedTime: p.modifiedTime,
         modality: null,
         accessionNumber: null,
         patientMRN: null,

@@ -192,6 +192,56 @@ describe('strict duplicate detection', () => {
     expect(new Set(keys).size).toBe(3);
   });
 
+  test('repeating the same PowerScribe screenshot produces exact duplicate identities', async () => {
+    const firstCapture = [
+      candidate({
+        performedDateTime: '2026-07-01T17:18:00',
+        modifiedDateTime: '2026-07-02T07:59:00',
+        studyDateTime: '2026-07-02T07:59:00',
+      }),
+      candidate({
+        performedDateTime: '2026-07-01T19:06:00',
+        modifiedDateTime: '2026-07-02T08:03:00',
+        studyDateTime: '2026-07-02T08:03:00',
+      }),
+    ];
+    const repeatedCapture = firstCapture.map((row) => ({ ...row }));
+
+    expect(repeatedCapture.map(__testBatchDuplicateKey)).toEqual(firstCapture.map(__testBatchDuplicateKey));
+    expect(repeatedCapture.every((row, index) => __testBatchDuplicateKey(row) === __testBatchDuplicateKey(firstCapture[index]))).toBe(true);
+  });
+
+  test('later portable chest capture skips only old exact identities and keeps new rows', async () => {
+    const priorLogs = [
+      log({
+        cptCode: '71045',
+        examDateTime: '2026-07-01T17:18:00',
+        studyDateTime: '2026-07-02T07:59:00',
+      }),
+      log({
+        cptCode: '71045',
+        examDateTime: '2026-07-01T19:06:00',
+        studyDateTime: '2026-07-02T08:03:00',
+      }),
+    ];
+    const repeatedOldRow = candidate({
+      performedDateTime: '2026-07-01T17:18:00',
+      modifiedDateTime: '2026-07-02T07:59:00',
+      studyDateTime: '2026-07-02T07:59:00',
+    });
+    const newRow = candidate({
+      performedDateTime: '2026-07-01T20:28:00',
+      modifiedDateTime: '2026-07-02T08:17:00',
+      studyDateTime: '2026-07-02T08:17:00',
+    });
+
+    const oldMatch = await checkOneDuplicate(repeatedOldRow, priorLogs);
+    const newMatch = await checkOneDuplicate(newRow, priorLogs);
+
+    expect(oldMatch?.confidence).toBe('exact');
+    expect(newMatch?.confidence).not.toBe('exact');
+  });
+
   test('same multi-CPT set with different modified datetime is not duplicate', async () => {
     const match = await checkOneDuplicate(
       candidate({

@@ -121,7 +121,7 @@ function parseSheetRows(sheetXml: string, sharedStrings: string[]): string[][] {
 function parseCptCodes(value: string): string[] {
   return Array.from(new Set(
     value
-      .split(/[\/,;|]+/)
+      .split(/[\/,;|+\s]+/)
       .map((part) => part.trim().replace(/\.0$/, ''))
       .filter((part) => /^\d{5}$/.test(part)),
   ));

@@ -57,6 +57,17 @@ describe('PowerScribe OCR parser date-time preservation', () => {
     expect(row.modifiedTime).toBe('08:16');
   });
 
+  test('parses compact PowerScribe date fragments without inventing July 11', () => {
+    const [row] = parseOcrLines([
+      'XR ABDOMEN AP 7112026 8:28 PM 722026 8:17 AM',
+    ]);
+
+    expect(row.procedureName).toBe('XR ABDOMEN AP');
+    expect(row.examDateTime).toBe('2026-07-01T20:28:00');
+    expect(row.modifiedDateTime).toBe('2026-07-02T08:17:00');
+    expect(row.examDateTime).not.toBe('2026-07-11T20:28:00');
+  });
+
   test('removes trailing OCR date fragments from cleaned procedure names', () => {
     const rows = parseOcrLines([
       'XR ABDOMEN AP A2026 AT AM',

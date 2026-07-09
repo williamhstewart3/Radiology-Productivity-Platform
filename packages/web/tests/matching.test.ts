@@ -5,6 +5,7 @@ import { __testInstitutionMappingReviewReason, __testProcedureNameFor } from '..
 import {
   __testAutoMatchRowsFor,
   __testDeterministicCptCodesFor,
+  __testHasClinicallyMeaningfulInstitutionDifference,
   __testParseModalityFirst,
 } from '../src/web/utils/matching';
 
@@ -55,6 +56,20 @@ describe('modality-first CPT matching', () => {
     expect(__testDeterministicCptCodesFor('XR WRIST RIGHT PA LATERAL AND OBLIQUE')).toEqual(['73110']);
   });
 
+  test.each([
+    'XRCHESTFORTABLE',
+    'XRCHESTPORTABLE',
+    'XR CHEST FORTABLE',
+    'XR CHEST PORTBLE',
+    'XR CHESTPORTABLE',
+    'XRCHEST PORTABLE',
+    'XR CHEST-PORTABLE',
+  ])('maps portable chest OCR variant %s to 71045 deterministically', (raw) => {
+    const parsed = __testParseModalityFirst(raw);
+    expect(parsed.cleanedProcedure).toBe('XR CHEST PORTABLE');
+    expect(__testDeterministicCptCodesFor(raw)).toEqual(['71045']);
+  });
+
   test('keeps XR wrist auto-match candidates in the XR/plain-film lane', () => {
     const rows = [
       cptRow('73110', 'X-ray wrist 3+ views', 'XR'),
@@ -67,6 +82,20 @@ describe('modality-first CPT matching', () => {
 
     const candidates = __testAutoMatchRowsFor('ARUREST FURTABLE ... $12 XRWRIST RIGHT PA LATERAL AND OBLIQUE', rows);
     expect(candidates.map((row) => row.cptCode)).toEqual(['73110']);
+  });
+
+  test('keeps XR chest portable on the 71045 golden path', () => {
+    const rows = [
+      cptRow('71045', 'XR Chest 1 View', 'XR'),
+      cptRow('71046', 'XR Chest 2 Views', 'XR'),
+      cptRow('71047', 'XR Chest 3 Views', 'XR'),
+      cptRow('71048', 'XR Chest 4+ Views', 'XR'),
+      cptRow('71101', 'XR Ribs Unilateral with Chest', 'XR'),
+      cptRow('71260', 'CT Chest with Contrast', 'CT'),
+    ];
+
+    const candidates = __testAutoMatchRowsFor('XRCHESTFORTABLE', rows);
+    expect(candidates.map((row) => row.cptCode)).toEqual(['71045']);
   });
 
   test('keeps CT cardiac scoring out of the cardiac MRI lane', () => {
@@ -106,7 +135,7 @@ describe('modality-first CPT matching', () => {
         modality: 'CT' as Modality,
         confidence: 0.985,
         method: 'radiology_match' as const,
-        explanation: { rawText: 'CTA CHEST ABDOMEN PELVIS', normalizedText: 'cta chest abdomen pelvis', source: 'Institution mapping', detail: 'institution exact' },
+        explanation: { rawText: 'CTA CHEST ABDOMEN PELVIS', normalizedText: 'cta chest abdomen pelvis', source: 'Institution procedure dictionary', detail: 'institution exact' },
       },
       {
         cptCode: '74174',
@@ -116,7 +145,7 @@ describe('modality-first CPT matching', () => {
         modality: 'CT' as Modality,
         confidence: 0.985,
         method: 'radiology_match' as const,
-        explanation: { rawText: 'CTA CHEST ABDOMEN PELVIS', normalizedText: 'cta chest abdomen pelvis', source: 'Institution mapping', detail: 'institution exact' },
+        explanation: { rawText: 'CTA CHEST ABDOMEN PELVIS', normalizedText: 'cta chest abdomen pelvis', source: 'Institution procedure dictionary', detail: 'institution exact' },
       },
     ];
 
@@ -132,7 +161,7 @@ describe('modality-first CPT matching', () => {
       modality: 'CT' as Modality,
       confidence: 0.9,
       method: 'radiology_match' as const,
-      explanation: { rawText: 'CT HEAD WO', normalizedText: 'ct head wo', source: 'Institution mapping', detail: 'near institution' },
+      explanation: { rawText: 'CT HEAD WO', normalizedText: 'ct head wo', source: 'Institution procedure dictionary', detail: 'near institution' },
     }];
     const exactWithExtra = [
       { ...nearInstitution[0], confidence: 0.985, explanation: { ...nearInstitution[0].explanation, detail: 'institution exact' } },
@@ -150,5 +179,21 @@ describe('modality-first CPT matching', () => {
 
     expect(__testInstitutionMappingReviewReason(nearInstitution)).toBe('Low confidence match');
     expect(__testInstitutionMappingReviewReason(exactWithExtra)).toBe('Multiple possible CPT matches');
+  });
+
+  test('institution dictionary OCR corrections allow spelling and spacing repairs', () => {
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('XRCHESTPORTABLE', 'XR CHEST PORTABLE')).toBe(false);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('XRCHESTFORTABLE', 'XR CHEST PORTABLE')).toBe(false);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('XR WRIST OBLIGUE', 'XR WRIST OBLIQUE')).toBe(false);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('CT ABDCOMEN WCONTRAST', 'CT ABDOMEN W CONTRAST')).toBe(false);
+  });
+
+  test('institution dictionary near matches do not cross clinical safety boundaries', () => {
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('CT CHEST W CONTRAST', 'CT CHEST WO CONTRAST')).toBe(true);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('CT CHEST WO CONTRAST', 'CT CHEST W CONTRAST')).toBe(true);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('US ABDOMEN LIMITED', 'US ABDOMEN COMPLETE')).toBe(true);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('XR WRIST LEFT 3 VIEWS', 'XR WRIST RIGHT 3 VIEWS')).toBe(true);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('US LEG UNILATERAL', 'US LEG BILATERAL')).toBe(true);
+    expect(__testHasClinicallyMeaningfulInstitutionDifference('XR CHEST 1 VIEW', 'XR CHEST 2 VIEWS')).toBe(true);
   });
 });

@@ -12,6 +12,7 @@ import { findOrbitCmeSeedMapping } from '../data/orbitCmeSeedMappings';
 import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from '../data/acrRadiologyActiveCptSet';
 
 const CPT_CODE_PATTERN = /^\d{5}$/;
+const INSTITUTION_PROCEDURE_DICTIONARY_SOURCE = 'Institution procedure dictionary';
 const EXAM_CONTEXT_PATTERN =
   /\b(?:ct|cta|mri?|mra|x-?ray|xr|ultrasound|u\/s|us|nm|pet|fluoro|mammogram|mammo|angiogram|abdomen|pelvis|chest|head|neck|brain|spine|lumbar|thoracic|cervical|knee|shoulder|hip|ankle|wrist|contrast|with|without|w\/o|w\/)\b/i;
 const DATE_TIME_OR_IDENTIFIER_PATTERN =
@@ -219,7 +220,13 @@ function candidateMatchesModalityLane(candidate: MatchCandidate, lane: ModalityL
 function candidateRespectsOrBypassesModalityLane(candidate: MatchCandidate, lane: ModalityLane | null): boolean {
   if (!lane) return true;
   const source = candidate.explanation?.source;
-  if (candidate.method === 'alias_match' || source === 'exam dictionary' || source === 'Institution mapping' || source === 'OCR learning table') return true;
+  if (
+    candidate.method === 'alias_match' ||
+    source === 'exam dictionary' ||
+    source === INSTITUTION_PROCEDURE_DICTIONARY_SOURCE ||
+    source === 'Institution mapping' ||
+    source === 'OCR learning table'
+  ) return true;
   return candidateMatchesModalityLane(candidate, lane);
 }
 
@@ -400,9 +407,12 @@ async function candidatesForInstitutionMappings(rawInput: string, maxResults: nu
       const bestScore = exact
         ? 1
         : Math.max(...knownNames.map((name) => combinedSimilarity(normalized, normalizeRadiologyDescription(name))), 0);
-      return { entry, exact, score: bestScore };
+      const bestName = knownNames
+        .map((name) => ({ name, score: combinedSimilarity(normalized, normalizeRadiologyDescription(name)) }))
+        .sort((a, b) => b.score - a.score)[0]?.name ?? entry.canonicalDisplayName;
+      return { entry, exact, score: bestScore, bestName };
     })
-    .filter((item) => item.exact || item.score >= 0.78)
+    .filter((item) => item.exact || (item.score >= 0.78 && !hasClinicallyMeaningfulInstitutionDifference(rawInput, item.bestName)))
     .sort((a, b) => Number(b.exact) - Number(a.exact) || b.score - a.score)
     .slice(0, maxResults);
 
@@ -418,11 +428,11 @@ async function candidatesForInstitutionMappings(rawInput: string, maxResults: nu
           row,
           confidence,
           'radiology_match',
-          'Institution mapping',
+          INSTITUTION_PROCEDURE_DICTIONARY_SOURCE,
         );
         if (candidate.explanation) {
           candidate.explanation.detail =
-            `${row.cptCode}${row.modifier ? `-${row.modifier}` : ''} from Institution mapping; spreadsheet procedure: ${entry.institutionProcedureName ?? entry.canonicalDisplayName}; CPT group: ${entry.cptCodes.join(', ')}`;
+            `${exact ? 'institution exact' : 'near institution'}; ${row.cptCode}${row.modifier ? `-${row.modifier}` : ''} from Institution procedure dictionary; spreadsheet procedure: ${entry.institutionProcedureName ?? entry.canonicalDisplayName}; CPT group: ${entry.cptCodes.join(', ')}`;
         }
         candidates.push(candidate);
       }
@@ -430,6 +440,53 @@ async function candidatesForInstitutionMappings(rawInput: string, maxResults: nu
     if (dedupeCandidates(candidates).length >= maxResults && !exact) break;
   }
   return candidates;
+}
+
+function hasWord(text: string, pattern: RegExp): boolean {
+  return pattern.test(text.toUpperCase());
+}
+
+function contrastSignature(text: string): 'w' | 'wo' | 'wwo' | null {
+  const upper = normalizeOcrExamTextForMatching(text).toUpperCase();
+  if (/\b(?:W\s*WO|WWO|WITH\s+AND\s+WITHOUT|WITHOUT\s+AND\s+WITH|W\/WO)\b/.test(upper)) return 'wwo';
+  if (/\b(?:WO|W\/O|WITHOUT|NON\s*CONTRAST|NONCONTRAST)\b/.test(upper)) return 'wo';
+  if (/\b(?:W|WITH)\b/.test(upper) || /\bWCONTRAST\b/.test(upper)) return 'w';
+  return null;
+}
+
+function viewCountSignature(text: string): number | null {
+  const upper = normalizeOcrExamTextForMatching(text).toUpperCase();
+  const numeric = upper.match(/\b([1-4])\s*(?:VIEW|VIEWS|V)\b/);
+  if (numeric) return Number(numeric[1]);
+  if (/\b(?:ONE|SINGLE|AP|PORTABLE)\b/.test(upper) && !/\bLATERAL\b/.test(upper)) return 1;
+  if (/\b(?:TWO|PA\s+AND\s+LATERAL|PA\s+LATERAL|AP\s+AND\s+LATERAL|AP\s+LATERAL)\b/.test(upper)) return 2;
+  if (/\b(?:THREE|OBLIQUE|3\+)\b/.test(upper)) return 3;
+  return null;
+}
+
+function hasClinicallyMeaningfulInstitutionDifference(rawInput: string, dictionaryName: string): boolean {
+  const raw = normalizeOcrExamTextForMatching(rawInput).toUpperCase();
+  const known = normalizeOcrExamTextForMatching(dictionaryName).toUpperCase();
+  if (detectModalityLane(raw) && detectModalityLane(known) && detectModalityLane(raw) !== detectModalityLane(known)) return true;
+
+  const rawContrast = contrastSignature(raw);
+  const knownContrast = contrastSignature(known);
+  if (rawContrast && knownContrast && rawContrast !== knownContrast) return true;
+
+  const pairedChecks: Array<[RegExp, RegExp]> = [
+    [/\bLEFT\b/, /\bRIGHT\b/],
+    [/\bLIMITED\b/, /\bCOMPLETE\b/],
+    [/\bUNILATERAL\b/, /\bBILATERAL\b/],
+  ];
+  for (const [a, b] of pairedChecks) {
+    if ((hasWord(raw, a) && hasWord(known, b)) || (hasWord(raw, b) && hasWord(known, a))) return true;
+  }
+
+  const rawViews = viewCountSignature(raw);
+  const knownViews = viewCountSignature(known);
+  if (rawViews && knownViews && rawViews !== knownViews) return true;
+
+  return false;
 }
 
 function hasNormalizedPhrase(normalized: string, phrase: string): boolean {
@@ -608,6 +665,10 @@ export function __testAutoMatchRowsFor(rawInput: string, rows: CptRvuRow[]): Cpt
     rows.filter(isAutoMatchEligibleRow).filter((row) => rowMatchesModalityLane(row, parsed.lane)),
     parsed,
   );
+}
+
+export function __testHasClinicallyMeaningfulInstitutionDifference(rawInput: string, dictionaryName: string): boolean {
+  return hasClinicallyMeaningfulInstitutionDifference(rawInput, dictionaryName);
 }
 
 function aliasNormalizedKeys(alias: ExamAlias): string[] {
