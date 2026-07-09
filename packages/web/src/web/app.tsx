@@ -1,6 +1,7 @@
 import { useState, useEffect, Component } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { Route, Switch } from 'wouter';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useAppInitialization } from './hooks/useAppInitialization';
 import { OrgProvider } from './contexts/OrgContext';
 import { OrgSwitcher } from './components/OrgSwitcher';
@@ -99,6 +100,40 @@ const NAV_ITEMS: { id: Tab; label: string; icon: ComponentType<{ className?: str
   { id: 'settings',  label: 'Settings',   icon: SettingsIcon },
 ];
 
+function AppLoadingOverlay() {
+  const easeOut: [number, number, number, number] = [0.16, 1, 0.3, 1];
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[9999] flex items-center justify-center"
+      style={{ backgroundColor: '#0A0E1A' }}
+      initial={{ opacity: 1 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.45, ease: easeOut }}
+      aria-label="Loading application"
+    >
+      <motion.img
+        src="/bmg_logo.png"
+        alt="Baptist"
+        className="h-28 w-28 select-none object-contain sm:h-32 sm:w-32"
+        draggable={false}
+        initial={{ opacity: 0.72, scale: 0.985 }}
+        animate={{
+          opacity: [0.72, 1, 0.72],
+          scale: [0.985, 1, 0.985],
+          transition: { duration: 2, repeat: Infinity, ease: 'easeInOut' },
+        }}
+        exit={{
+          opacity: 0,
+          scale: 1.08,
+          transition: { duration: 0.45, ease: easeOut },
+        }}
+      />
+    </motion.div>
+  );
+}
+
 function MainApp() {
   const { isReady, error } = useAppInitialization();
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -127,7 +162,7 @@ function MainApp() {
     );
   }
 
-  if (!isReady) {
+  if (import.meta.env.SSR && !isReady) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--theme-bg-base)' }}>
         <div className="text-center space-y-6">
@@ -152,6 +187,7 @@ function MainApp() {
 
   return (
     <div className={isDark ? 'dark' : ''}>
+      {isReady && (
       <div className="app-shell flex min-h-screen">
         <aside className={`desktop-sidebar sticky top-0 hidden h-screen shrink-0 flex-col px-3 py-4 transition-[width] duration-200 lg:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[248px]'}`}>
           <div className="flex items-center justify-between gap-2 px-1">
@@ -257,6 +293,10 @@ function MainApp() {
           </nav>
         </div>
       </div>
+      )}
+      <AnimatePresence>
+        {!isReady && <AppLoadingOverlay key="app-loading-overlay" />}
+      </AnimatePresence>
     </div>
   );
 }
