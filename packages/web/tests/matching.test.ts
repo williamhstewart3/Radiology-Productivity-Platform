@@ -245,6 +245,17 @@ describe('modality-first CPT matching', () => {
     expect(result.candidates[0].procedureType).toBe('XR WRIST RIGHT PA LATERAL AND OBLIQUE');
   });
 
+  test('institution resolver treats appendix protocol as known local procedure', () => {
+    const entries = [institutionEntry('CT APPENDIX PROTOCOL', ['74177'], 'CT')];
+
+    for (const raw of ['CT APPENDIX PROTOCOL', 'CTAPPENDIXPROTOCOL', 'CT APPENDX PROTOCOL', 'CT APPENDIX PROT0COL', 'CT APPENDIX PROTOCOL 22']) {
+      const result = resolveInstitutionProcedure(raw, entries);
+      expect(['exact_institution_match', 'ocr_tolerant_institution_match']).toContain(result.matchType);
+      expect(result.candidates[0].procedureType).toBe('CT APPENDIX PROTOCOL');
+      expect(result.candidates[0].entry.cptCodes).toEqual(['74177']);
+    }
+  });
+
   test('ambiguous institution resolver output stays explicit for review', () => {
     const result = resolveInstitutionProcedure('XR WRIST RIGHT PA LATERAL OBLIQUE', [
       institutionEntry('XR WRIST RIGHT PA LATERAL AND OBLIQUE', ['73110']),

@@ -734,8 +734,8 @@ export function Settings({ onNavigate }: SettingsProps) {
 
         <div className="grid grid-cols-1 gap-3">
           {[
-            ['autoImportClipboardScreenshots', 'Automatically import screenshots from clipboard', 'When this app is focused, pasted PowerScribe screenshots can go directly into OCR.'],
-            ['alwaysProcessPowerScribeClipboard', 'Always process PowerScribe screenshots', 'Skip the Process/Ignore banner for future pasted screenshots.'],
+            ['autoImportClipboardScreenshots', 'Automatically import screenshots from clipboard', 'When this app is focused, pasted PowerScribe screenshots can go directly into Capture.'],
+            ['alwaysProcessPowerScribeClipboard', 'Automatically process detected PowerScribe captures', 'Skip the Process/Ignore confirmation for future pasted PowerScribe screenshots.'],
             ['clearClipboardAfterImport', 'Clear clipboard after import', 'Requested behavior for desktop wrapper support; browsers may block clipboard clearing.'],
           ].map(([key, label, description]) => (
             <label key={key} className="flex items-center justify-between gap-3 cursor-pointer select-none">

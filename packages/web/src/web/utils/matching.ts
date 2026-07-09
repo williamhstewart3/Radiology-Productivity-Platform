@@ -416,7 +416,11 @@ export interface InstitutionResolverResult {
 }
 
 function ocrTolerantInstitutionKey(raw: string): string {
-  return normalizeRadiologyDescription(raw)
+  return normalizeRadiologyDescription(normalizeOcrExamTextForMatching(raw))
+    .replace(/\bCT(?=APPENDIX\b)/g, 'CT ')
+    .replace(/\bAPPENDX\b/g, 'APPENDIX')
+    .replace(/\bPROT0COL\b/g, 'PROTOCOL')
+    .replace(/\bAPPENDIXPROTOCOL\b/g, 'APPENDIX PROTOCOL')
     .replace(/\bOBLIGUE\b/g, 'OBLIQUE')
     .replace(/\bABDCOMEN\b/g, 'ABDOMEN')
     .replace(/\bCONTRST\b/g, 'CONTRAST')
@@ -497,7 +501,7 @@ function scoreInstitutionEntry(rawInput: string, entry: ExamDictionaryEntry): In
     entry,
     procedureType: best.procedureType,
     matchType,
-    confidence: best.exact ? 0.985 : Math.min(0.96, Math.max(0.72, score * 0.96)),
+    confidence: best.exact ? 0.995 : Math.min(0.96, Math.max(0.72, score * 0.96)),
     score,
     exact: best.exact,
     corrections: institutionCorrections(rawInput, best.procedureType),

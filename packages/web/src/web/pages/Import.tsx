@@ -9,6 +9,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { BaptistLogoMark } from '../components/BaptistLogo';
 import { theme } from '../lib/theme';
 import { searchExamLibrary } from '../utils/matching';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
@@ -40,7 +41,7 @@ import {
 } from '../services/aiReviewAssistantService';
 import { processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
-import type { CorrectionAction, FeedbackEvent, FeedbackEventCategory, DuplicateStatus, MatchCandidate } from '../types';
+import type { CorrectionAction, FeedbackEvent, FeedbackEventCategory, DuplicateStatus, MatchCandidate, UserSettings } from '../types';
 
 // ─── ExamSearchPanel ─────────────────────────────────────────────────────────
 
@@ -480,6 +481,14 @@ type ImportToastTone = 'info' | 'success' | 'warning' | 'danger';
 
 type AssistantQuickOption = { label: string; category: FeedbackEventCategory; prompt: string };
 
+export const CAPTURE_PROCESSING_LABEL = 'Processing...';
+export const CAPTURE_PROMPT_TITLE = 'PowerScribe capture detected';
+export const CAPTURE_PRIVACY_COPY = 'The screenshot is processed in memory and discarded after parsing. Only extracted productivity data is stored.';
+
+export function shouldAutoProcessPowerScribeCaptures(settings: Pick<UserSettings, 'alwaysProcessPowerScribeClipboard'> | null | undefined): boolean {
+  return Boolean(settings?.alwaysProcessPowerScribeClipboard);
+}
+
 interface AssistantPanelState {
   rowId: string;
   response: AssistantResponse;
@@ -514,6 +523,20 @@ function ImportToastStack({ toasts }: { toasts: ImportToast[] }) {
           {toast.body && <p className="mt-1 text-xs leading-relaxed opacity-80">{toast.body}</p>}
         </div>
       ))}
+    </div>
+  );
+}
+
+function CaptureProcessingState() {
+  return (
+    <div className="rounded-xl border border-sky-500/25 bg-sky-500/8 px-4 py-5 text-center">
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-sky-500/25 bg-slate-950/40">
+        <div className="animate-pulse">
+          <BaptistLogoMark size={42} />
+        </div>
+      </div>
+      <p className="mt-3 text-sm font-semibold text-white">{CAPTURE_PROCESSING_LABEL}</p>
+      <p className="mt-1 text-xs text-slate-400">Preparing extracted studies for review.</p>
     </div>
   );
 }
@@ -718,7 +741,7 @@ export function Import({ onImported }: ImportProps) {
     setProcessing(true);
     setError(null);
     setOcrFile(file);
-    pushToast('info', 'OCR processing...', 'Reading the screenshot and detecting completed-study rows.');
+    pushToast('info', 'Processing capture...', 'Reading the screenshot and preparing extracted study rows.');
     try {
       const processed = await processOcrImport(file, {
         profileId: activeProfile?.id ?? null,
@@ -764,14 +787,34 @@ export function Import({ onImported }: ImportProps) {
     }
   }
 
+  async function processPowerScribeCapture(file: File, timelineSource: string) {
+    if (processingRef.current) return;
+    setProcessing(true);
+    setError(null);
+    setOcrFile(file);
+    setClipboardFile(null);
+    pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
+    try {
+      const usedStructuredHelper = await processWindowsClipboardCapture(file, timelineSource);
+      if (!usedStructuredHelper) {
+        await processOcrFile(file, timelineSource);
+      }
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   async function queueClipboardImage(file: File, timelineSource: string) {
     const hash = await hashImageBlob(file);
     if (hash === lastClipboardImageHashRef.current) return;
     lastClipboardImageHashRef.current = hash;
-    setClipboardFile(file);
     pushToast('info', 'Screenshot captured', `PowerScribe image received from ${timelineSource}.`);
-    if (await processWindowsClipboardCapture(file, timelineSource)) return;
-    await processOcrFile(file, timelineSource);
+    const settings = await ensureUserSettings();
+    if (shouldAutoProcessPowerScribeCaptures(settings)) {
+      await processPowerScribeCapture(file, timelineSource);
+      return;
+    }
+    setClipboardFile(file);
   }
 
   async function handlePasteProcess() {
@@ -824,7 +867,8 @@ export function Import({ onImported }: ImportProps) {
       alwaysProcessPowerScribeClipboard: true,
       updatedAt: new Date().toISOString(),
     });
-    await queueClipboardImage(file, 'trusted clipboard');
+    pushToast('success', 'PowerScribe captures will be processed automatically.');
+    await processPowerScribeCapture(file, 'trusted clipboard');
   }
 
   // Restore a skipped row back into the review list
@@ -2032,42 +2076,46 @@ export function Import({ onImported }: ImportProps) {
             className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
             style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
           >
-            {processing ? 'Processing…' : 'Match & Review'}
+            {processing ? CAPTURE_PROCESSING_LABEL : 'Match & Review'}
           </button>
         </div>
       )}
 
       {mode === 'ocr' && (
         <div className="card space-y-4">
-          {clipboardFile && (
+          {clipboardFile && !processing && (
             <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-3">
-              <p className="text-sm font-semibold text-sky-300">PowerScribe window grab detected - Process?</p>
+              <p className="text-sm font-semibold text-sky-300">{CAPTURE_PROMPT_TITLE}</p>
               <p className="text-xs text-slate-400">
-                The pasted image will be processed in memory for OCR, then discarded. Only parsed exam/CPT productivity data is stored.
+                This looks like a PowerScribe worklist screenshot. {CAPTURE_PRIVACY_COPY}
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={() => { setOcrFile(clipboardFile); setClipboardFile(null); }}
+                  onClick={() => processPowerScribeCapture(clipboardFile, 'confirmed clipboard')}
+                  disabled={processing}
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
                   style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
                 >
-                  Process
+                  Process this capture
                 </button>
                 <button
                   onClick={() => setClipboardFile(null)}
-                  className="px-3 py-1.5 rounded-lg border border-white/12 text-xs text-slate-400 hover:text-white"
+                  disabled={processing}
+                  className="px-3 py-1.5 rounded-lg border border-white/12 text-xs text-slate-400 hover:text-white disabled:opacity-40"
                 >
-                  Ignore
+                  Ignore this capture
                 </button>
                 <button
                   onClick={() => alwaysProcessClipboard(clipboardFile)}
-                  className="px-3 py-1.5 rounded-lg border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/10"
+                  disabled={processing}
+                  className="px-3 py-1.5 rounded-lg border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/10 disabled:opacity-40"
                 >
                   Always process PowerScribe captures
                 </button>
               </div>
             </div>
           )}
+          {processing && <CaptureProcessingState />}
           <div>
             <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
               Paste or upload PowerScribe window grab
@@ -2117,10 +2165,10 @@ export function Import({ onImported }: ImportProps) {
             />
           </div>
           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-            <p className="text-amber-300 text-xs font-medium">⚡ OCR Tips</p>
+            <p className="text-amber-300 text-xs font-medium">Capture tips</p>
             <p className="text-amber-300/70 text-xs mt-1">
               Capture the PowerScribe study list with Procedure, Exam Date, and Modified columns visible.
-              OCR runs locally and is cropped before parsing. Already-imported studies are auto-skipped.
+              The screenshot is cropped, parsed, matched, and checked locally. Already-imported studies are auto-skipped.
             </p>
           </div>
           <OcrDebugPanel debug={ocrDebug} />
@@ -2131,7 +2179,7 @@ export function Import({ onImported }: ImportProps) {
             className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
             style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
           >
-            {processing ? 'Running OCR…' : 'Extract & Match'}
+            {processing ? CAPTURE_PROCESSING_LABEL : 'Extract & Match'}
           </button>
         </div>
       )}
