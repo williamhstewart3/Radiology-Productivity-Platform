@@ -41,6 +41,7 @@ export interface OCRImportDebugRow extends ParsedLine {
     confidence: number | null;
     needsReview: boolean;
     reviewReason: string | null;
+    duplicateKey?: string | null;
   };
 }
 

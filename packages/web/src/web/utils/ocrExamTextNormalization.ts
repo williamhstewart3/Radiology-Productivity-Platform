@@ -25,6 +25,27 @@ const RADIOLOGY_OCR_CORRECTIONS: Array<[RegExp, string]> = [
   [/\bAP\s*\/\s*LAT(?:ERAL)?\b/gi, 'AP LATERAL'],
 ];
 
+function stripTrailingOcrDateTimeGarbage(raw: string): string {
+  let text = raw.trim();
+  let previous = '';
+
+  while (text !== previous) {
+    previous = text;
+    text = text
+      .replace(/\s+\b\d{1,2}\s*:?\s*\d{2}\s*(?:AM|PM)\b$/i, '')
+      .replace(/\s+\b(?:AT\s+)?(?:AM|PM)\b$/i, '')
+      .replace(/\s+\bAT\b$/i, '')
+      .replace(/\s+\b[A-Z]?\/\d{4,8}\b$/i, '')
+      .replace(/\s+\b[A-Z]?\d{0,2}20\d{2}\b$/i, '')
+      .replace(/\s+\b[TF]\d{4,8}\b$/i, '')
+      .replace(/\s+\b\d{1,2}\d{4}\b$/i, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  return text;
+}
+
 export function normalizeOcrExamTextForMatching(raw: string): string {
   let text = raw
     .replace(/[✓✔☑☒●•·]/g, ' ')
@@ -58,6 +79,8 @@ export function normalizeOcrExamTextForMatching(raw: string): string {
     .replace(/\bWITH\s+DYE\b/gi, 'W CONTRAST')
     .replace(/\s+/g, ' ')
     .trim();
+
+  text = stripTrailingOcrDateTimeGarbage(text);
 
   return text;
 }

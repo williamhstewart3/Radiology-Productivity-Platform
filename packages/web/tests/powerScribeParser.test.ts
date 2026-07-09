@@ -45,6 +45,20 @@ describe('PowerScribe OCR parser date-time preservation', () => {
     expect(row.modifiedDateTime).toBe('2026-07-08T21:05:00');
   });
 
+  test('removes trailing OCR date fragments from cleaned procedure names', () => {
+    const rows = parseOcrLines([
+      'XR ABDOMEN AP A2026 AT AM',
+      'XR WRIST RIGHT PA LATERAL AND OBLIGUE T2026 212026',
+      'CT HEAD WO CONTRAST T212026',
+    ]);
+
+    expect(rows.map((row) => row.procedureName)).toEqual([
+      'XR ABDOMEN AP',
+      'XR WRIST RIGHT PA LATERAL AND OBLIQUE',
+      'CT HEAD WO CONTRAST',
+    ]);
+  });
+
   test('splits joined neighboring OCR rows instead of matching merged procedure text', () => {
     const rows = parseOcrLines([
       've 51 XR CHEST PA AND LATERAL 7/2/2026 2:16 PM 7/2/2026 2:36 PM / 52 XRCHEST PORTABLE 7/2/2026 3:00 PM 7/2/2026 3:12 PM',

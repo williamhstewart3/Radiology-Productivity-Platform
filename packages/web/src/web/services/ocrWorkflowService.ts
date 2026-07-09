@@ -4,6 +4,7 @@ import { StructuredPowerScribeOcrImportProvider } from '../providers/StructuredP
 import { runImportPipeline, type PipelineResult, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
 import { ensureUserSettings } from '../db/database';
+import { buildFingerprint } from '../utils/duplicateDetection';
 import type { ImportProvider } from '../types/importProvider';
 import type { PowerScribeStructuredOcrRow } from '../types/structuredOcr';
 
@@ -61,6 +62,21 @@ function attachOcrMatchDebug(debugInfo: OCRImportDebugInfo | null, result: Pipel
         .map((index) => matched.candidates[index])
         .filter(Boolean);
       const top = matched.candidates[0] ?? null;
+      const duplicateKey = selected.length > 0
+        ? buildFingerprint(
+            matched.source.procedureName ?? matched.source.cleanedExamName ?? matched.source.examTitle,
+            selected[0].cptCode,
+            matched.source.modifiedDate ?? matched.source.modifiedDateTime?.slice(0, 10) ?? matched.source.studyDate,
+            matched.source.modifiedDateTime ?? matched.source.studyTime,
+            matched.source.accessionNumber,
+            selected[0].modality,
+            {
+              cptCodes: selected.map((candidate) => candidate.cptCode),
+              performedDateTime: matched.source.examDateTime ?? null,
+              modifiedDateTime: matched.source.modifiedDateTime ?? matched.source.studyTime,
+            },
+          )
+        : null;
 
       return {
         ...row,
@@ -70,6 +86,7 @@ function attachOcrMatchDebug(debugInfo: OCRImportDebugInfo | null, result: Pipel
           confidence: top?.confidence ?? null,
           needsReview: matched.needsReview,
           reviewReason: matched.reviewReason,
+          duplicateKey,
         },
       };
     }),

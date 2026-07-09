@@ -40,7 +40,9 @@ describe('PowerScribe column crop detection', () => {
 
     expect(layout.method).toBe('fallback');
     expect(layout.columns.procedure.x).toBe(0.13);
-    expect(layout.columns.examDate.x).toBe(0.575);
-    expect(layout.columns.modifiedDate.x).toBe(0.765);
+    expect(layout.columns.examDate.x).toBe(0.54);
+    expect(layout.columns.modifiedDate.x).toBe(0.76);
+    expect(layout.columns.examDate.width).toBeGreaterThanOrEqual(0.22);
+    expect(layout.columns.modifiedDate.width).toBeGreaterThanOrEqual(0.235);
   });
 });

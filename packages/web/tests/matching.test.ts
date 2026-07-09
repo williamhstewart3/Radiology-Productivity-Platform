@@ -38,7 +38,7 @@ function cptRow(cptCode: string, description: string, modality: Modality, includ
 describe('modality-first CPT matching', () => {
   test('strips junk before the first modality token', () => {
     expect(__testParseModalityFirst('$ 15 XR CHEST PORTABLE F/212026 2026').cleanedProcedure)
-      .toBe('XR CHEST PORTABLE F/212026 2026');
+      .toBe('XR CHEST PORTABLE');
     expect(__testParseModalityFirst('$9 26 CTANGIOGRAM HEAD NECK W WO CONTRAST').cleanedProcedure)
       .toBe('CT ANGIOGRAM HEAD NECK W WO CONTRAST');
     expect(__testParseModalityFirst('v10 CTCHEST WCONTRAST').cleanedProcedure)

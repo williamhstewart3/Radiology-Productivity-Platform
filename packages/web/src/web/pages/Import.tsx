@@ -176,11 +176,13 @@ function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) 
               debug.detectedRows.map((row, index) => (
                 <p key={`${row.rawText}-${index}`} className="font-mono text-[11px] text-slate-400">
                   {index + 1}. {row.cleanedExamName ?? row.examName}
-                  {row.modifiedDateTime ? ` | modified ${row.modifiedDateTime}` : ''}
-                  {row.studyDate ? ` | exam ${row.studyDate}` : ''}
+                  {` | exam ${row.examDateTime ?? row.examDate ?? row.studyDate ?? 'none'}`}
+                  {` | read ${row.modifiedDateTime ?? row.modifiedDate ?? 'none'}`}
+                  {` | log ${row.modifiedDateTime ?? row.studyDateTime ?? 'none'}`}
                   {` | parser ${Math.round((row.extractionConfidence ?? 0) * 100)}%`}
                   {row.matchResult?.topCandidate ? ` | match ${row.matchResult.topCandidate}` : ' | no match'}
                   {row.matchResult?.confidence != null ? ` ${Math.round(row.matchResult.confidence * 100)}%` : ''}
+                  {row.matchResult?.duplicateKey ? ` | dupe ${row.matchResult.duplicateKey}` : ''}
                   {row.reviewReason ?? row.matchResult?.reviewReason ? ` | review: ${row.reviewReason ?? row.matchResult?.reviewReason}` : ''}
                 </p>
               ))
@@ -239,12 +241,14 @@ function formatOcrTime(time: string): string {
   return `${hour12}:${minute} ${period}`;
 }
 
-function formatOcrDateTime(date?: string | null, time?: string | null, fallbackDateTime?: string | null): string | null {
+export function formatOcrDateTime(date?: string | null, time?: string | null, fallbackDateTime?: string | null): string | null {
+  const fallbackTime = fallbackDateTime?.match(/T(\d{2}:\d{2})(?::\d{2})?/)?.[1] ?? null;
+  const displayTime = time ?? fallbackTime;
   if (date) {
     const [year, month, day] = date.split('-');
     if (year && month && day) {
       const shortYear = year.slice(-2);
-      return `${Number(month)}/${Number(day)}/${shortYear}${time ? ` ${formatOcrTime(time)}` : ''}`;
+      return `${Number(month)}/${Number(day)}/${shortYear}${displayTime ? ` ${formatOcrTime(displayTime)}` : ''}`;
     }
   }
   if (!fallbackDateTime) return null;
