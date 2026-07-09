@@ -8,6 +8,23 @@ const MODALITY_PREFIX_SPACING: Array<[RegExp, string]> = [
   [/\bUS(?=BREAST\b|ABD(?:OMEN)?\b|PELVIS\b|THYROID\b|SCROTUM\b|RENAL\b|KIDNEY\b|RUQ\b)/gi, 'US '],
 ];
 
+const RADIOLOGY_OCR_CORRECTIONS: Array<[RegExp, string]> = [
+  [/\bOBLIGUE\b/gi, 'OBLIQUE'],
+  [/\bCONTRST\b/gi, 'CONTRAST'],
+  [/\bCONTRASTT\b/gi, 'CONTRAST'],
+  [/\bWCONTRAST\b/gi, 'W CONTRAST'],
+  [/\bWO\s*CONTRST\b/gi, 'WO CONTRAST'],
+  [/\bWOCONTRAST\b/gi, 'WO CONTRAST'],
+  [/\bPORTBLE\b/gi, 'PORTABLE'],
+  [/\bABDCOMEN\b/gi, 'ABDOMEN'],
+  [/\bABDOMN\b/gi, 'ABDOMEN'],
+  [/\bPELVS\b/gi, 'PELVIS'],
+  [/\bLATERL\b/gi, 'LATERAL'],
+  [/\bLATRL\b/gi, 'LATERAL'],
+  [/\bPA\s*\/\s*LAT(?:ERAL)?\b/gi, 'PA LATERAL'],
+  [/\bAP\s*\/\s*LAT(?:ERAL)?\b/gi, 'AP LATERAL'],
+];
+
 export function normalizeOcrExamTextForMatching(raw: string): string {
   let text = raw
     .replace(/[✓✔☑☒●•·]/g, ' ')
@@ -18,6 +35,9 @@ export function normalizeOcrExamTextForMatching(raw: string): string {
     .trim();
 
   for (const [pattern, replacement] of MODALITY_PREFIX_SPACING) {
+    text = text.replace(pattern, replacement);
+  }
+  for (const [pattern, replacement] of RADIOLOGY_OCR_CORRECTIONS) {
     text = text.replace(pattern, replacement);
   }
 
@@ -31,6 +51,8 @@ export function normalizeOcrExamTextForMatching(raw: string): string {
     .replace(/\bABD\b/gi, 'ABDOMEN')
     .replace(/\bW\s*\/\s*CONTRAST\b/gi, 'W CONTRAST')
     .replace(/\bW\/CONTRAST\b/gi, 'W CONTRAST')
+    .replace(/\bWO\s*\/\s*CONTRAST\b/gi, 'WO CONTRAST')
+    .replace(/\bW\/O\s*CONTRAST\b/gi, 'WO CONTRAST')
     .replace(/\bWITH\s+CONTRAST\b/gi, 'W CONTRAST')
     .replace(/\bW\s+DYE\b/gi, 'W CONTRAST')
     .replace(/\bWITH\s+DYE\b/gi, 'W CONTRAST')

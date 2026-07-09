@@ -83,6 +83,17 @@ function lineCenterY(line: OcrPositionedLine): number | null {
   return (line.bbox.y0 + line.bbox.y1) / 2;
 }
 
+function lineHeight(line: OcrPositionedLine): number | null {
+  if (!line.bbox) return null;
+  return Math.max(1, line.bbox.y1 - line.bbox.y0);
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
 function normalizeColumnLineText(text: string): string {
   return text
     .replace(/[|•·]+/g, ' ')
@@ -103,10 +114,33 @@ function nearestLine(lines: OcrPositionedLine[], y: number, tolerance: number): 
   return best?.line ?? null;
 }
 
+function nearbyColumnText(lines: OcrPositionedLine[], y: number, tolerance: number): string {
+  const nearby = lines
+    .map((line) => ({ line, center: lineCenterY(line) }))
+    .filter((item): item is { line: OcrPositionedLine; center: number } => item.center != null && Math.abs(item.center - y) <= tolerance)
+    .sort((a, b) => {
+      const yDiff = (a.line.bbox?.y0 ?? 0) - (b.line.bbox?.y0 ?? 0);
+      if (Math.abs(yDiff) > 4) return yDiff;
+      return (a.line.bbox?.x0 ?? 0) - (b.line.bbox?.x0 ?? 0);
+    });
+  const parts: string[] = [];
+  for (const item of nearby) {
+    const text = normalizeColumnLineText(item.line.text);
+    if (text && !parts.includes(text)) parts.push(text);
+  }
+  return parts.join(' ').replace(/\s{2,}/g, ' ').trim();
+}
+
 function reassembleColumnRows(results: ColumnOcrResults): string[] {
   const procedureLines = results.procedure.positionedLines;
   const examLines = results.examDate.positionedLines;
   const modifiedLines = results.modifiedDate.positionedLines;
+  const medianHeight = median([
+    ...procedureLines,
+    ...examLines,
+    ...modifiedLines,
+  ].map(lineHeight).filter((height): height is number => height != null));
+  const tolerance = Math.max(22, Math.min(42, Math.round((medianHeight ?? 16) * 1.8)));
   const allCenters = [
     ...procedureLines,
     ...examLines,
@@ -117,7 +151,6 @@ function reassembleColumnRows(results: ColumnOcrResults): string[] {
     .sort((a, b) => a - b);
 
   const rowCenters: number[] = [];
-  const tolerance = 22;
   for (const center of allCenters) {
     const existingIndex = rowCenters.findIndex((existing) => Math.abs(existing - center) <= tolerance);
     if (existingIndex >= 0) {
@@ -140,15 +173,19 @@ function reassembleColumnRows(results: ColumnOcrResults): string[] {
     .sort((a, b) => a - b)
     .map((center) => {
       const procedure = nearestLine(procedureLines, center, tolerance);
-      const examDate = nearestLine(examLines, center, tolerance);
-      const modifiedDate = nearestLine(modifiedLines, center, tolerance);
+      const examDate = nearbyColumnText(examLines, center, tolerance);
+      const modifiedDate = nearbyColumnText(modifiedLines, center, tolerance);
       return [
         normalizeColumnLineText(procedure?.text ?? 'UNCLEAR POWERSCRIBE ROW'),
-        normalizeColumnLineText(examDate?.text ?? ''),
-        normalizeColumnLineText(modifiedDate?.text ?? ''),
+        examDate,
+        modifiedDate,
       ].join(' ').replace(/\s{2,}/g, ' ').trim();
     })
     .filter((line) => line.length > 0);
+}
+
+export function __testReassembleColumnRows(results: ColumnOcrResults): string[] {
+  return reassembleColumnRows(results);
 }
 
 function reassembleColumnRowsByIndex(results: ColumnOcrResults): string[] {

@@ -12,6 +12,10 @@ describe('OCR exam text normalization', () => {
     ['CTA CHEST PE', 'CTA CHEST PE'],
     ['MRIBRAIN W/ CONTRAST', 'MRI BRAIN W CONTRAST'],
     ['USBREAST COMPLETE', 'US BREAST COMPLETE'],
+    ['XR WRIST RIGHT PA LATERAL AND OBLIGUE', 'XR WRIST RIGHT PA LATERAL AND OBLIQUE'],
+    ['CT ABDCOMEN PELVS WCONTRAST', 'CT ABDOMEN PELVIS W CONTRAST'],
+    ['XR CHEST PORTBLE', 'XR CHEST PORTABLE'],
+    ['CT HEAD WO CONTRST', 'CT HEAD WO CONTRAST'],
   ])('%s', (raw, expected) => {
     expect(normalizeOcrExamTextForMatching(raw)).toBe(expected);
   });

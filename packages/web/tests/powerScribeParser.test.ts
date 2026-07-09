@@ -31,6 +31,20 @@ describe('PowerScribe OCR parser date-time preservation', () => {
     expect(row.modifiedDateTime).toBeNull();
   });
 
+  test('preserves OCR-damaged compact date-times from PowerScribe columns', () => {
+    const [row] = parseOcrLines([
+      'XR CHEST PORTABLE 7/8/26 819 AM 7/8/26 905 PM',
+    ]);
+
+    expect(row.procedureName).toBe('XR CHEST PORTABLE');
+    expect(row.examDate).toBe('2026-07-08');
+    expect(row.examTime).toBe('08:19');
+    expect(row.examDateTime).toBe('2026-07-08T08:19:00');
+    expect(row.modifiedDate).toBe('2026-07-08');
+    expect(row.modifiedTime).toBe('21:05');
+    expect(row.modifiedDateTime).toBe('2026-07-08T21:05:00');
+  });
+
   test('splits joined neighboring OCR rows instead of matching merged procedure text', () => {
     const rows = parseOcrLines([
       've 51 XR CHEST PA AND LATERAL 7/2/2026 2:16 PM 7/2/2026 2:36 PM / 52 XRCHEST PORTABLE 7/2/2026 3:00 PM 7/2/2026 3:12 PM',

@@ -42,7 +42,7 @@ describe('modality-first CPT matching', () => {
     expect(__testParseModalityFirst('$9 26 CTANGIOGRAM HEAD NECK W WO CONTRAST').cleanedProcedure)
       .toBe('CT ANGIOGRAM HEAD NECK W WO CONTRAST');
     expect(__testParseModalityFirst('v10 CTCHEST WCONTRAST').cleanedProcedure)
-      .toBe('CT CHEST WCONTRAST');
+      .toBe('CT CHEST W CONTRAST');
     expect(__testParseModalityFirst('ARUREST FURTABLE ... $12 XRWRIST RIGHT PA LATERAL AND OBLIQUE').cleanedProcedure)
       .toBe('XR WRIST RIGHT 3 VIEWS');
   });

@@ -50,6 +50,8 @@ const US_DATE_TIME = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})(?::\
 const ISO_DATE_TIME = /\b(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::\d{2})?\b/;
 // Dash-separated US: MM-DD-YYYY H:MM AM/PM
 const US_DASH_DATE_TIME = /\b(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|am|pm)?\b/;
+// OCR-damaged US datetime where the colon is missing but AM/PM is present.
+const US_DATE_COMPACT_TIME = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2})\s*:?\s*(\d{2})\s*(AM|PM|am|pm)\b/;
 // Date only (no time): MM/DD/YYYY or MM/DD/YY
 const US_DATE_ONLY = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/;
 // ISO date only: YYYY-MM-DD
@@ -82,6 +84,14 @@ const ORDERED_DATE_PATTERNS: Array<{ pattern: RegExp; parse: (match: RegExpMatch
       const [, mStr, dStr, yStr, hStr, minStr, ampm] = match;
       const parsed = buildUsDateTime(mStr, dStr, yStr, hStr, minStr, ampm ?? null);
       return parsed ? { ...parsed, matchedPattern: 'US_DASH_DATE_TIME' } : null;
+    },
+  },
+  {
+    pattern: /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2})\s*:?\s*(\d{2})\s*(AM|PM|am|pm)\b/g,
+    parse: (match) => {
+      const [, mStr, dStr, yStr, hStr, minStr, ampm] = match;
+      const parsed = buildUsDateTime(mStr, dStr, yStr, hStr, minStr, ampm ?? null);
+      return parsed ? { ...parsed, confidence: 0.92, matchedPattern: 'US_DATE_COMPACT_TIME' } : null;
     },
   },
   {
@@ -140,6 +150,13 @@ export function parseDateTimeFromOcr(text: string): ParsedDateTime | null {
   }
 
   // ── Date-only patterns ────────────────────────────────────────────────────
+  const compactTimeMatch = text.match(US_DATE_COMPACT_TIME);
+  if (compactTimeMatch) {
+    const [, mStr, dStr, yStr, hStr, minStr, ampm] = compactTimeMatch;
+    const parsed = buildUsDateTime(mStr, dStr, yStr, hStr, minStr, ampm ?? null);
+    if (parsed) return { ...parsed, confidence: 0.92, matchedPattern: 'US_DATE_COMPACT_TIME' };
+  }
+
   const usDateOnly = text.match(US_DATE_ONLY);
   if (usDateOnly) {
     const [, mStr, dStr, yStr] = usDateOnly;

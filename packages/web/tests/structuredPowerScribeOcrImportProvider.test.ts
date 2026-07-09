@@ -51,4 +51,25 @@ describe('StructuredPowerScribeOcrImportProvider', () => {
     expect(studies[0].parserNeedsReview).toBe(true);
     expect(studies[0].parserReviewReason).toBe('Unclear PowerScribe procedure text');
   });
+
+  test('preserves compact OCR date-times from independent date columns', async () => {
+    const provider = new StructuredPowerScribeOcrImportProvider([
+      {
+        procedureName: 'XR CHEST PORTABLE',
+        examDateTime: null,
+        modifiedDateTime: null,
+        rawProcedureText: 'XR CHEST PORTABLE',
+        rawExamDateText: '7/8/26 819 AM',
+        rawModifiedText: '7/8/26 905 PM',
+        confidence: 0.9,
+        needsReview: false,
+        reviewReason: null,
+      },
+    ], '2026-07-08');
+
+    const studies = await provider.importStudies();
+    expect(studies[0].examDateTime).toBe('2026-07-08T08:19:00');
+    expect(studies[0].modifiedDateTime).toBe('2026-07-08T21:05:00');
+    expect(studies[0].studyTime).toBe('2026-07-08T21:05:00');
+  });
 });
