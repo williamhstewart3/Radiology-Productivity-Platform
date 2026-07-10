@@ -10,10 +10,11 @@ import {
   buildUserApprovalPatch,
   canApproveReviewRow,
   hasValidSelectedProductivityRvu,
+  isRowFinalizableAfterApproval,
   reviewRowStatusLabel,
   summarizeReviewApproval,
 } from '../src/web/pages/Import';
-import type { PipelineReviewRow } from '../src/web/pipeline/importPipeline';
+import { isReviewRowSaveEligible, type PipelineReviewRow } from '../src/web/pipeline/importPipeline';
 import type { ImportedStudy } from '../src/web/types/importProvider';
 import type { MatchCandidate, Modality } from '../src/web/types';
 
@@ -176,5 +177,18 @@ describe('import review approval workflow', () => {
     expect(summary.possibleDuplicateRows).toBe(1);
     expect(summary.exactDuplicateRows).toBe(1);
     expect(summary.excludedRows).toBe(1);
+  });
+
+  test('pending warning row is not finalizable until explicitly approved', () => {
+    const pending = row({ needsReview: true, approvalStatus: 'pending' });
+    const staleApproved = row({ needsReview: true, approvalStatus: 'manual_approved' });
+    const approvedAsNew = row({ needsReview: true, duplicateStatus: 'possible', approvalStatus: 'approved_as_new' });
+
+    expect(isRowFinalizableAfterApproval(pending)).toBe(false);
+    expect(isReviewRowSaveEligible(pending)).toBe(false);
+    expect(isRowFinalizableAfterApproval(staleApproved)).toBe(true);
+    expect(isReviewRowSaveEligible(staleApproved)).toBe(true);
+    expect(isRowFinalizableAfterApproval(approvedAsNew)).toBe(true);
+    expect(isReviewRowSaveEligible(approvedAsNew)).toBe(true);
   });
 });

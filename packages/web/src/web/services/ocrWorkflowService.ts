@@ -49,6 +49,11 @@ function attachOcrMatchDebug(debugInfo: OCRImportDebugInfo | null, result: Pipel
     ...debugInfo,
     duplicateSkippedCount: result.skippedRows.length,
     finalReviewRowCount: result.reviewRows.length,
+    autoApprovedRowCount: result.reviewRows.filter((row) => row.autoApproved || row.approvalStatus === 'auto_approved').length,
+    manuallyApprovedRowCount: result.reviewRows.filter((row) => row.approvalStatus === 'manual_approved' || row.approvalStatus === 'approved_as_new').length,
+    possibleDuplicateRowCount: result.reviewRows.filter((row) => row.duplicateStatus === 'possible').length,
+    exactDuplicateSkippedCount: result.skippedRows.filter((row) => row.duplicateStatus === 'exact' || row.autoSkipped).length,
+    excludedRowCount: result.reviewRows.filter((row) => !row.included).length,
     detectedRows: debugInfo.detectedRows.map((row) => {
       const matched = rowsByRawLine.get(row.rawText);
       if (!matched) return row;

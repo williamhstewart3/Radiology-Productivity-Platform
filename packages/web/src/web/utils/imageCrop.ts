@@ -9,7 +9,7 @@ export const DEFAULT_POWERSCRIBE_STUDY_LIST_CROP: RelativeCropRect = {
   x: 0.2,
   y: 0.22,
   width: 0.76,
-  height: 0.58,
+  height: 0.72,
 };
 
 export interface DetectedCrop {
@@ -55,7 +55,7 @@ function boundToStudyListArea(rect: RelativeCropRect): RelativeCropRect {
   const minX = 0.18;
   const minY = 0.2;
   const maxRight = 0.98;
-  const maxBottom = 0.88;
+  const maxBottom = 0.965;
   const x = Math.max(minX, bounded.x);
   const y = Math.max(minY, bounded.y);
   const right = Math.min(maxRight, Math.max(x + 0.45, bounded.x + bounded.width));
@@ -140,7 +140,7 @@ function detectPowerScribeStudyListCropFromBitmap(bitmap: ImageBitmap): Detected
   const xMin = Math.floor(width * 0.18);
   const xMax = Math.floor(width * 0.98);
   const yMin = Math.floor(height * 0.2);
-  const yMax = Math.floor(height * 0.88);
+  const yMax = Math.floor(height * 0.965);
 
   for (let y = yMin + 1; y < yMax; y++) {
     for (let x = xMin + 1; x < xMax; x++) {
@@ -174,7 +174,7 @@ function detectPowerScribeStudyListCropFromBitmap(bitmap: ImageBitmap): Detected
     x: colBand.start / width - 0.02,
     y: rowBand.start / height - 0.015,
     width: Math.min(0.8, (Math.min(width - 1, colBand.end + Math.round(width * 0.035)) / width) - (colBand.start / width - 0.02)),
-    height: Math.min(0.68, (Math.min(height - 1, rowBand.end + Math.round(height * 0.025)) / height) - (rowBand.start / height - 0.015)),
+    height: Math.min(0.78, (Math.min(height - 1, rowBand.end + Math.round(height * 0.025)) / height) - (rowBand.start / height - 0.015)),
   });
 
   const rowCoverage = (rowBand.end - rowBand.start + 1) / Math.max(1, yMax - yMin);
@@ -260,6 +260,10 @@ function childRect(parent: RelativeCropRect, child: RelativeCropRect): RelativeC
     width: p.width * c.width,
     height: p.height * c.height,
   });
+}
+
+export function __testBoundToStudyListArea(rect: RelativeCropRect): RelativeCropRect {
+  return boundToStudyListArea(rect);
 }
 
 interface PowerScribeColumnLayout {

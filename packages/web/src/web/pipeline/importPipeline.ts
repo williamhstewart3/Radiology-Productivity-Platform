@@ -56,6 +56,18 @@ function productivityRelevant(candidate: MatchCandidate): boolean {
   return candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0;
 }
 
+export function isReviewRowSaveEligible(row: PipelineReviewRow): boolean {
+  if (!row.included || row.autoSkipped || row.approvalStatus === 'excluded' || row.approvalStatus === 'exact_duplicate_skipped') {
+    return false;
+  }
+  const selectedCandidates = selectedCandidatesForRow(row).filter(productivityRelevant);
+  if (selectedCandidates.length === 0) return false;
+  if (row.approvalStatus === 'auto_approved' || row.approvalStatus === 'manual_approved' || row.approvalStatus === 'approved_as_new') {
+    return true;
+  }
+  return !row.needsReview;
+}
+
 function isDeterministicProtocolCandidate(candidate: MatchCandidate): boolean {
   return candidate.method === 'radiology_match' &&
     candidate.confidence >= 0.99 &&
@@ -267,14 +279,15 @@ export async function commitPipelineResults(
   const committedLogs: StudyLog[] = [];
 
   for (const row of reviewRows) {
-    if (!row.included) continue;
     const selectedCandidates = selectedCandidatesForRow(row).filter(productivityRelevant);
     if (selectedCandidates.length === 0) {
-      reviewNeededCount++;
+      if (row.included && !row.autoSkipped && row.approvalStatus !== 'excluded') reviewNeededCount++;
       continue;
     }
-    if (row.needsReview) {
-      reviewNeededCount++;
+    if (!isReviewRowSaveEligible(row)) {
+      if (row.included && !row.autoSkipped && row.approvalStatus !== 'excluded' && row.approvalStatus !== 'exact_duplicate_skipped') {
+        reviewNeededCount++;
+      }
       continue;
     }
 
@@ -307,7 +320,7 @@ export async function commitPipelineResults(
         : null;
       if (existing && !(existing as any).deletedAt) continue;
 
-      const isReview = cand.confidence < 0.75 || row.needsReview;
+      const isReview = false;
 
       const studyDate = productivityDate;
       const logDateFinal = productivityDate;

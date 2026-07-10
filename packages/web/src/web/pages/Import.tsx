@@ -139,16 +139,36 @@ function ExamSearchPanel({ initialQuery, onSelect, onClose }: ExamSearchPanelPro
 }
 // ─── ImportProps ──────────────────────────────────────────────────────────────
 
-function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) {
+function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocrDebug']; imageFile?: File | Blob | null }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!imageFile) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(imageFile);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [imageFile]);
+
   if (!debug) return null;
   const debugStats = [
     ['Provider', debug.ocrProvider],
     ['Raw lines', debug.rawLineCount ?? debug.ocrLines.length],
     ['Cleaned lines', debug.cleanedLineCount ?? debug.ocrLines.length],
+    ['Procedure OCR lines', debug.columnLineCounts?.procedure ?? 'n/a'],
+    ['Exam date OCR lines', debug.columnLineCounts?.examDate ?? 'n/a'],
+    ['Modified OCR lines', debug.columnLineCounts?.modifiedDate ?? 'n/a'],
+    ['Reconstructed rows', debug.reconstructedRowCount ?? debug.ocrLines.length],
     ['Parsed rows', debug.parsedRowCount ?? debug.detectedRows.length],
     ['Rejected rows', debug.rejectedRowCount ?? 0],
     ['Duplicates skipped', debug.duplicateSkippedCount ?? 0],
     ['Review rows', debug.finalReviewRowCount ?? debug.detectedRows.length],
+    ['Auto-approved rows', debug.autoApprovedRowCount ?? 0],
+    ['Manual-approved rows', debug.manuallyApprovedRowCount ?? 0],
+    ['Possible duplicates', debug.possibleDuplicateRowCount ?? 0],
+    ['Exact duplicates skipped', debug.exactDuplicateSkippedCount ?? 0],
+    ['Excluded rows', debug.excludedRowCount ?? 0],
   ];
 
   return (
@@ -171,8 +191,38 @@ function OcrDebugPanel({ debug }: { debug: ProcessedImportResult['ocrDebug'] }) 
               Crop: {debug.crop.method} ({Math.round(debug.crop.confidence * 100)}%)
             </p>
             <p className="mt-1 font-mono text-[11px] text-slate-400">
-              x {debug.crop.rect.x.toFixed(3)}, y {debug.crop.rect.y.toFixed(3)}, w {debug.crop.rect.width.toFixed(3)}, h {debug.crop.rect.height.toFixed(3)}
+              x {debug.crop.rect.x.toFixed(3)}, y {debug.crop.rect.y.toFixed(3)}, w {debug.crop.rect.width.toFixed(3)}, h {debug.crop.rect.height.toFixed(3)}, bottom {(debug.crop.rect.y + debug.crop.rect.height).toFixed(3)}
             </p>
+          </div>
+        )}
+        {previewUrl && debug.crop && (
+          <div className="rounded-lg border border-white/8 bg-black/20 p-2">
+            <p className="font-medium text-slate-300">Crop preview</p>
+            <div className="relative mt-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+              <img src={previewUrl} alt="OCR crop debug preview" className="block w-full opacity-80" />
+              <div
+                className="absolute border-2 border-sky-400/90 bg-sky-400/10"
+                style={{
+                  left: `${debug.crop.rect.x * 100}%`,
+                  top: `${debug.crop.rect.y * 100}%`,
+                  width: `${debug.crop.rect.width * 100}%`,
+                  height: `${debug.crop.rect.height * 100}%`,
+                }}
+              />
+              {debug.columnCrops?.map((column) => (
+                <div
+                  key={column.name}
+                  className={`absolute border ${column.name === 'procedure' ? 'border-emerald-300/90 bg-emerald-300/10' : column.name === 'examDate' ? 'border-amber-300/90 bg-amber-300/10' : 'border-fuchsia-300/90 bg-fuchsia-300/10'}`}
+                  title={column.name}
+                  style={{
+                    left: `${column.rect.x * 100}%`,
+                    top: `${column.rect.y * 100}%`,
+                    width: `${column.rect.width * 100}%`,
+                    height: `${column.rect.height * 100}%`,
+                  }}
+                />
+              ))}
+            </div>
           </div>
         )}
         <div className="rounded-lg border border-white/8 bg-black/20 p-2">
@@ -433,6 +483,15 @@ export function canApproveReviewRow(row: PipelineReviewRow): boolean {
   return hasValidSelectedProductivityRvu(row) && row.duplicateStatus !== 'exact';
 }
 
+export function isRowFinalizableAfterApproval(row: PipelineReviewRow): boolean {
+  if (!hasValidSelectedProductivityRvu(row)) return false;
+  if (row.autoSkipped || row.approvalStatus === 'excluded' || row.approvalStatus === 'exact_duplicate_skipped') return false;
+  return !row.needsReview ||
+    row.approvalStatus === 'auto_approved' ||
+    row.approvalStatus === 'manual_approved' ||
+    row.approvalStatus === 'approved_as_new';
+}
+
 export function approvalButtonLabel(row: PipelineReviewRow): string {
   if (!hasValidSelectedProductivityRvu(row)) return 'Add CPT';
   if (row.duplicateStatus === 'possible') return 'Approve as new';
@@ -471,8 +530,8 @@ export function buildUserApprovalPatch(row: PipelineReviewRow): Partial<Pipeline
 
 export function summarizeReviewApproval(rows: PipelineReviewRow[], skippedRows: PipelineReviewRow[]) {
   const included = rows.filter((row) => row.included);
-  const approvedRows = included.filter((row) => !row.needsReview && hasValidSelectedProductivityRvu(row));
-  const pendingRows = included.filter((row) => row.needsReview && hasValidSelectedProductivityRvu(row));
+  const approvedRows = included.filter(isRowFinalizableAfterApproval);
+  const pendingRows = included.filter((row) => !isRowFinalizableAfterApproval(row) && hasValidSelectedProductivityRvu(row));
   const possibleDuplicateRows = pendingRows.filter((row) => row.duplicateStatus === 'possible');
   const noValidCptRows = included.filter((row) => !hasValidSelectedProductivityRvu(row));
   const excludedRows = rows.filter((row) => !row.included);
@@ -974,7 +1033,7 @@ export function Import({ onImported }: ImportProps) {
     setError(null);
     try {
       const selectedRvu = reviewRows
-        .filter((row) => row.included && !row.needsReview)
+        .filter(isRowFinalizableAfterApproval)
         .reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
       const result = await finalizeReviewSession({
         sessionId,
@@ -2350,7 +2409,7 @@ export function Import({ onImported }: ImportProps) {
               The screenshot is cropped, parsed, matched, and checked locally. Already-imported studies are auto-skipped.
             </p>
           </div>
-          <OcrDebugPanel debug={ocrDebug} />
+          <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button
             onClick={handleOcrProcess}

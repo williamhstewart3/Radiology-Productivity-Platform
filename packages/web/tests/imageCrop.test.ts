@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { __testDetectPowerScribeColumnLayoutFromProjection } from '../src/web/utils/imageCrop';
+import {
+  DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
+  __testBoundToStudyListArea,
+  __testDetectPowerScribeColumnLayoutFromProjection,
+} from '../src/web/utils/imageCrop';
 
 function syntheticThreeColumnProjection(width = 1000): number[] {
   const projection = new Array<number>(width).fill(0.002);
@@ -22,6 +26,24 @@ function syntheticThreeColumnProjection(width = 1000): number[] {
 }
 
 describe('PowerScribe column crop detection', () => {
+  test('fallback table crop reaches the lower visible worklist rows', () => {
+    const bottom = DEFAULT_POWERSCRIBE_STUDY_LIST_CROP.y + DEFAULT_POWERSCRIBE_STUDY_LIST_CROP.height;
+
+    expect(bottom).toBeGreaterThanOrEqual(0.93);
+    expect(bottom).toBeLessThanOrEqual(0.97);
+  });
+
+  test('detected crop bounds do not clamp near row 48', () => {
+    const bounded = __testBoundToStudyListArea({
+      x: 0.2,
+      y: 0.22,
+      width: 0.76,
+      height: 0.74,
+    });
+
+    expect(bounded.y + bounded.height).toBeGreaterThanOrEqual(0.95);
+  });
+
   test('detects Procedure, Exam Date, and Modified columns from vertical gutters', () => {
     const layout = __testDetectPowerScribeColumnLayoutFromProjection(syntheticThreeColumnProjection());
 

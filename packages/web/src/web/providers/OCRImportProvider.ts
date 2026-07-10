@@ -48,16 +48,26 @@ export interface OCRImportDebugRow extends ParsedLine {
 
 export interface OCRImportDebugInfo {
   crop: DetectedCrop | null;
+  threeColumnCrop?: DetectedCrop | null;
+  columnCrops?: Array<{ name: PowerScribeColumnName; rect: RelativeCropRect }>;
   ocrProvider: string;
   ocrText: string;
   ocrLines: string[];
   rawLineCount: number;
   cleanedLineCount: number;
+  columnLineCounts?: Record<PowerScribeColumnName, number>;
+  reconstructedRowCount: number;
   parsedRowCount: number;
   rejectedRowCount: number;
   rejectedRows: OcrParseDebugInfo['rejectedRows'];
   duplicateSkippedCount?: number;
   finalReviewRowCount?: number;
+  autoApprovedRowCount?: number;
+  manuallyApprovedRowCount?: number;
+  possibleDuplicateRowCount?: number;
+  exactDuplicateSkippedCount?: number;
+  excludedRowCount?: number;
+  finalSavedRowCount?: number;
   columnText?: Record<PowerScribeColumnName, string>;
   detectedRows: OCRImportDebugRow[];
   ocrConfidence: number;
@@ -327,11 +337,21 @@ export class OCRImportProvider implements ImportProvider {
 
     this.debugInfo = {
       crop: preprocessed?.tableCrop ?? null,
+      threeColumnCrop: preprocessed?.threeColumnCrop ?? null,
+      columnCrops: preprocessed?.columns.map((column) => ({ name: column.name, rect: column.rect })),
       ocrProvider: provider.constructor.name,
       ocrText,
       ocrLines,
       rawLineCount: parsedWithDebug.debug.rawLineCount,
       cleanedLineCount: parsedWithDebug.debug.cleanedLineCount,
+      columnLineCounts: columnResults
+        ? {
+            procedure: columnResults.procedure.lines.length,
+            examDate: columnResults.examDate.lines.length,
+            modifiedDate: columnResults.modifiedDate.lines.length,
+          }
+        : undefined,
+      reconstructedRowCount: rowLines.length,
       parsedRowCount: parsedWithDebug.debug.parsedRowCount,
       rejectedRowCount: parsedWithDebug.debug.rejectedRowCount,
       rejectedRows: parsedWithDebug.debug.rejectedRows,
