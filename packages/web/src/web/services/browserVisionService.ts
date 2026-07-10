@@ -27,6 +27,7 @@ export interface BrowserVisionSupport {
   status: BrowserVisionStatus;
   backend: 'webgpu' | 'wasm' | null;
   reason: string | null;
+  supportsFp16: boolean;
 }
 
 interface BrowserVisionState {
@@ -38,6 +39,8 @@ interface BrowserVisionState {
   modelLoadMs: number | null;
   lastError: string | null;
   progress: number | null;
+  supportsFp16: boolean;
+  dtype: string | Record<string, string> | null;
 }
 
 type ProgressCallback = (progress: { status: BrowserVisionStatus; progress: number | null; message: string }) => void;
@@ -78,6 +81,8 @@ const state: BrowserVisionState = {
   modelLoadMs: null,
   lastError: null,
   progress: null,
+  supportsFp16: false,
+  dtype: null,
 };
 
 export function getBrowserVisionModelInfo(): BrowserVisionModelInfo {
@@ -92,17 +97,19 @@ export async function detectBrowserVisionSupport(options: { allowWasmFallback?: 
   state.status = 'checking';
   if (typeof navigator === 'undefined') {
     state.status = 'webgpu_unavailable';
-    return { available: false, status: state.status, backend: null, reason: 'Browser APIs are not available in this environment.' };
+    return { available: false, status: state.status, backend: null, reason: 'Browser APIs are not available in this environment.', supportsFp16: false };
   }
 
   const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
   if (gpu) {
     try {
-      const adapter = await gpu.requestAdapter();
+      const adapter = await gpu.requestAdapter() as { features?: { has?: (feature: string) => boolean } } | null;
       if (adapter) {
+        const supportsFp16 = Boolean(adapter.features?.has?.('shader-f16'));
         state.status = 'available';
         state.backend = 'webgpu';
-        return { available: true, status: state.status, backend: 'webgpu', reason: null };
+        state.supportsFp16 = supportsFp16;
+        return { available: true, status: state.status, backend: 'webgpu', reason: null, supportsFp16 };
       }
     } catch (error) {
       state.lastError = error instanceof Error ? error.message : String(error);
@@ -112,12 +119,38 @@ export async function detectBrowserVisionSupport(options: { allowWasmFallback?: 
   if (options.allowWasmFallback) {
     state.status = 'available';
     state.backend = 'wasm';
-    return { available: true, status: state.status, backend: 'wasm', reason: 'WebGPU unavailable; explicit WASM fallback selected.' };
+    state.supportsFp16 = false;
+    return { available: true, status: state.status, backend: 'wasm', reason: 'WebGPU unavailable; explicit WASM fallback selected.', supportsFp16: false };
   }
 
   state.status = 'webgpu_unavailable';
   state.backend = null;
-  return { available: false, status: state.status, backend: null, reason: 'WebGPU is unavailable. Browser Vision will not silently fall back to WASM.' };
+  state.supportsFp16 = false;
+  return { available: false, status: state.status, backend: null, reason: 'WebGPU is unavailable. Browser Vision will not silently fall back to WASM.', supportsFp16: false };
+}
+
+function dtypeForSupport(support: BrowserVisionSupport): string | Record<string, string> {
+  if (support.backend === 'wasm') return 'q4';
+  if (support.supportsFp16) {
+    return {
+      embed_tokens: 'fp16',
+      vision_encoder: 'fp16',
+      encoder_model: 'q4',
+      decoder_model_merged: 'q4',
+    };
+  }
+  return {
+    embed_tokens: 'fp32',
+    vision_encoder: 'fp32',
+    encoder_model: 'q4',
+    decoder_model_merged: 'q4',
+  };
+}
+
+function dtypeLabel(dtype: string | Record<string, string> | null): string {
+  if (!dtype) return MODEL_INFO.dtype;
+  if (typeof dtype === 'string') return dtype;
+  return Object.entries(dtype).map(([key, value]) => `${key}:${value}`).join(', ');
 }
 
 export async function downloadAndInitializeVisionModel(options: {
@@ -126,7 +159,7 @@ export async function downloadAndInitializeVisionModel(options: {
 } = {}): Promise<BrowserVisionSupport> {
   if (state.model && state.processor && state.tokenizer && state.backend) {
     state.status = 'ready';
-    return { available: true, status: state.status, backend: state.backend, reason: null };
+    return { available: true, status: state.status, backend: state.backend, reason: null, supportsFp16: state.supportsFp16 };
   }
 
   const support = await detectBrowserVisionSupport({ allowWasmFallback: options.allowWasmFallback });
@@ -150,15 +183,8 @@ export async function downloadAndInitializeVisionModel(options: {
         message: item.file ? `Loading ${item.file}` : `Loading ${MODEL_INFO.modelId}`,
       });
     };
-    const dtype =
-      support.backend === 'webgpu'
-        ? {
-            embed_tokens: 'fp16',
-            vision_encoder: 'fp16',
-            encoder_model: 'q4',
-            decoder_model_merged: 'q4',
-          }
-        : 'q4';
+    const dtype = dtypeForSupport(support);
+    state.dtype = dtype;
     const commonOptions = {
       device: support.backend,
       dtype,
@@ -175,17 +201,18 @@ export async function downloadAndInitializeVisionModel(options: {
     state.processor = processor;
     state.tokenizer = tokenizer;
     state.backend = support.backend;
+    state.supportsFp16 = support.supportsFp16;
     state.modelLoadMs = Math.round(performance.now() - start);
     state.status = 'ready';
     state.progress = 1;
     state.lastError = null;
     options.onProgress?.({ status: 'ready', progress: 1, message: 'Browser Vision ready' });
-    return { available: true, status: 'ready', backend: support.backend, reason: null };
+    return { available: true, status: 'ready', backend: support.backend, reason: null, supportsFp16: support.supportsFp16 };
   } catch (error) {
     state.status = 'model_failed';
     state.lastError = error instanceof Error ? error.message : String(error);
     options.onProgress?.({ status: 'model_failed', progress: null, message: state.lastError });
-    return { available: false, status: 'model_failed', backend: support.backend, reason: state.lastError };
+    return { available: false, status: 'model_failed', backend: support.backend, reason: state.lastError, supportsFp16: support.supportsFp16 };
   }
 }
 
@@ -199,6 +226,8 @@ export async function disposeVisionModel(): Promise<void> {
   state.backend = null;
   state.modelLoadMs = null;
   state.progress = null;
+  state.supportsFp16 = false;
+  state.dtype = null;
 }
 
 export function extractJsonFromModelText(text: string): unknown {
@@ -365,7 +394,7 @@ export async function extractPowerScribeRows(imageBlob: Blob, options: {
       modelId: MODEL_INFO.modelId,
       taskType: MODEL_INFO.taskType,
       backend: support.backend,
-      dtype: MODEL_INFO.dtype,
+      dtype: dtypeLabel(state.dtype),
       approximateDownloadSize: MODEL_INFO.approximateDownloadSize,
       expectedMemory: MODEL_INFO.expectedMemory,
       webGpuRequired: true,
