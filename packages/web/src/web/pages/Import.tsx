@@ -2239,33 +2239,44 @@ export function Import({ onImported }: ImportProps) {
           </div>
 
           {processingEngine === 'browser_vision' && (
-            <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/8 p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-200">Browser Vision - Experimental</p>
-                  <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                    Runs locally in Chrome/Edge with WebGPU after downloading and caching the model files. No Ollama, desktop helper, OCR engine, or external inference API is used.
-                  </p>
-                </div>
-                <span className="shrink-0 rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-200">
-                  OCR used: No
-                </span>
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2 text-xs">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${
+                  browserVisionStatus === 'model_failed' || browserVisionStatus === 'extraction_failed'
+                    ? 'bg-red-400'
+                    : browserVisionStatus === 'loading' || browserVisionStatus === 'downloading'
+                    ? 'bg-amber-400'
+                    : 'bg-cyan-400'
+                }`} />
+                <span className="font-medium text-slate-300">Local Browser Vision</span>
+                <span className="text-slate-500">WebGPU · no OCR</span>
               </div>
-              <div className="mt-3 grid gap-2 text-[11px] text-slate-400 sm:grid-cols-2">
-                <p><span className="text-slate-500">Model:</span> {browserVisionModelInfo.modelId}</p>
-                <p><span className="text-slate-500">Task:</span> {browserVisionModelInfo.taskType}</p>
-                <p><span className="text-slate-500">Backend:</span> WebGPU required by default</p>
-                <p><span className="text-slate-500">Download:</span> {browserVisionModelInfo.approximateDownloadSize}</p>
-              </div>
-              {browserVisionStatus !== 'uninitialized' && (
-                <div className="mt-3 rounded-lg border border-white/8 bg-black/15 px-3 py-2 text-xs text-slate-300">
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Status: {browserVisionStatus.replace(/_/g, ' ')}</span>
-                    {browserVisionProgress != null && <span>{Math.round(browserVisionProgress * 100)}%</span>}
+              <div className="flex items-center gap-2 text-slate-500">
+                {browserVisionStatus !== 'uninitialized' && (
+                  <span>
+                    {browserVisionStatus.replace(/_/g, ' ')}
+                    {browserVisionProgress != null ? ` · ${Math.round(browserVisionProgress * 100)}%` : ''}
+                  </span>
+                )}
+                <details className="relative">
+                  <summary className="cursor-pointer select-none rounded-lg border border-white/10 px-2 py-1 text-slate-400 transition-colors hover:text-slate-200">
+                    Details
+                  </summary>
+                  <div className="absolute right-0 z-20 mt-2 w-[min(420px,calc(100vw-3rem))] rounded-xl border border-white/10 bg-slate-950/95 p-3 text-left shadow-2xl">
+                    <p className="text-xs font-semibold text-slate-200">Browser Vision</p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                      Runs locally in Chrome/Edge after model files are cached. The screenshot is not sent to an inference service.
+                    </p>
+                    <div className="mt-3 grid gap-2 text-[11px] text-slate-400 sm:grid-cols-2">
+                      <p><span className="text-slate-600">Model:</span> {browserVisionModelInfo.modelId}</p>
+                      <p><span className="text-slate-600">Task:</span> {browserVisionModelInfo.taskType}</p>
+                      <p><span className="text-slate-600">Backend:</span> WebGPU</p>
+                      <p><span className="text-slate-600">OCR used:</span> No</p>
+                    </div>
+                    {browserVisionMessage && <p className="mt-2 text-[11px] text-slate-500">{browserVisionMessage}</p>}
                   </div>
-                  {browserVisionMessage && <p className="mt-1 text-slate-500">{browserVisionMessage}</p>}
-                </div>
-              )}
+                </details>
+              </div>
             </div>
           )}
 
