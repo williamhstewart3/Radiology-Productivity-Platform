@@ -1,4 +1,5 @@
 import { theme } from '../lib/theme';
+import { AnimatedProgressBar } from './AnimatedProgress';
 
 interface ProgressBarProps {
   value: number; // 0–100
@@ -44,13 +45,13 @@ export function ProgressBar({
         borderRadius: h / 2,
         overflow: 'hidden',
       }}>
-        <div style={{
-          height: h,
-          width: `${clamped}%`,
-          background: fill,
-          borderRadius: h / 2,
-          transition: animated ? 'width 0.7s cubic-bezier(0.4,0,0.2,1)' : 'none',
-        }} />
+        <AnimatedProgressBar
+          value={clamped}
+          height={h}
+          fill={fill}
+          radius={h / 2}
+          animated={animated}
+        />
       </div>
     </div>
   );

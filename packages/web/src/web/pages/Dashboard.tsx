@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState, useEffect, useMemo } from 'react';
+import { motion } from 'framer-motion';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { db } from '../db/database';
 import { useOrg } from '../hooks/useOrg';
@@ -9,6 +10,8 @@ import { StatusBadge } from '../components/StatusBadge';
 import { ConfettiCanvas } from '../components/ConfettiCanvas';
 import { ProfileAvatar } from '../components/OrgSwitcher';
 import { theme } from '../lib/theme';
+import { AnimatedNumber } from '../components/AnimatedNumber';
+import { cardEntry, cardGroup, pageEntry } from '../lib/motionVariants';
 import type { UserSettings, StudyLog, Modality, RadiologistProfile, ActiveReviewSession } from '../types';
 import { MODALITY_LABELS } from '../types';
 
@@ -330,7 +333,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   }, [allStudyLogs]);
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <motion.div className="space-y-6" variants={pageEntry} initial="hidden" animate="visible">
       <ConfettiCanvas active={showConfetti} />
 
       {/* Header */}
@@ -388,9 +391,15 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       )}
 
       {/* Top metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <motion.div
+        className="grid grid-cols-2 lg:grid-cols-4 gap-3"
+        variants={cardGroup}
+        initial="hidden"
+        animate="visible"
+      >
         {/* Today */}
-        <div
+        <motion.div
+          variants={cardEntry}
           className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
           style={{
             background: 'linear-gradient(145deg, rgba(37,99,168,0.14), rgba(22,32,50,0.95))',
@@ -399,14 +408,17 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           }}
         >
           <p className="metric-label">{mode === 'my' ? 'Today' : 'Today (All)'}</p>
-          <p className="metric-value">{fmt(todayStats?.totalWorkRvu ?? 0)}</p>
+          <p className="metric-value">
+            <AnimatedNumber value={todayStats?.totalWorkRvu ?? 0} decimals={1} />
+          </p>
           <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
             {todayStats?.studyCount ?? 0} {todayStats?.studyCount === 1 ? 'study' : 'studies'}
           </p>
-        </div>
+        </motion.div>
 
         {/* YTD wRVU */}
-        <div
+        <motion.div
+          variants={cardEntry}
           className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
           style={{
             background: 'linear-gradient(145deg, rgba(22,32,50,0.95), rgba(15,22,34,0.98))',
@@ -415,14 +427,17 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           }}
         >
           <p className="metric-label">YTD wRVU</p>
-          <p className="metric-value">{fmtInt(ytdStats?.ytdWorkRvu ?? 0)}</p>
+          <p className="metric-value">
+            <AnimatedNumber value={ytdStats?.ytdWorkRvu ?? 0} decimals={0} />
+          </p>
           <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
             of {fmtInt(ytdStats?.annualGoal ?? 0)} goal
           </p>
-        </div>
+        </motion.div>
 
         {/* % to Goal */}
-        <div
+        <motion.div
+          variants={cardEntry}
           className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
           style={{
             background: 'linear-gradient(145deg, rgba(22,32,50,0.95), rgba(15,22,34,0.98))',
@@ -441,15 +456,16 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 : undefined,
             }}
           >
-            {fmt(ytdStats?.percentToGoal ?? 0, 1)}%
+            <AnimatedNumber value={ytdStats?.percentToGoal ?? 0} decimals={1} suffix="%" />
           </p>
           <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
             {fmtInt(ytdStats?.remainingRvu ?? 0)} remaining
           </p>
-        </div>
+        </motion.div>
 
         {/* Req. Pace */}
-        <div
+        <motion.div
+          variants={cardEntry}
           className="rounded-2xl p-5 flex flex-col gap-1.5 transition-all duration-200"
           style={{
             background: 'linear-gradient(145deg, rgba(22,32,50,0.95), rgba(15,22,34,0.98))',
@@ -458,12 +474,14 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           }}
         >
           <p className="metric-label">{mode === 'my' ? 'Req. Pace' : 'Avg / Day'}</p>
-          <p className="metric-value">{fmt(ytdStats?.requiredRvuPerWorkday ?? 0)}</p>
+          <p className="metric-value">
+            <AnimatedNumber value={ytdStats?.requiredRvuPerWorkday ?? 0} decimals={1} />
+          </p>
           <p style={{ fontSize: '0.75rem', color: 'var(--theme-text-muted)' }}>
             wRVU/workday needed
           </p>
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
 
       <div className="card space-y-3">
         <div className="flex items-center justify-between gap-3">
@@ -779,6 +797,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           ))}
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }

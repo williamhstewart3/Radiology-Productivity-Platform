@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { motion } from 'framer-motion';
 import { db } from '../db/database';
@@ -26,6 +27,10 @@ import { todayDateString } from '../utils/calculations';
 import { ConfettiCanvas } from './ConfettiCanvas';
 import { MiniPaceWindow } from './MiniPaceWindow';
 import { theme } from '../lib/theme';
+import { AnimatedCircleProgress, AnimatedProgressBar } from './AnimatedProgress';
+import { AnimatedNumber } from './AnimatedNumber';
+import { cardEntry, cardGroup, pageEntry } from '../lib/motionVariants';
+import { motionDurations, motionEase } from '../lib/motionTokens';
 
 // ─── Status → color token ────────────────────────────────────────────────────
 
@@ -56,7 +61,6 @@ function CircularGauge({ current, goal, status }: GaugeProps) {
   const cx = 112;
   const cy = 112;
   const circumference = 2 * Math.PI * radius;
-  const dashOffset = circumference * (1 - pct);
   const color = statusColor(status);
 
   return (
@@ -88,19 +92,14 @@ function CircularGauge({ current, goal, status }: GaugeProps) {
           strokeWidth={stroke - 2}
         />
         {/* Progress arc */}
-        <circle
-          cx={cx} cy={cy} r={radius}
-          fill="none"
-          stroke={color}
+        <AnimatedCircleProgress
+          cx={cx}
+          cy={cy}
+          radius={radius}
+          value={pct}
+          circumference={circumference}
+          color={color}
           strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={dashOffset}
-          transform={`rotate(-90 ${cx} ${cy})`}
-          style={{
-            transition: 'stroke-dashoffset 0.9s cubic-bezier(0.34,1.56,0.64,1), stroke 0.5s ease',
-            filter: `drop-shadow(0 0 6px ${color}88)`,
-          }}
         />
         {/* Goal tick mark */}
         {pct < 0.98 && (
@@ -121,11 +120,11 @@ function CircularGauge({ current, goal, status }: GaugeProps) {
           className="tabular-nums leading-none"
           style={{ fontSize: '2.75rem', fontWeight: 900, color, textShadow: `0 0 40px ${color}55`, letterSpacing: '-0.02em' }}
         >
-          {current.toFixed(1)}
+          <AnimatedNumber value={current} decimals={1} />
         </span>
         <div className="flex items-center gap-1 mt-0.5">
           <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--theme-text-muted)' }}>
-            / {goal}
+            / <AnimatedNumber value={goal} decimals={0} />
           </span>
           <span style={{ fontSize: '0.6875rem', color: 'var(--theme-text-disabled)', fontWeight: 500 }}>
             wRVU
@@ -170,13 +169,11 @@ function DualProgressBars({ expectedPct, actualPct, progressStatus }: DualBarsPr
           </span>
         </div>
         <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(91,184,212,0.07)' }}>
-          <div
+          <AnimatedProgressBar
             className="h-2 rounded-full"
-            style={{
-              width: `${Math.min(100, expectedPct)}%`,
-              background: 'linear-gradient(90deg, rgba(91,184,212,0.2), rgba(91,184,212,0.35))',
-              transition: 'width 0.7s cubic-bezier(0.4,0,0.2,1)',
-            }}
+            value={expectedPct}
+            height={8}
+            fill="linear-gradient(90deg, rgba(91,184,212,0.2), rgba(91,184,212,0.35))"
           />
         </div>
       </div>
@@ -201,14 +198,11 @@ function DualProgressBars({ expectedPct, actualPct, progressStatus }: DualBarsPr
           </div>
         </div>
         <div className="h-2.5 rounded-full overflow-hidden" style={{ background: 'rgba(91,184,212,0.07)' }}>
-          <div
+          <AnimatedProgressBar
             className="h-2.5 rounded-full"
-            style={{
-              width: `${Math.min(100, actualPct)}%`,
-              background: `linear-gradient(90deg, ${barColor}cc, ${barColor})`,
-              boxShadow: `0 0 10px ${barColor}44`,
-              transition: 'width 0.8s cubic-bezier(0.34,1.2,0.64,1)',
-            }}
+            value={actualPct}
+            height={10}
+            fill={`linear-gradient(90deg, ${barColor}cc, ${barColor})`}
           />
         </div>
       </div>
@@ -220,7 +214,7 @@ function DualProgressBars({ expectedPct, actualPct, progressStatus }: DualBarsPr
 
 interface StatCardProps {
   label: string;
-  value: string;
+  value: ReactNode;
   sub?: string;
   valueColor?: string;
   highlight?: boolean;
@@ -228,8 +222,11 @@ interface StatCardProps {
 
 function StatCard({ label, value, sub, valueColor, highlight }: StatCardProps) {
   return (
-    <div
+    <motion.div
+      variants={cardEntry}
       className="rounded-xl flex flex-col gap-1 transition-all duration-200"
+      whileHover={{ y: -2, scale: 1.005 }}
+      transition={{ duration: motionDurations.fast, ease: motionEase.easeOut }}
       style={{
         background: highlight
           ? `linear-gradient(145deg, rgba(37,99,168,0.18), rgba(91,184,212,0.06))`
@@ -256,7 +253,7 @@ function StatCard({ label, value, sub, valueColor, highlight }: StatCardProps) {
           {sub}
         </span>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -370,9 +367,9 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
   return (
     <motion.div
       className="mx-auto max-w-3xl space-y-5"
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.18, ease: 'easeOut' }}
+      variants={pageEntry}
+      initial="hidden"
+      animate="visible"
     >
       <ConfettiCanvas active={showConfetti} />
       {showMiniFallback && (
@@ -512,16 +509,21 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
       </div>
 
       {/* ── Stat Cards ───────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <motion.div
+        className="grid grid-cols-2 sm:grid-cols-3 gap-3"
+        variants={cardGroup}
+        initial="hidden"
+        animate="visible"
+      >
         <StatCard
           label="Current"
-          value={`${metrics.currentRvu.toFixed(1)}`}
+          value={<AnimatedNumber value={metrics.currentRvu} decimals={1} />}
           sub={`of ${metrics.dailyGoal} goal`}
           highlight
         />
         <StatCard
           label="Expected by Now"
-          value={`${metrics.expectedRvu.toFixed(1)}`}
+          value={<AnimatedNumber value={metrics.expectedRvu} decimals={1} />}
           sub="wRVU at current time"
           valueColor="var(--theme-text-secondary)"
         />
@@ -536,8 +538,8 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
           value={
             metrics.status === 'before_work' ? '—' :
             metrics.status === 'after_work' || metrics.status === 'goal_achieved'
-              ? `${metrics.currentRvu.toFixed(1)}`
-              : `${metrics.projectedEndOfDay.toFixed(1)}`
+              ? <AnimatedNumber value={metrics.currentRvu} decimals={1} />
+              : <AnimatedNumber value={metrics.projectedEndOfDay} decimals={1} />
           }
           sub="wRVU by end of shift"
           valueColor={
@@ -548,7 +550,7 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
         />
         <StatCard
           label="Remaining"
-          value={metrics.remainingToGoal > 0 ? `${metrics.remainingToGoal.toFixed(1)}` : '0.0'}
+          value={<AnimatedNumber value={metrics.remainingToGoal > 0 ? metrics.remainingToGoal : 0} decimals={1} />}
           sub="wRVU to goal"
           valueColor={
             metrics.remainingToGoal === 0 ? theme.colors.ahead : undefined
@@ -558,7 +560,7 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
           label="Required Rate"
           value={
             metrics.remainingWorkMinutes <= 0 || metrics.remainingToGoal <= 0 ? '—' :
-            `${metrics.requiredRvuPerHour.toFixed(1)}/hr`
+            <AnimatedNumber value={metrics.requiredRvuPerHour} decimals={1} suffix="/hr" />
           }
           sub="to finish at goal"
           valueColor={
@@ -567,7 +569,7 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
             'var(--theme-text-secondary)'
           }
         />
-      </div>
+      </motion.div>
 
       {/* Study count */}
       <div className="flex items-center justify-between text-xs px-1" style={{ color: 'var(--theme-text-disabled)' }}>

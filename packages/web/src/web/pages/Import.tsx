@@ -9,6 +9,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { theme } from '../lib/theme';
 import { searchExamLibrary } from '../utils/matching';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
@@ -30,6 +31,7 @@ import {
 } from '../services/reviewSessionService';
 import { rememberCorrectedExam } from '../services/memoryLearningService';
 import { processOcrImport, processTextImport } from '../services/ocrWorkflowService';
+import { rowEntry } from '../lib/motionVariants';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
 
@@ -613,7 +615,12 @@ export function Import({ onImported }: ImportProps) {
   // ── Done screen ───────────────────────────────────────────────────────────
   if (step === 'done') {
     return (
-      <div className="max-w-lg mx-auto text-center space-y-6 py-16 animate-in fade-in duration-300">
+      <motion.div
+        className="max-w-lg mx-auto text-center space-y-6 py-16"
+        variants={rowEntry}
+        initial="hidden"
+        animate="visible"
+      >
         <div className="w-20 h-20 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto text-4xl">
           ✓
         </div>
@@ -658,14 +665,14 @@ export function Import({ onImported }: ImportProps) {
             View Dashboard
           </button>
         </div>
-      </div>
+      </motion.div>
     );
   }
 
   // ── Review screen ─────────────────────────────────────────────────────────
   if (step === 'review') {
     return (
-      <div className="space-y-5 animate-in fade-in duration-300">
+      <motion.div className="space-y-5" variants={rowEntry} initial="hidden" animate="visible">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">Review Matches</h1>
@@ -884,7 +891,8 @@ export function Import({ onImported }: ImportProps) {
         )}
 
         {/* ── Review rows ───────────────────────────────────────────────── */}
-        <div className="space-y-3">
+        <motion.div className="space-y-3" layout>
+          <AnimatePresence initial={false}>
           {visibleReviewRows.map((row, i) => {
             const isPossibleDupe = row.duplicateStatus === 'possible';
             const selectedIndices = getSelectedCandidateIndices(row);
@@ -894,8 +902,13 @@ export function Import({ onImported }: ImportProps) {
             const reviewReason = manualReviewReason(row);
             const canApproveSame = Boolean(buildApprovalPatch(row));
             return (
-              <div
+              <motion.div
                 key={row.tempId}
+                layout
+                variants={rowEntry}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
                 className={`card transition-opacity duration-200 ${!row.included ? 'opacity-40' : ''}`}
               >
                 <div className="flex items-start justify-between gap-3 mb-2">
@@ -1158,9 +1171,10 @@ export function Import({ onImported }: ImportProps) {
                     )}
                   </div>
                 )}
-              </div>
+              </motion.div>
             );
           })}
+          </AnimatePresence>
 
           {reviewRows.length === 0 && skippedRows.length > 0 && (
             <div className="text-center py-10">
@@ -1171,7 +1185,7 @@ export function Import({ onImported }: ImportProps) {
               </p>
             </div>
           )}
-        </div>
+        </motion.div>
 
         {error && <p className="text-red-400 text-sm">{error}</p>}
 
@@ -1199,7 +1213,7 @@ export function Import({ onImported }: ImportProps) {
               : `Finalize Day: ${matchedCount} ${matchedCount === 1 ? 'Study' : 'Studies'} (${selectedCodeCount} CPT${selectedCodeCount === 1 ? '' : 's'})`}
           </button>
         </div>
-      </div>
+      </motion.div>
     );
   }
 

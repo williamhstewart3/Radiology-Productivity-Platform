@@ -1,5 +1,6 @@
 import { useState, useEffect, Component } from 'react';
 import type { ComponentType, ReactNode } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Route, Switch } from 'wouter';
 import { useAppInitialization } from './hooks/useAppInitialization';
 import { OrgProvider } from './contexts/OrgContext';
@@ -41,7 +42,10 @@ import { Profiles } from './pages/Profiles';
 import { AdminData } from './pages/AdminData';
 import { Automation } from './pages/Automation';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
+import { LoadingOverlay } from './components/LoadingOverlay';
 import { injectTheme } from './lib/theme';
+import { motionDurations, motionEase, motionSprings } from './lib/motionTokens';
+import { pageEntry } from './lib/motionVariants';
 
 type Tab = 'pace' | 'dashboard' | 'automation' | 'log' | 'import' | 'history' | 'settings' | 'locations' | 'watcher' | 'profiles' | 'camera' | 'explorer' | 'admin';
 
@@ -128,7 +132,7 @@ function MainApp() {
     );
   }
 
-  if (!isReady) {
+  if (!isReady && typeof LoadingOverlay === 'undefined') {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--theme-bg-base)' }}>
         <div className="text-center space-y-6">
@@ -153,7 +157,18 @@ function MainApp() {
 
   return (
     <div className={isDark ? 'dark' : ''}>
-      <div className="app-shell flex min-h-screen">
+      <AnimatePresence>
+        {!isReady && <LoadingOverlay />}
+      </AnimatePresence>
+
+      <motion.div
+        className="app-shell flex min-h-screen"
+        variants={pageEntry}
+        initial="hidden"
+        animate={isReady ? 'visible' : 'hidden'}
+        transition={{ duration: motionDurations.slow, ease: motionEase.easeOut }}
+        aria-hidden={!isReady}
+      >
         <aside className={`desktop-sidebar sticky top-0 hidden h-screen shrink-0 flex-col px-3 py-4 transition-[width] duration-200 lg:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[248px]'}`}>
           <div className="flex items-center justify-between gap-2 px-1">
             {sidebarCollapsed ? <BaptistLogoMark size={34} /> : <BaptistLogoLockup size="sm" showTagline />}
@@ -177,9 +192,16 @@ function MainApp() {
                   className={`nav-rail-item ${active ? 'nav-rail-item-active' : ''} ${sidebarCollapsed ? 'justify-center px-0' : ''}`}
                   title={sidebarCollapsed ? item.label : undefined}
                 >
-                  <Icon className="size-4 shrink-0" />
-                  {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
-                  {!sidebarCollapsed && active && <ChevronRight className="ml-auto size-4 opacity-60" />}
+                  {active && (
+                    <motion.span
+                      layoutId="desktop-nav-active"
+                      className="nav-rail-active-indicator"
+                      transition={motionSprings.gentle}
+                    />
+                  )}
+                  <Icon className="relative z-10 size-4 shrink-0" />
+                  {!sidebarCollapsed && <span className="relative z-10 truncate">{item.label}</span>}
+                  {!sidebarCollapsed && active && <ChevronRight className="relative z-10 ml-auto size-4 opacity-60" />}
                 </button>
               );
             })}
@@ -249,16 +271,23 @@ function MainApp() {
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
-                  className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[10px] font-medium transition-colors ${active ? 'bg-cyan-400/10 text-cyan-200' : 'text-slate-500'}`}
+                  className={`relative flex min-h-12 flex-col items-center justify-center gap-1 overflow-hidden rounded-lg text-[10px] font-medium transition-colors ${active ? 'text-cyan-200' : 'text-slate-500'}`}
                 >
-                  <Icon className="size-4" />
-                  <span className="max-w-full truncate">{item.label}</span>
+                  {active && (
+                    <motion.span
+                      layoutId="mobile-nav-active"
+                      className="absolute inset-0 rounded-lg bg-cyan-400/10"
+                      transition={motionSprings.gentle}
+                    />
+                  )}
+                  <Icon className="relative z-10 size-4" />
+                  <span className="relative z-10 max-w-full truncate">{item.label}</span>
                 </button>
               );
             })}
           </nav>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
