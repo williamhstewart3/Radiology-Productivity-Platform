@@ -2,6 +2,8 @@ import { parseDateTimeFromOcr } from '../utils/studyDateParser';
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
 import type { PowerScribeVisionRow } from '../types/structuredOcr';
 
+type VisionImportEngine = 'ollama_vision' | 'browser_vision';
+
 function splitIsoMinute(value: string | null): { date: string | null; time: string | null; dateTime: string | null } {
   if (!value) return { date: null, time: null, dateTime: null };
   const normalized = value.length === 16 ? `${value}:00` : value;
@@ -22,9 +24,9 @@ function bestDateTime(value: string | null, rawText: string): { date: string | n
   };
 }
 
-function compactRawLine(row: PowerScribeVisionRow): string {
+function compactRawLine(row: PowerScribeVisionRow, engine: VisionImportEngine): string {
   return JSON.stringify({
-    provider: 'ollama_vision',
+    provider: engine,
     rowIndex: row.rowIndex,
     procedure: row.rawProcedureText,
     examDate: row.rawExamDateText,
@@ -33,12 +35,18 @@ function compactRawLine(row: PowerScribeVisionRow): string {
 }
 
 export class PowerScribeVisionImportProvider implements ImportProvider {
-  readonly name = 'Ollama PowerScribe Vision';
-  readonly sourceId = 'vision' as const;
+  get name(): string {
+    return this.engine === 'browser_vision' ? 'Browser PowerScribe Vision' : 'Ollama PowerScribe Vision';
+  }
+
+  get sourceId(): 'vision' | 'browser_vision' {
+    return this.engine === 'browser_vision' ? 'browser_vision' : 'vision';
+  }
 
   constructor(
     private readonly rows: PowerScribeVisionRow[],
     private readonly fallbackDate: string,
+    private readonly engine: VisionImportEngine = 'ollama_vision',
   ) {}
 
   async importStudies(): Promise<ImportedStudy[]> {
@@ -83,12 +91,12 @@ export class PowerScribeVisionImportProvider implements ImportProvider {
         extractionConfidence: row.confidence,
         parserNeedsReview,
         parserReviewReason,
-        parserRawLine: compactRawLine(row),
+        parserRawLine: compactRawLine(row, this.engine),
         ocrConfidence: null,
-        source: 'vision' as const,
+        source: this.sourceId,
         importedAt: now,
         dateTimeConfidence,
-        dateTimeSource: dateTimeConfidence > 0 ? 'vision' : 'import_default',
+        dateTimeSource: dateTimeConfidence > 0 ? this.sourceId : 'import_default',
       };
     });
   }

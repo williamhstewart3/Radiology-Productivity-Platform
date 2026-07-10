@@ -154,7 +154,7 @@ export async function runImportPipeline(
     const procedureName = procedureNameFor(study);
     const query = study.cpt ?? procedureName;
     const candidates = (await findMatchCandidates(query, 6, profileId, {
-      requireExamContextForDirectCpt: study.source === 'vision' && !study.cpt,
+      requireExamContextForDirectCpt: (study.source === 'vision' || study.source === 'browser_vision') && !study.cpt,
       directCptContext: procedureName,
     })).filter(productivityRelevant);
     matched.push({ study, candidates });

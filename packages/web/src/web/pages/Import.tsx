@@ -40,8 +40,16 @@ import {
   type AssistantResponse,
 } from '../services/aiReviewAssistantService';
 import { processPowerScribeVisionImport, processTextImport } from '../services/visionWorkflowService';
+import {
+  detectBrowserVisionSupport,
+  extractPowerScribeRows as extractPowerScribeRowsWithBrowserVision,
+  getBrowserVisionModelInfo,
+  getBrowserVisionStatus,
+  type BrowserVisionStatus,
+} from '../services/browserVisionService';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { CorrectionAction, FeedbackEvent, FeedbackEventCategory, DuplicateStatus, MatchCandidate, UserSettings } from '../types';
+import type { BrowserVisionDiagnostics } from '../types/structuredOcr';
 
 // ─── ExamSearchPanel ─────────────────────────────────────────────────────────
 
@@ -466,6 +474,7 @@ interface ImportProps {
 }
 
 type Mode = 'paste' | 'vision' | 'powerscribe';
+type ProcessingEngine = 'browser_vision' | 'ollama_vision' | 'existing_ocr';
 type Step = 'input' | 'review' | 'done';
 type ReviewMode = 'unknowns' | 'everything' | 'auto' | 'low';
 type ImportToastTone = 'info' | 'success' | 'warning' | 'danger';
@@ -475,6 +484,7 @@ type AssistantQuickOption = { label: string; category: FeedbackEventCategory; pr
 export const CAPTURE_PROCESSING_LABEL = 'Processing...';
 export const CAPTURE_PROMPT_TITLE = 'PowerScribe capture detected';
 export const CAPTURE_PRIVACY_COPY = 'The screenshot is processed in memory and discarded after parsing. Only extracted productivity data is stored.';
+const BROWSER_VISION_EXPECTED_ROWS = 68;
 
 export function shouldAutoProcessPowerScribeCaptures(settings: Pick<UserSettings, 'alwaysProcessPowerScribeClipboard'> | null | undefined): boolean {
   return Boolean(settings?.alwaysProcessPowerScribeClipboard);
@@ -548,6 +558,7 @@ const ASSISTANT_QUICK_OPTIONS: AssistantQuickOption[] = [
 export function Import({ onImported }: ImportProps) {
   const { activeProfile, activePractice } = useProfile();
   const [mode, setMode]           = useState<Mode>('vision');
+  const [processingEngine, setProcessingEngine] = useState<ProcessingEngine>('browser_vision');
   const [step, setStep]           = useState<Step>('input');
   const [pasteText, setPasteText] = useState('');
   const [captureFile, setcaptureFile]     = useState<File | null>(null);
@@ -575,9 +586,14 @@ export function Import({ onImported }: ImportProps) {
   const [feedbackQueueOpen, setFeedbackQueueOpen] = useState(false);
   const [feedbackEvents, setFeedbackEvents] = useState<FeedbackEvent[]>([]);
   const [feedbackSummary, setFeedbackSummary] = useState<string | null>(null);
+  const [browserVisionStatus, setBrowserVisionStatus] = useState<BrowserVisionStatus>(getBrowserVisionStatus().status);
+  const [browserVisionProgress, setBrowserVisionProgress] = useState<number | null>(null);
+  const [browserVisionMessage, setBrowserVisionMessage] = useState<string | null>(null);
+  const [browserVisionDiagnostics, setBrowserVisionDiagnostics] = useState<BrowserVisionDiagnostics | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const processingRef = useRef(false);
   const lastClipboardImageHashRef = useRef<string | null>(null);
+  const browserVisionModelInfo = getBrowserVisionModelInfo();
 
   useEffect(() => {
     loadActiveReviewSession(activeProfile?.id ?? null).then((session) => {
@@ -728,10 +744,73 @@ export function Import({ onImported }: ImportProps) {
   }
 
   async function processPowerScribeCapture(file: File, timelineSource: string) {
-    await processPowerScribeVisionCapture(file, timelineSource);
+    if (processingEngine === 'browser_vision') {
+      await processPowerScribeBrowserVisionCapture(file, timelineSource);
+      return;
+    }
+    if (processingEngine === 'ollama_vision') {
+      await processPowerScribeOllamaVisionCapture(file, timelineSource);
+      return;
+    }
+    setError('Existing OCR is not available on the experimental Vision pipeline branch.');
+    pushToast('warning', 'OCR unavailable on this branch', 'Switch to Browser Vision or Ollama Vision for this proof of concept.');
   }
 
-  async function processPowerScribeVisionCapture(file: File | null, timelineSource: string) {
+  async function processPowerScribeBrowserVisionCapture(file: File | null, timelineSource: string) {
+    if (!file) return;
+    if (processingRef.current) return;
+    setProcessing(true);
+    setError(null);
+    setBrowserVisionDiagnostics(null);
+    setBrowserVisionProgress(null);
+    setBrowserVisionMessage('Checking browser Vision support...');
+    if (file) {
+      setcaptureFile(file);
+      setClipboardFile(null);
+    }
+    pushToast('info', 'Processing with Browser Vision...', 'Running local WebGPU extraction in this browser. OCR used: No.');
+    try {
+      const support = await detectBrowserVisionSupport();
+      setBrowserVisionStatus(support.status);
+      if (!support.available) {
+        throw new Error(support.reason ?? 'Browser Vision is unavailable.');
+      }
+      const extracted = await extractPowerScribeRowsWithBrowserVision(file, {
+        onProgress: ({ status, progress, message }) => {
+          setBrowserVisionStatus(status);
+          setBrowserVisionProgress(progress);
+          setBrowserVisionMessage(message);
+        },
+      });
+      setBrowserVisionDiagnostics(extracted.diagnostics);
+      if (extracted.rows.length === 0) {
+        setError('Browser Vision returned no study rows.');
+        pushToast('warning', 'No studies found', 'Browser Vision did not return structured PowerScribe rows.');
+        return;
+      }
+      if (extracted.diagnostics.warning) {
+        pushToast('warning', 'Possible missed studies', extracted.diagnostics.warning);
+      }
+      const processed = await processPowerScribeVisionImport(extracted.rows, {
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+      }, {
+        engine: 'browser_vision',
+        diagnostics: extracted.diagnostics,
+      });
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
+    } catch (error) {
+      setBrowserVisionStatus('extraction_failed');
+      setError(error instanceof Error ? error.message : 'Browser Vision extraction failed');
+      pushToast('danger', 'Browser Vision failed', error instanceof Error ? `${error.message} Retry or switch to Ollama Vision.` : 'Retry or switch to Ollama Vision.');
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function processPowerScribeOllamaVisionCapture(file: File | null, timelineSource: string) {
     const desktop = getDesktopAPI();
     if (!desktop?.extractPowerScribeClipboardVisionRows) {
       setError('Ollama Vision extraction is only available in the desktop app.');
@@ -758,7 +837,7 @@ export function Import({ onImported }: ImportProps) {
         siteId: activePractice?.id ?? null,
         sessionId,
         logDate,
-      });
+      }, { engine: 'ollama_vision' });
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Vision extraction failed');
@@ -804,7 +883,7 @@ export function Import({ onImported }: ImportProps) {
 
   async function handleVisionProcess() {
     if (!captureFile) return;
-    await processPowerScribeVisionCapture(captureFile, 'manual Vision capture');
+    await processPowerScribeCapture(captureFile, 'manual Vision capture');
   }
 
   async function alwaysProcessClipboard(file: File) {
@@ -1625,13 +1704,13 @@ export function Import({ onImported }: ImportProps) {
                         {rowStatus}
                       </span>
                       {/* Source confidence badge */}
-                      {row.source.dateTimeSource === 'vision' && (row.source.dateTimeConfidence ?? 0) >= 1.0 ? (
+                      {(row.source.dateTimeSource === 'vision' || row.source.dateTimeSource === 'browser_vision') && (row.source.dateTimeConfidence ?? 0) >= 1.0 ? (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 font-medium">
-                          Vision {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
+                          {row.source.dateTimeSource === 'browser_vision' ? 'Browser Vision' : 'Vision'} {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
                         </span>
-                      ) : row.source.dateTimeSource === 'vision' && (row.source.dateTimeConfidence ?? 0) > 0 ? (
+                      ) : (row.source.dateTimeSource === 'vision' || row.source.dateTimeSource === 'browser_vision') && (row.source.dateTimeConfidence ?? 0) > 0 ? (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/25 text-sky-400 font-medium">
-                          Vision {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
+                          {row.source.dateTimeSource === 'browser_vision' ? 'Browser Vision' : 'Vision'} {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
                         </span>
                       ) : (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/25 text-amber-400/80 font-medium" title="Date was not extracted from Vision — using the log date you selected">
@@ -2131,6 +2210,65 @@ export function Import({ onImported }: ImportProps) {
 
       {mode === 'vision' && (
         <div className="card space-y-4">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Processing Engine</p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+              {[
+                { id: 'browser_vision' as const, label: 'Browser Vision', detail: 'Experimental WebGPU' },
+                { id: 'ollama_vision' as const, label: 'Ollama Vision', detail: 'Desktop only' },
+                { id: 'existing_ocr' as const, label: 'Existing OCR', detail: 'Removed on this branch' },
+              ].map((engine) => (
+                <button
+                  key={engine.id}
+                  onClick={() => {
+                    setProcessingEngine(engine.id);
+                    setError(null);
+                  }}
+                  disabled={processing || engine.id === 'existing_ocr'}
+                  className={`rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                    processingEngine === engine.id
+                      ? 'border-sky-400/45 bg-sky-500/12 text-white'
+                      : 'border-white/10 bg-black/10 text-slate-400 hover:border-white/20 hover:text-slate-200'
+                  }`}
+                >
+                  <p className="text-sm font-semibold">{engine.label}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">{engine.detail}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {processingEngine === 'browser_vision' && (
+            <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/8 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-200">Browser Vision - Experimental</p>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                    Runs locally in Chrome/Edge with WebGPU after downloading and caching the model files. No Ollama, desktop helper, OCR engine, or external inference API is used.
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-200">
+                  OCR used: No
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 text-[11px] text-slate-400 sm:grid-cols-2">
+                <p><span className="text-slate-500">Model:</span> {browserVisionModelInfo.modelId}</p>
+                <p><span className="text-slate-500">Task:</span> {browserVisionModelInfo.taskType}</p>
+                <p><span className="text-slate-500">Backend:</span> WebGPU required by default</p>
+                <p><span className="text-slate-500">Download:</span> {browserVisionModelInfo.approximateDownloadSize}</p>
+              </div>
+              {browserVisionStatus !== 'uninitialized' && (
+                <div className="mt-3 rounded-lg border border-white/8 bg-black/15 px-3 py-2 text-xs text-slate-300">
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Status: {browserVisionStatus.replace(/_/g, ' ')}</span>
+                    {browserVisionProgress != null && <span>{Math.round(browserVisionProgress * 100)}%</span>}
+                  </div>
+                  {browserVisionMessage && <p className="mt-1 text-slate-500">{browserVisionMessage}</p>}
+                </div>
+              )}
+            </div>
+          )}
+
           {clipboardFile && !processing && (
             <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-3">
               <p className="text-sm font-semibold text-sky-300">{CAPTURE_PROMPT_TITLE}</p>
@@ -2216,17 +2354,38 @@ export function Import({ onImported }: ImportProps) {
             <p className="text-amber-300 text-xs font-medium">Capture tips</p>
             <p className="text-amber-300/70 text-xs mt-1">
               Capture the PowerScribe study list with Procedure, Exam Date, and Modified columns visible.
-              The screenshot is cropped, parsed, matched, and checked locally. Already-imported studies are auto-skipped.
+              The selected engine extracts rows locally; matching, duplicate checks, review, and RVUs use the existing app pipeline.
             </p>
           </div>
-          {getDesktopAPI()?.extractPowerScribeClipboardVisionRows && (
+          {browserVisionDiagnostics && (
+            <details className="rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2 text-xs">
+              <summary className="cursor-pointer select-none font-semibold text-slate-300">Vision diagnostics</summary>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <p><span className="text-slate-500">Engine:</span> Browser Vision</p>
+                <p><span className="text-slate-500">Model:</span> {browserVisionDiagnostics.modelId}</p>
+                <p><span className="text-slate-500">Backend:</span> {browserVisionDiagnostics.backend}</p>
+                <p><span className="text-slate-500">OCR used:</span> No</p>
+                <p><span className="text-slate-500">Model load:</span> {browserVisionDiagnostics.modelLoadMs ?? 'cached'} ms</p>
+                <p><span className="text-slate-500">Inference:</span> {browserVisionDiagnostics.inferenceMs ?? 'unknown'} ms</p>
+                <p><span className="text-slate-500">Extracted rows:</span> {browserVisionDiagnostics.extractedRowCount}</p>
+                <p><span className="text-slate-500">Invalid rows:</span> {browserVisionDiagnostics.invalidRowCount}</p>
+                <p><span className="text-slate-500">Expected visible rows:</span> {browserVisionDiagnostics.expectedVisibleRows ?? BROWSER_VISION_EXPECTED_ROWS}</p>
+              </div>
+              {browserVisionDiagnostics.warning && (
+                <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-amber-200">
+                  {browserVisionDiagnostics.warning}
+                </p>
+              )}
+            </details>
+          )}
+          {processingEngine === 'ollama_vision' && getDesktopAPI()?.extractPowerScribeClipboardVisionRows && (
             <div className="rounded-xl border border-violet-500/25 bg-violet-500/8 p-3">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-200">Experimental Vision pipeline</p>
               <p className="mt-1 text-xs leading-relaxed text-slate-400">
                 Uses a local Ollama Vision model to extract structured study rows from the clipboard screenshot. CPT matching, duplicate checks, review, and RVUs still use the existing app pipeline.
               </p>
               <button
-                onClick={() => processPowerScribeVisionCapture(clipboardFile ?? captureFile, 'Ollama Vision clipboard')}
+                onClick={() => processPowerScribeOllamaVisionCapture(clipboardFile ?? captureFile, 'Ollama Vision clipboard')}
                 disabled={processing}
                 className="mt-3 w-full rounded-xl border border-violet-400/30 px-3 py-2 text-sm font-semibold text-violet-100 transition-colors hover:bg-violet-500/10 disabled:opacity-40"
               >
@@ -2237,11 +2396,11 @@ export function Import({ onImported }: ImportProps) {
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button
             onClick={handleVisionProcess}
-            disabled={!captureFile || processing}
+            disabled={!captureFile || processing || processingEngine === 'existing_ocr'}
             className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
             style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
           >
-            {processing ? CAPTURE_PROCESSING_LABEL : 'Extract with Vision'}
+            {processing ? CAPTURE_PROCESSING_LABEL : processingEngine === 'browser_vision' ? 'Extract with Browser Vision' : processingEngine === 'ollama_vision' ? 'Extract with Ollama Vision' : 'OCR unavailable on this branch'}
           </button>
         </div>
       )}

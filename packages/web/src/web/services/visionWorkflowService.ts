@@ -3,7 +3,7 @@ import { PowerScribeVisionImportProvider } from '../providers/PowerScribeVisionI
 import { runImportPipeline, type PipelineResult } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
 import type { ImportProvider } from '../types/importProvider';
-import type { PowerScribeVisionRow } from '../types/structuredOcr';
+import type { BrowserVisionDiagnostics, PowerScribeVisionRow } from '../types/structuredOcr';
 
 interface WorkflowContext {
   profileId: string | null;
@@ -60,11 +60,14 @@ export async function processTextImport(
 export async function processPowerScribeVisionImport(
   rows: PowerScribeVisionRow[],
   context: WorkflowContext,
+  options: { engine?: 'ollama_vision' | 'browser_vision'; diagnostics?: BrowserVisionDiagnostics | null } = {},
 ): Promise<ProcessedImportResult> {
+  const engine = options.engine ?? 'ollama_vision';
+  const label = engine === 'browser_vision' ? 'Browser Vision' : 'Ollama Vision';
   const processed = await processProvider(
-    new PowerScribeVisionImportProvider(rows, context.logDate),
+    new PowerScribeVisionImportProvider(rows, context.logDate, engine),
     context,
-    (count) => `Ollama Vision extraction completed (${count} extracted)`,
+    (count) => `${label} extraction completed (${count} extracted)`,
   );
   await recordAuditEvent({
     profileId: context.profileId,
@@ -72,9 +75,10 @@ export async function processPowerScribeVisionImport(
     sessionId: context.sessionId,
     logDate: context.logDate,
     action: 'vision_completed',
-    summary: `Ollama Vision extraction completed ${processed.extractedCount} extracted studies`,
+    summary: `${label} extraction completed ${processed.extractedCount} extracted studies`,
     detailsJson: JSON.stringify({
-      source: 'ollama_vision',
+      source: engine,
+      diagnostics: options.diagnostics ?? null,
       reviewRows: processed.result.reviewRows.length,
       skippedRows: processed.result.skippedRows.length,
     }),
