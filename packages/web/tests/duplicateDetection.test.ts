@@ -35,7 +35,7 @@ function log(patch: Partial<StudyLog> = {}): StudyLog {
     examDateTime: base.performedDateTime ?? null,
     studyDate: base.studyDate,
     dateTimeConfidence: 1,
-    dateTimeSource: 'ocr',
+    dateTimesource: 'vision',
     examNameRaw: base.examNameRaw,
     examTitleNormalized: null,
     examTitleDisplay: base.examNameRaw,
@@ -261,3 +261,4 @@ describe('strict duplicate detection', () => {
     expect(match?.confidence).not.toBe('exact');
   });
 });
+

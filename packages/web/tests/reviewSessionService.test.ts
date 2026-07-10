@@ -24,7 +24,7 @@ function candidate(cptCode: string): MatchCandidate {
 
 function row(patch: Partial<ImportedStudy> = {}, cptCodes = ['71045']): PipelineReviewRow {
   const source: ImportedStudy = {
-    source: 'ocr',
+    source: 'vision',
     examTitle: 'XR CHEST PORTABLE',
     procedureName: 'XR CHEST PORTABLE',
     canonicalExam: null,
@@ -51,7 +51,7 @@ function row(patch: Partial<ImportedStudy> = {}, cptCodes = ['71045']): Pipeline
     ocrConfidence: 1,
     importedAt: '2026-07-02T08:00:00.000Z',
     dateTimeConfidence: patch.dateTimeConfidence ?? 1,
-    dateTimeSource: 'ocr',
+    dateTimesource: 'vision',
     ...patch,
   };
 
@@ -140,3 +140,4 @@ describe('active review session duplicate merging', () => {
     expect(differentMerge.reviewRows).toHaveLength(2);
   });
 });
+

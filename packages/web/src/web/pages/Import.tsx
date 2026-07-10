@@ -1,7 +1,7 @@
 /**
  * Import.tsx
  *
- * Import screen — routes each import mode through the shared OCR workflow
+ * Import screen — routes each import mode through the shared Vision workflow
  * service, then merges the returned rows into the active review session.
  *
  * Architecture placeholder:
@@ -39,14 +39,14 @@ import {
   generateFeedbackSummary,
   type AssistantResponse,
 } from '../services/aiReviewAssistantService';
-import { processOcrImport, processPowerScribeVisionImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { processPowerScribeVisionImport, processTextImport } from '../services/visionWorkflowService';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { CorrectionAction, FeedbackEvent, FeedbackEventCategory, DuplicateStatus, MatchCandidate, UserSettings } from '../types';
 
 // ─── ExamSearchPanel ─────────────────────────────────────────────────────────
 
 interface ExamSearchPanelProps {
-  /** Raw OCR / paste text to pre-populate the search */
+  /** Raw extracted / pasted text to pre-populate the search */
   initialQuery: string;
   onSelect: (candidate: MatchCandidate) => void;
   onClose: () => void;
@@ -138,153 +138,6 @@ function ExamSearchPanel({ initialQuery, onSelect, onClose }: ExamSearchPanelPro
   );
 }
 // ─── ImportProps ──────────────────────────────────────────────────────────────
-
-function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocrDebug']; imageFile?: File | Blob | null }) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!imageFile) {
-      setPreviewUrl(null);
-      return;
-    }
-    const url = URL.createObjectURL(imageFile);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [imageFile]);
-
-  if (!debug) return null;
-  const debugStats = [
-    ['Provider', debug.ocrProvider],
-    ['Raw lines', debug.rawLineCount ?? debug.ocrLines.length],
-    ['Cleaned lines', debug.cleanedLineCount ?? debug.ocrLines.length],
-    ['Procedure OCR lines', debug.columnLineCounts?.procedure ?? 'n/a'],
-    ['Exam date OCR lines', debug.columnLineCounts?.examDate ?? 'n/a'],
-    ['Modified OCR lines', debug.columnLineCounts?.modifiedDate ?? 'n/a'],
-    ['Reconstructed rows', debug.reconstructedRowCount ?? debug.ocrLines.length],
-    ['Parsed rows', debug.parsedRowCount ?? debug.detectedRows.length],
-    ['Rejected rows', debug.rejectedRowCount ?? 0],
-    ['Duplicates skipped', debug.duplicateSkippedCount ?? 0],
-    ['Review rows', debug.finalReviewRowCount ?? debug.detectedRows.length],
-    ['Auto-approved rows', debug.autoApprovedRowCount ?? 0],
-    ['Manual-approved rows', debug.manuallyApprovedRowCount ?? 0],
-    ['Possible duplicates', debug.possibleDuplicateRowCount ?? 0],
-    ['Exact duplicates skipped', debug.exactDuplicateSkippedCount ?? 0],
-    ['Excluded rows', debug.excludedRowCount ?? 0],
-  ];
-
-  return (
-    <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs">
-      <summary className="cursor-pointer font-semibold text-slate-300">
-        OCR debug: {debug.parsedRowCount ?? debug.detectedRows.length} parsed / {debug.rawLineCount ?? debug.ocrLines.length} raw lines, {Math.round(debug.ocrConfidence * 100)}% text confidence
-      </summary>
-      <div className="mt-3 grid gap-3">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {debugStats.map(([label, value]) => (
-            <div key={label} className="rounded-lg border border-white/8 bg-black/20 p-2">
-              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
-              <p className="mt-1 font-mono text-[11px] text-slate-300">{value}</p>
-            </div>
-          ))}
-        </div>
-        {debug.crop && (
-          <div className="rounded-lg border border-white/8 bg-black/20 p-2">
-            <p className="font-medium text-slate-300">
-              Crop: {debug.crop.method} ({Math.round(debug.crop.confidence * 100)}%)
-            </p>
-            <p className="mt-1 font-mono text-[11px] text-slate-400">
-              x {debug.crop.rect.x.toFixed(3)}, y {debug.crop.rect.y.toFixed(3)}, w {debug.crop.rect.width.toFixed(3)}, h {debug.crop.rect.height.toFixed(3)}, bottom {(debug.crop.rect.y + debug.crop.rect.height).toFixed(3)}
-            </p>
-          </div>
-        )}
-        {previewUrl && debug.crop && (
-          <div className="rounded-lg border border-white/8 bg-black/20 p-2">
-            <p className="font-medium text-slate-300">Crop preview</p>
-            <div className="relative mt-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
-              <img src={previewUrl} alt="OCR crop debug preview" className="block w-full opacity-80" />
-              <div
-                className="absolute border-2 border-sky-400/90 bg-sky-400/10"
-                style={{
-                  left: `${debug.crop.rect.x * 100}%`,
-                  top: `${debug.crop.rect.y * 100}%`,
-                  width: `${debug.crop.rect.width * 100}%`,
-                  height: `${debug.crop.rect.height * 100}%`,
-                }}
-              />
-              {debug.columnCrops?.map((column) => (
-                <div
-                  key={column.name}
-                  className={`absolute border ${column.name === 'procedure' ? 'border-emerald-300/90 bg-emerald-300/10' : column.name === 'examDate' ? 'border-amber-300/90 bg-amber-300/10' : 'border-fuchsia-300/90 bg-fuchsia-300/10'}`}
-                  title={column.name}
-                  style={{
-                    left: `${column.rect.x * 100}%`,
-                    top: `${column.rect.y * 100}%`,
-                    width: `${column.rect.width * 100}%`,
-                    height: `${column.rect.height * 100}%`,
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="rounded-lg border border-white/8 bg-black/20 p-2">
-          <p className="font-medium text-slate-300">Detected rows</p>
-          <div className="mt-2 max-h-36 overflow-y-auto space-y-1">
-            {debug.detectedRows.length === 0 ? (
-              <p className="text-slate-500">No exam rows were detected from the OCR text.</p>
-            ) : (
-              debug.detectedRows.map((row, index) => (
-                <p key={`${row.rawText}-${index}`} className="font-mono text-[11px] text-slate-400">
-                  {index + 1}. {row.cleanedExamName ?? row.examName}
-                  {row.rawProcedureColumnText ? ` | proc "${row.rawProcedureColumnText}"` : ''}
-                  {row.rawExamDateColumnText ? ` | exam raw "${row.rawExamDateColumnText}"` : ''}
-                  {row.rawModifiedDateColumnText ? ` | read raw "${row.rawModifiedDateColumnText}"` : ''}
-                  {` | exam ${row.examDateTime ?? row.examDate ?? row.studyDate ?? 'none'}`}
-                  {` | read ${row.modifiedDateTime ?? row.modifiedDate ?? 'none'}`}
-                  {` | acc ${row.accessionNumber ?? 'none'}`}
-                  {` | log ${row.modifiedDateTime ?? row.studyDateTime ?? 'none'}`}
-                  {` | parser ${Math.round((row.extractionConfidence ?? 0) * 100)}%`}
-                  {row.matchResult?.topCandidate ? ` | match ${row.matchResult.topCandidate}` : ' | no match'}
-                  {row.matchResult?.confidence != null ? ` ${Math.round(row.matchResult.confidence * 100)}%` : ''}
-                  {row.matchResult?.duplicateKey ? ` | dupe ${row.matchResult.duplicateKey}` : ''}
-                  {row.reviewReason ?? row.matchResult?.reviewReason ? ` | review: ${row.reviewReason ?? row.matchResult?.reviewReason}` : ''}
-                </p>
-              ))
-            )}
-          </div>
-        </div>
-        {debug.rejectedRows && debug.rejectedRows.length > 0 && (
-          <div className="rounded-lg border border-white/8 bg-black/20 p-2">
-            <p className="font-medium text-slate-300">Rejected rows</p>
-            <div className="mt-2 max-h-32 overflow-y-auto space-y-1">
-              {debug.rejectedRows.map((row, index) => (
-                <p key={`${row.reason}-${row.rawText}-${index}`} className="font-mono text-[11px] text-slate-400">
-                  {index + 1}. {row.reason}: {row.rawText}
-                </p>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="rounded-lg border border-white/8 bg-black/20 p-2">
-          <p className="font-medium text-slate-300">OCR text</p>
-          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">
-            {debug.ocrText}
-          </pre>
-        </div>
-        {debug.columnText && (
-          <div className="grid gap-2 md:grid-cols-3">
-            {(['procedure', 'examDate', 'modifiedDate'] as const).map((column) => (
-              <div key={column} className="rounded-lg border border-white/8 bg-black/20 p-2">
-                <p className="font-medium text-slate-300">{column}</p>
-                <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">
-                  {debug.columnText?.[column]}
-                </pre>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </details>
-  );
-}
 
 function candidateKey(candidate: MatchCandidate): string {
   return `${candidate.cptCode}-${candidate.modifier ?? ''}`;
@@ -381,7 +234,7 @@ function StructuredDetails({
         </div>
         <div className="grid gap-2 lg:grid-cols-2">
           <div className="rounded-lg border border-white/8 bg-black/15 p-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Raw OCR text</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Raw extraction text</p>
             <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">{rawOcr}</pre>
           </div>
           <div className="rounded-lg border border-white/8 bg-black/15 p-2.5">
@@ -612,7 +465,7 @@ interface ImportProps {
   onImported: () => void;
 }
 
-type Mode = 'paste' | 'ocr' | 'powerscribe';
+type Mode = 'paste' | 'vision' | 'powerscribe';
 type Step = 'input' | 'review' | 'done';
 type ReviewMode = 'unknowns' | 'everything' | 'auto' | 'low';
 type ImportToastTone = 'info' | 'success' | 'warning' | 'danger';
@@ -684,7 +537,7 @@ const ASSISTANT_QUICK_OPTIONS: AssistantQuickOption[] = [
   { label: 'Not a duplicate', category: 'wrong_duplicate', prompt: 'This is not a duplicate.' },
   { label: 'Should be duplicate', category: 'wrong_duplicate', prompt: 'This should be marked as a duplicate.' },
   { label: 'Missing time', category: 'missing_datetime', prompt: 'The exam or read time is missing or wrong.' },
-  { label: 'Bad OCR text', category: 'bad_ocr', prompt: 'The OCR text is wrong.' },
+  { label: 'Bad Vision text', category: 'bad_ocr', prompt: 'The extracted text is wrong.' },
   { label: 'Bad cleanup', category: 'bad_exam_cleanup', prompt: 'The normalized exam name is wrong.' },
   { label: 'Two exams merged', category: 'merged_ocr_rows', prompt: 'This is two exams recognized as one. The second modality starts a new row.' },
   { label: 'Should auto-approve', category: 'should_auto_approve', prompt: 'This should auto-approve.' },
@@ -694,10 +547,10 @@ const ASSISTANT_QUICK_OPTIONS: AssistantQuickOption[] = [
 
 export function Import({ onImported }: ImportProps) {
   const { activeProfile, activePractice } = useProfile();
-  const [mode, setMode]           = useState<Mode>('ocr');
+  const [mode, setMode]           = useState<Mode>('vision');
   const [step, setStep]           = useState<Step>('input');
   const [pasteText, setPasteText] = useState('');
-  const [ocrFile, setOcrFile]     = useState<File | null>(null);
+  const [captureFile, setcaptureFile]     = useState<File | null>(null);
   const [processing, setProcessing] = useState(false);
   const [reviewRows, setReviewRows]   = useState<PipelineReviewRow[]>([]);
   const [skippedRows, setSkippedRows] = useState<PipelineReviewRow[]>([]);
@@ -711,7 +564,6 @@ export function Import({ onImported }: ImportProps) {
   const [searchPanelTempId, setSearchPanelTempId] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<ReviewMode>('unknowns');
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
-  const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   const [lastExtractedCount, setLastExtractedCount] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
@@ -781,7 +633,7 @@ export function Import({ onImported }: ImportProps) {
   }, [processing]);
 
   useEffect(() => {
-    if (mode !== 'ocr') return;
+    if (mode !== 'vision') return;
     function handlePaste(event: ClipboardEvent) {
       const imageItem = Array.from(event.clipboardData?.items ?? []).find((item) => item.type.startsWith('image/'));
       if (!imageItem) return;
@@ -796,7 +648,7 @@ export function Import({ onImported }: ImportProps) {
   }, [mode, activeProfile?.id, activePractice?.id, sessionId, logDate, reviewRows, skippedRows]);
 
   useEffect(() => {
-    if (mode !== 'ocr') return;
+    if (mode !== 'vision') return;
     if (!navigator.clipboard?.read) return;
 
     let cancelled = false;
@@ -875,71 +727,8 @@ export function Import({ onImported }: ImportProps) {
       .join('');
   }
 
-  async function processOcrFile(file: File, timelineSource: string) {
-    setProcessing(true);
-    setError(null);
-    setOcrFile(file);
-    pushToast('info', 'Processing capture...', 'Reading the screenshot and preparing extracted study rows.');
-    try {
-      const processed = await processOcrImport(file, {
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-      }, { filename: file.name, size: file.size });
-      pushToast('info', 'Matching CPT codes...', 'Running aliases, active CPT filters, and review checks.');
-      setOcrDebug(processed.ocrDebug ?? null);
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
-      setClipboardFile(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'OCR failed - try paste mode instead');
-      pushToast('danger', 'OCR failed', e instanceof Error ? e.message : 'Try paste mode instead.');
-    } finally {
-      setProcessing(false);
-    }
-  }
-
-  async function processWindowsClipboardCapture(file: File, timelineSource: string): Promise<boolean> {
-    const desktop = getDesktopAPI();
-    if (desktop?.platform !== 'win32' || !desktop.extractPowerScribeClipboardRows) return false;
-
-    try {
-      pushToast('info', 'Reading PowerScribe...', 'Using the Windows structured OCR helper.');
-      const rows = await desktop.extractPowerScribeClipboardRows();
-      if (rows.length === 0) return false;
-      pushToast('info', 'Matching CPT codes...', 'Using structured procedure names only.');
-      const processed = await processStructuredPowerScribeOcrImport(rows, {
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-      });
-      setOcrFile(file);
-      setOcrDebug(null);
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
-      setClipboardFile(null);
-      return true;
-    } catch (error) {
-      console.warn('Windows PowerScribe OCR helper failed; falling back to browser OCR.', error);
-      return false;
-    }
-  }
-
   async function processPowerScribeCapture(file: File, timelineSource: string) {
-    if (processingRef.current) return;
-    setProcessing(true);
-    setError(null);
-    setOcrFile(file);
-    setClipboardFile(null);
-    pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
-    try {
-      const usedStructuredHelper = await processWindowsClipboardCapture(file, timelineSource);
-      if (!usedStructuredHelper) {
-        await processOcrFile(file, timelineSource);
-      }
-    } finally {
-      setProcessing(false);
-    }
+    await processPowerScribeVisionCapture(file, timelineSource);
   }
 
   async function processPowerScribeVisionCapture(file: File | null, timelineSource: string) {
@@ -953,7 +742,7 @@ export function Import({ onImported }: ImportProps) {
     setProcessing(true);
     setError(null);
     if (file) {
-      setOcrFile(file);
+      setcaptureFile(file);
       setClipboardFile(null);
     }
     pushToast('info', 'Processing with Vision...', 'Using local Ollama Vision to extract structured study rows.');
@@ -970,7 +759,6 @@ export function Import({ onImported }: ImportProps) {
         sessionId,
         logDate,
       });
-      setOcrDebug(null);
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Vision extraction failed');
@@ -1014,25 +802,9 @@ export function Import({ onImported }: ImportProps) {
     }
   }
 
-  async function handleOcrProcess() {
-    if (!ocrFile) return;
-    await processOcrFile(ocrFile, 'manual file');
-    return;
-    setProcessing(true);
-    setError(null);
-    try {
-      const processed = await processOcrImport(ocrFile, {
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-      }, { filename: ocrFile.name, size: ocrFile.size });
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel, processed.extractedCount);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'OCR failed — try paste mode instead');
-    } finally {
-      setProcessing(false);
-    }
+  async function handleVisionProcess() {
+    if (!captureFile) return;
+    await processPowerScribeVisionCapture(captureFile, 'manual Vision capture');
   }
 
   async function alwaysProcessClipboard(file: File) {
@@ -1448,7 +1220,7 @@ export function Import({ onImported }: ImportProps) {
               onClick={() => {
                 setStep('input');
                 setPasteText('');
-                setOcrFile(null);
+                setcaptureFile(null);
                 setReviewRows([]);
                 setSkippedRows([]);
                 setLastExtractedCount(0);
@@ -1515,7 +1287,7 @@ export function Import({ onImported }: ImportProps) {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-white">Feedback Queue</p>
-                <p className="text-xs text-slate-500">Structured OCR review feedback saved locally for later mapping, issue, or Codex prompt generation.</p>
+                <p className="text-xs text-slate-500">Structured Vision review feedback saved locally for later mapping, issue, or Codex prompt generation.</p>
               </div>
               <button
                 onClick={showFeedbackSummary}
@@ -1853,22 +1625,22 @@ export function Import({ onImported }: ImportProps) {
                         {rowStatus}
                       </span>
                       {/* Source confidence badge */}
-                      {row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) >= 1.0 ? (
+                      {row.source.dateTimeSource === 'vision' && (row.source.dateTimeConfidence ?? 0) >= 1.0 ? (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 font-medium">
-                          OCR {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
+                          Vision {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
                         </span>
-                      ) : row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) > 0 ? (
+                      ) : row.source.dateTimeSource === 'vision' && (row.source.dateTimeConfidence ?? 0) > 0 ? (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/25 text-sky-400 font-medium">
-                          OCR {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
+                          Vision {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
                         </span>
                       ) : (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/25 text-amber-400/80 font-medium" title="Date was not extracted from OCR — using the log date you selected">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/25 text-amber-400/80 font-medium" title="Date was not extracted from Vision — using the log date you selected">
                           ⚠ inferred
                         </span>
                       )}
                       {row.source.ocrConfidence != null && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300 font-medium">
-                          OCR text {Math.round(row.source.ocrConfidence * 100)}%
+                          Vision text {Math.round(row.source.ocrConfidence * 100)}%
                         </span>
                       )}
                       <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${labelClass(label.tone)}`}>
@@ -2291,9 +2063,9 @@ export function Import({ onImported }: ImportProps) {
           Paste / CSV
         </button>
         <button
-          onClick={() => { setMode('ocr'); setError(null); }}
+          onClick={() => { setMode('vision'); setError(null); }}
           className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-            mode === 'ocr' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-300'
+            mode === 'vision' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-300'
           }`}
         >
           Screen Capture Intake
@@ -2357,7 +2129,7 @@ export function Import({ onImported }: ImportProps) {
         </div>
       )}
 
-      {mode === 'ocr' && (
+      {mode === 'vision' && (
         <div className="card space-y-4">
           {clipboardFile && !processing && (
             <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-3">
@@ -2399,9 +2171,9 @@ export function Import({ onImported }: ImportProps) {
             <div
               onClick={() => fileRef.current?.click()}
               className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${
-                ocrFile ? '' : 'border-white/15 hover:border-white/30 hover:bg-white/3'
+                captureFile ? '' : 'border-white/15 hover:border-white/30 hover:bg-white/3'
               }`}
-              style={ocrFile ? {
+              style={captureFile ? {
                 borderColor: 'rgba(37,99,168,0.4)',
                 background: 'rgba(37,99,168,0.06)',
               } : {}}
@@ -2411,13 +2183,13 @@ export function Import({ onImported }: ImportProps) {
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={(e) => setOcrFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => setcaptureFile(e.target.files?.[0] ?? null)}
               />
-              {ocrFile ? (
+              {captureFile ? (
                 <div>
-                  <p className="font-medium" style={{ color: theme.colors.accent }}>{ocrFile.name}</p>
+                  <p className="font-medium" style={{ color: theme.colors.accent }}>{captureFile.name}</p>
                   <p className="text-slate-400 text-xs mt-1">
-                    {(ocrFile.size / 1024).toFixed(0)} KB · Click to change
+                    {(captureFile.size / 1024).toFixed(0)} KB · Click to change
                   </p>
                 </div>
               ) : (
@@ -2454,7 +2226,7 @@ export function Import({ onImported }: ImportProps) {
                 Uses a local Ollama Vision model to extract structured study rows from the clipboard screenshot. CPT matching, duplicate checks, review, and RVUs still use the existing app pipeline.
               </p>
               <button
-                onClick={() => processPowerScribeVisionCapture(clipboardFile ?? ocrFile, 'Ollama Vision clipboard')}
+                onClick={() => processPowerScribeVisionCapture(clipboardFile ?? captureFile, 'Ollama Vision clipboard')}
                 disabled={processing}
                 className="mt-3 w-full rounded-xl border border-violet-400/30 px-3 py-2 text-sm font-semibold text-violet-100 transition-colors hover:bg-violet-500/10 disabled:opacity-40"
               >
@@ -2462,15 +2234,14 @@ export function Import({ onImported }: ImportProps) {
               </button>
             </div>
           )}
-          <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button
-            onClick={handleOcrProcess}
-            disabled={!ocrFile || processing}
+            onClick={handleVisionProcess}
+            disabled={!captureFile || processing}
             className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
             style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
           >
-            {processing ? CAPTURE_PROCESSING_LABEL : 'Extract & Match'}
+            {processing ? CAPTURE_PROCESSING_LABEL : 'Extract with Vision'}
           </button>
         </div>
       )}
@@ -2492,3 +2263,5 @@ export function Import({ onImported }: ImportProps) {
     </>
   );
 }
+
+

@@ -18,9 +18,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   showNotification: (title: string, body: string) =>
     ipcRenderer.invoke("notification:show", title, body),
 
-  // Windows PowerScribe OCR
-  extractPowerScribeClipboardRows: () =>
-    ipcRenderer.invoke("powerscribe:extract-clipboard-rows"),
+  // Local Ollama Vision extraction
   extractPowerScribeClipboardVisionRows: (options?: { model?: string }) =>
     ipcRenderer.invoke("powerscribe:extract-clipboard-vision-rows", options),
 

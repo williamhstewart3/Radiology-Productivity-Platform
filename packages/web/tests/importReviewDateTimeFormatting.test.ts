@@ -39,7 +39,7 @@ function candidate(patch: Partial<MatchCandidate> = {}): MatchCandidate {
 
 function row(patch: Partial<PipelineReviewRow> = {}): PipelineReviewRow {
   const source: ImportedStudy = {
-    source: 'ocr',
+    source: 'vision',
     examTitle: 'XR CHEST PORTABLE',
     procedureName: 'XR CHEST PORTABLE',
     canonicalExam: null,
@@ -66,7 +66,7 @@ function row(patch: Partial<PipelineReviewRow> = {}): PipelineReviewRow {
     ocrConfidence: 1,
     importedAt: '2026-07-08T08:30:00.000Z',
     dateTimeConfidence: 1,
-    dateTimeSource: 'ocr',
+    dateTimesource: 'vision',
   };
 
   return {
@@ -95,17 +95,17 @@ describe('import review date-time formatting', () => {
     expect(formatOcrDateTime('2026-07-08', null, '2026-07-08T21:05:00')).toBe('7/8/26 9:05 PM');
   });
 
-  test('displays explicit OCR time when available', () => {
+  test('displays explicit Vision time when available', () => {
     expect(formatOcrDateTime('2026-07-08', '08:19', '2026-07-08T21:05:00')).toBe('7/8/26 8:19 AM');
   });
 
-  test('hides accession line when PowerScribe OCR has no real accession', () => {
+  test('hides accession line when PowerScribe Vision has no real accession', () => {
     expect(shouldShowAccession(null)).toBe(false);
     expect(shouldShowAccession('')).toBe(false);
     expect(shouldShowAccession('ACC12345')).toBe(true);
   });
 
-  test('uses broad capture processing language instead of OCR-only language', () => {
+  test('uses broad capture processing language instead of Vision-only language', () => {
     expect(CAPTURE_PROCESSING_LABEL).toBe('Processing...');
     expect(CAPTURE_PROCESSING_LABEL).not.toMatch(/Running OCR/i);
   });
@@ -192,3 +192,4 @@ describe('import review approval workflow', () => {
     expect(isReviewRowSaveEligible(approvedAsNew)).toBe(true);
   });
 });
+

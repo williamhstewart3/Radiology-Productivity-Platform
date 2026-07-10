@@ -147,7 +147,7 @@ describe('modality-first CPT matching', () => {
 
   test('import pipeline supplies procedureName without exam or read dates', () => {
     const study = {
-      source: 'ocr',
+      source: 'vision',
       examTitle: 'CT CHEST ABDOMEN PELVIS W CONTRAST 7/2/2026 8:20 AM 7/2/2026 9:24 AM',
       procedureName: 'CT CHEST ABDOMEN PELVIS W CONTRAST',
       cleanedExamName: 'CT CHEST ABDOMEN PELVIS W CONTRAST',
@@ -295,3 +295,4 @@ describe('modality-first CPT matching', () => {
     expect(views.matchType).toBe('no_institution_match');
   });
 });
+

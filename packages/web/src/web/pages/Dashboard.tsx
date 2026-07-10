@@ -123,7 +123,7 @@ function RadCard({ profile, logs, settings, isActive }: RadCardProps) {
 // ─── Main component ────────────────────────────────────────────────────────────
 
 interface DashboardProps {
-  onNavigate: (tab: 'log' | 'import' | 'history' | 'settings' | 'camera' | 'explorer') => void;
+  onNavigate: (tab: 'log' | 'import' | 'history' | 'settings' | 'explorer') => void;
 }
 
 export function Dashboard({ onNavigate }: DashboardProps) {
@@ -835,9 +835,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       {showImportMethods && (
         <div className="card grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2" style={{ padding: '0.875rem' }}>
           {[
-            { label: 'Capture with Camera', icon: '📷', tab: 'camera' as const },
-            { label: 'Upload Screenshot/Image', icon: '🖼', tab: 'import' as const },
-            { label: 'Drag & Drop Image', icon: '📄', tab: 'import' as const },
+            { label: 'PowerScribe Vision Capture', icon: '🖼', tab: 'import' as const },
+            { label: 'Clipboard Screenshot', icon: '📄', tab: 'import' as const },
             { label: 'CPT Lookup', icon: '🔎', tab: 'explorer' as const },
             { label: 'Manual Text Entry', icon: '⌨️', tab: 'log' as const },
           ].map(({ label, icon, tab }) => (

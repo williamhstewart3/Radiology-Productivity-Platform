@@ -282,7 +282,7 @@ export function createFeedbackEvent(input: {
     duplicateStatus: input.context.duplicateStatus,
     duplicateReason: input.context.duplicateReason,
     duplicateFingerprint: input.context.duplicateFingerprint,
-    ocrProvider: 'powerscribe_clipboard',
+    ocrProvider: 'ollama_vision',
     ocrConfidence: input.context.ocrConfidence,
     llmCleanupUsed: Boolean(input.context.llmCleanupOutput),
     llmCleanupOutput: input.context.llmCleanupOutput,
@@ -542,8 +542,7 @@ export function generateFeedbackSummary(events: FeedbackEvent[]): FeedbackSummar
     expectedBehavior: event.expectedCorrectionJson,
   }));
   const likelyAffectedFiles = [
-    'packages/web/src/web/utils/powerScribeParser.ts',
-    'packages/web/src/web/providers/OCRImportProvider.ts',
+    'packages/web/src/web/providers/PowerScribeVisionImportProvider.ts',
     'packages/web/src/web/utils/matching.ts',
     'packages/web/src/web/utils/duplicateDetection.ts',
     'packages/web/src/web/pipeline/importPipeline.ts',

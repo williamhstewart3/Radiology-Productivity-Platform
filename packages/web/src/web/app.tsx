@@ -28,7 +28,6 @@ import { Import } from './pages/Import';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 import { Locations } from './pages/Locations';
-import { CameraUploadPage } from './pages/CameraUploadPage';
 import { CptExplorer } from './pages/CptExplorer';
 import { Profiles } from './pages/Profiles';
 import { AdminData } from './pages/AdminData';
@@ -47,7 +46,6 @@ type Tab =
   | 'settings'
   | 'locations'
   | 'profiles'
-  | 'camera'
   | 'explorer'
   | 'admin';
 
@@ -267,7 +265,6 @@ function MainApp() {
                 {activeTab === 'history'       && <History />}
                 {activeTab === 'settings'      && <Settings onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
-                {activeTab === 'camera'        && <CameraUploadPage onImported={() => setActiveTab('dashboard')} />}
                 {activeTab === 'explorer'      && <CptExplorer onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'profiles'      && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} initialEditId={activeProfile?.id ?? null} />}
                 {activeTab === 'admin'         && <AdminData />}

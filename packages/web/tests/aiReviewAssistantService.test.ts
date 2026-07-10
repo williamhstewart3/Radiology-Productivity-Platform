@@ -29,7 +29,7 @@ function candidate(cptCode: string, description = `CPT ${cptCode}`): MatchCandid
 
 function row(patch: Partial<ImportedStudy> = {}, rowPatch: Partial<PipelineReviewRow> = {}): PipelineReviewRow {
   const source: ImportedStudy = {
-    source: 'ocr',
+    source: 'vision',
     examTitle: 'XR CHEST PORTABLE',
     procedureName: 'XR CHEST PORTABLE',
     canonicalExam: null,
@@ -56,7 +56,7 @@ function row(patch: Partial<ImportedStudy> = {}, rowPatch: Partial<PipelineRevie
     ocrConfidence: 0.9,
     importedAt: '2026-07-08T08:40:00.000Z',
     dateTimeConfidence: 1,
-    dateTimeSource: 'ocr',
+    dateTimesource: 'vision',
     ...patch,
   };
 
@@ -196,3 +196,4 @@ describe('AI Review Assistant service', () => {
     expect(summary.codexPrompt).toContain('Tests required');
   });
 });
+
