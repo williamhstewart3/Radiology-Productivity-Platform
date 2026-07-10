@@ -31,7 +31,7 @@ import type { Modality } from './index';
 
 // ─── Canonical study model returned by every provider ──────────────────────
 
-export type ImportSource = 'manual' | 'ocr' | 'csv' | 'powerscribe';
+export type ImportSource = 'manual' | 'ocr' | 'vision' | 'csv' | 'powerscribe';
 
 /**
  * One study as emitted by any ImportProvider.

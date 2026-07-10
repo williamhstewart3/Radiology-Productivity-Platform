@@ -1,5 +1,5 @@
 /** Type definition for the Electron preload API exposed via contextBridge */
-import type { PowerScribeStructuredOcrRow } from '../types/structuredOcr';
+import type { PowerScribeStructuredOcrRow, PowerScribeVisionRow } from '../types/structuredOcr';
 
 export interface ElectronAPI {
   platform: string;
@@ -25,6 +25,7 @@ export interface ElectronAPI {
 
   // Windows PowerScribe OCR
   extractPowerScribeClipboardRows?: () => Promise<PowerScribeStructuredOcrRow[]>;
+  extractPowerScribeClipboardVisionRows?: (options?: { model?: string }) => Promise<PowerScribeVisionRow[]>;
 
   // Window controls
   minimize: () => Promise<void>;

@@ -1,12 +1,13 @@
 import { CSVImportProvider } from '../providers/CSVImportProvider';
 import { OCRImportProvider, type OCRImportDebugInfo } from '../providers/OCRImportProvider';
 import { StructuredPowerScribeOcrImportProvider } from '../providers/StructuredPowerScribeOcrImportProvider';
+import { PowerScribeVisionImportProvider } from '../providers/PowerScribeVisionImportProvider';
 import { runImportPipeline, type PipelineResult, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
 import { ensureUserSettings } from '../db/database';
 import { buildFingerprint } from '../utils/duplicateDetection';
 import type { ImportProvider } from '../types/importProvider';
-import type { PowerScribeStructuredOcrRow } from '../types/structuredOcr';
+import type { PowerScribeStructuredOcrRow, PowerScribeVisionRow } from '../types/structuredOcr';
 
 interface WorkflowContext {
   profileId: string | null;
@@ -191,6 +192,31 @@ export async function processStructuredPowerScribeOcrImport(
     summary: `Windows PowerScribe OCR completed ${processed.extractedCount} extracted studies`,
     detailsJson: JSON.stringify({
       source: 'windows_structured_ocr',
+      reviewRows: processed.result.reviewRows.length,
+      skippedRows: processed.result.skippedRows.length,
+    }),
+  });
+  return processed;
+}
+
+export async function processPowerScribeVisionImport(
+  rows: PowerScribeVisionRow[],
+  context: WorkflowContext,
+): Promise<ProcessedImportResult> {
+  const processed = await processProvider(
+    new PowerScribeVisionImportProvider(rows, context.logDate),
+    context,
+    (count) => `Ollama Vision extraction completed (${count} extracted)`,
+  );
+  await recordAuditEvent({
+    profileId: context.profileId,
+    siteId: context.siteId,
+    sessionId: context.sessionId,
+    logDate: context.logDate,
+    action: 'ocr_completed',
+    summary: `Ollama Vision extraction completed ${processed.extractedCount} extracted studies`,
+    detailsJson: JSON.stringify({
+      source: 'ollama_vision',
       reviewRows: processed.result.reviewRows.length,
       skippedRows: processed.result.skippedRows.length,
     }),

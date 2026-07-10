@@ -39,7 +39,7 @@ import {
   generateFeedbackSummary,
   type AssistantResponse,
 } from '../services/aiReviewAssistantService';
-import { processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { processOcrImport, processPowerScribeVisionImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { CorrectionAction, FeedbackEvent, FeedbackEventCategory, DuplicateStatus, MatchCandidate, UserSettings } from '../types';
 
@@ -937,6 +937,44 @@ export function Import({ onImported }: ImportProps) {
       if (!usedStructuredHelper) {
         await processOcrFile(file, timelineSource);
       }
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function processPowerScribeVisionCapture(file: File | null, timelineSource: string) {
+    const desktop = getDesktopAPI();
+    if (!desktop?.extractPowerScribeClipboardVisionRows) {
+      setError('Ollama Vision extraction is only available in the desktop app.');
+      pushToast('danger', 'Vision extraction unavailable', 'Open the desktop app with Ollama running locally.');
+      return;
+    }
+    if (processingRef.current) return;
+    setProcessing(true);
+    setError(null);
+    if (file) {
+      setOcrFile(file);
+      setClipboardFile(null);
+    }
+    pushToast('info', 'Processing with Vision...', 'Using local Ollama Vision to extract structured study rows.');
+    try {
+      const rows = await desktop.extractPowerScribeClipboardVisionRows();
+      if (rows.length === 0) {
+        setError('Vision extraction returned no study rows.');
+        pushToast('warning', 'No studies found', 'Ollama Vision did not return structured PowerScribe rows.');
+        return;
+      }
+      const processed = await processPowerScribeVisionImport(rows, {
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+      });
+      setOcrDebug(null);
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Vision extraction failed');
+      pushToast('danger', 'Vision extraction failed', error instanceof Error ? error.message : 'Confirm Ollama is running with a Vision model.');
     } finally {
       setProcessing(false);
     }
@@ -2409,6 +2447,21 @@ export function Import({ onImported }: ImportProps) {
               The screenshot is cropped, parsed, matched, and checked locally. Already-imported studies are auto-skipped.
             </p>
           </div>
+          {getDesktopAPI()?.extractPowerScribeClipboardVisionRows && (
+            <div className="rounded-xl border border-violet-500/25 bg-violet-500/8 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-200">Experimental Vision pipeline</p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                Uses a local Ollama Vision model to extract structured study rows from the clipboard screenshot. CPT matching, duplicate checks, review, and RVUs still use the existing app pipeline.
+              </p>
+              <button
+                onClick={() => processPowerScribeVisionCapture(clipboardFile ?? ocrFile, 'Ollama Vision clipboard')}
+                disabled={processing}
+                className="mt-3 w-full rounded-xl border border-violet-400/30 px-3 py-2 text-sm font-semibold text-violet-100 transition-colors hover:bg-violet-500/10 disabled:opacity-40"
+              >
+                Extract Clipboard with Ollama Vision
+              </button>
+            </div>
+          )}
           <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button

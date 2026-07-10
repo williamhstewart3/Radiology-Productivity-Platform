@@ -347,7 +347,7 @@ export type MatchMethod =
   | 'unmatched';
 
 /** Source of the study date/time — used to show confidence indicators in UI. */
-export type DateTimeSource = 'ocr' | 'llm_ocr_cleanup' | 'import_default' | 'manual' | 'api_future';
+export type DateTimeSource = 'ocr' | 'vision' | 'llm_ocr_cleanup' | 'import_default' | 'manual' | 'api_future';
 
 /** One completed study log — the core transactional record. */
 export interface StudyLog {

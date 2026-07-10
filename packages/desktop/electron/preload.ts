@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Windows PowerScribe OCR
   extractPowerScribeClipboardRows: () =>
     ipcRenderer.invoke("powerscribe:extract-clipboard-rows"),
+  extractPowerScribeClipboardVisionRows: (options?: { model?: string }) =>
+    ipcRenderer.invoke("powerscribe:extract-clipboard-vision-rows", options),
 
   // Window controls
   minimize: () => ipcRenderer.invoke("window:minimize"),
