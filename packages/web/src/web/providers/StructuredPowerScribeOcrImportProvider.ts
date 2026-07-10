@@ -47,12 +47,13 @@ export class StructuredPowerScribeOcrImportProvider implements ImportProvider {
       const procedureName = row.procedureName.trim() || 'UNCLEAR POWERSCRIBE ROW';
       const exam = bestDateTime(row.examDateTime, row.rawExamDateText);
       const modified = bestDateTime(row.modifiedDateTime, row.rawModifiedText);
-      const productivityDate = modified.date ?? exam.date ?? this.fallbackDate;
+      const productivityDate = modified.date ?? this.fallbackDate;
       const parserNeedsReview = row.needsReview || procedureName === 'UNCLEAR POWERSCRIBE ROW' || !exam.dateTime || !modified.dateTime;
       const parserReviewReason =
         row.reviewReason ??
         (procedureName === 'UNCLEAR POWERSCRIBE ROW' ? 'Unclear PowerScribe procedure text' :
-          !exam.dateTime || !modified.dateTime ? 'Missing or unclear PowerScribe date columns' :
+          !modified.dateTime ? 'Missing Modified time/date - productivity date will use selected log date unless corrected.' :
+          !exam.dateTime ? 'Missing or unclear PowerScribe Exam Date column' :
           null);
       const dateTimeConfidence = Math.max(exam.confidence, modified.confidence);
 
@@ -62,12 +63,12 @@ export class StructuredPowerScribeOcrImportProvider implements ImportProvider {
         canonicalExam: null,
         cpt: null,
         workRvu: null,
-        studyDate: exam.date ?? productivityDate,
+        studyDate: productivityDate,
         examDate: exam.date,
         examTime: exam.time,
         examDateTime: exam.dateTime,
         studyTime: modified.dateTime,
-        modifiedDate: modified.date ?? productivityDate,
+        modifiedDate: modified.date,
         modifiedDateTime: modified.dateTime,
         modifiedTime: modified.time,
         modality: null,

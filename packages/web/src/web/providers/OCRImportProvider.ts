@@ -347,7 +347,8 @@ export class OCRImportProvider implements ImportProvider {
     };
 
     return parsed.map((p) => {
-      const productivityDate = p.modifiedDate ?? p.studyDate ?? this.studyDate;
+      const productivityDate = p.modifiedDate ?? this.studyDate;
+      const missingModifiedDate = !p.modifiedDateTime;
 
       return {
         examTitle: p.procedureName,
@@ -355,12 +356,12 @@ export class OCRImportProvider implements ImportProvider {
         canonicalExam: null,
         cpt: null,
         workRvu: null,
-        studyDate: p.studyDate ?? productivityDate,
+        studyDate: productivityDate,
         examDate: p.examDate,
         examTime: p.examTime,
         examDateTime: p.examDateTime,
         studyTime: p.modifiedDateTime,
-        modifiedDate: p.modifiedDate ?? productivityDate,
+        modifiedDate: p.modifiedDate,
         modifiedDateTime: p.modifiedDateTime,
         modifiedTime: p.modifiedTime,
         modality: null,
@@ -370,14 +371,16 @@ export class OCRImportProvider implements ImportProvider {
         cleanedExamName: p.cleanedExamName,
         cleanedText: p.cleanedText,
         extractionConfidence: p.extractionConfidence,
-        parserNeedsReview: p.needsReview,
-        parserReviewReason: p.reviewReason,
+        parserNeedsReview: p.needsReview || missingModifiedDate,
+        parserReviewReason: missingModifiedDate
+          ? [p.reviewReason, 'Missing Modified time/date - productivity date will use selected log date unless corrected.'].filter(Boolean).join(' | ')
+          : p.reviewReason,
         parserRawLine: p.rawText,
         ocrConfidence,
         source: 'ocr' as const,
         importedAt: now,
         dateTimeConfidence: p.dateTimeConfidence,
-        dateTimeSource: p.dateTimeConfidence > 0 ? 'ocr' : 'import_default',
+        dateTimeSource: p.modifiedDateTime ? 'ocr' : 'import_default',
       };
     });
   }

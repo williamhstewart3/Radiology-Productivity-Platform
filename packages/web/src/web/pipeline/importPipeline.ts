@@ -107,6 +107,17 @@ function cmsDescriptionsFor(candidates: MatchCandidate[]): string {
   return candidates.map((candidate) => candidate.description).filter(Boolean).join(' + ');
 }
 
+export function resolvePowerScribeProductivityDates(study: ImportedStudy, fallbackLogDate: string): {
+  performedDate: string;
+  productivityDate: string;
+  modifiedDateTime: string | null;
+} {
+  const performedDate = study.examDate ?? study.examDateTime?.slice(0, 10) ?? study.studyDate ?? fallbackLogDate;
+  const modifiedDateTime = study.modifiedDateTime ?? study.studyTime ?? null;
+  const productivityDate = study.modifiedDate ?? modifiedDateTime?.slice(0, 10) ?? study.studyDate ?? fallbackLogDate;
+  return { performedDate, productivityDate, modifiedDateTime };
+}
+
 function procedureNameFor(study: ImportedStudy): string {
   return (study.procedureName ?? study.cleanedExamName ?? study.cleanedText ?? study.examTitle).trim();
 }
@@ -272,9 +283,7 @@ export async function commitPipelineResults(
     const displayTitle = (row.displayTitle ?? procedureName).trim() || procedureName;
     const normalizedTitle = normalizeRadiologyDescription(displayTitle || procedureName);
     const cmsDescription = cmsDescriptionsFor(selectedCandidates) || null;
-    const performedDate = study.studyDate || logDate;
-    const modifiedDateTime = study.modifiedDateTime ?? study.studyTime;
-    const productivityDate = study.modifiedDate ?? modifiedDateTime?.slice(0, 10) ?? performedDate;
+    const { productivityDate, modifiedDateTime } = resolvePowerScribeProductivityDates(study, logDate);
     const rowSessionId = crypto.randomUUID();
     let rowCommitted = false;
 
@@ -300,7 +309,7 @@ export async function commitPipelineResults(
 
       const isReview = cand.confidence < 0.75 || row.needsReview;
 
-      const studyDate = performedDate;
+      const studyDate = productivityDate;
       const logDateFinal = productivityDate;
 
       const log: StudyLog = {

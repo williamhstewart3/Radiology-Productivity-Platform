@@ -495,6 +495,14 @@ export function summarizeReviewApproval(rows: PipelineReviewRow[], skippedRows: 
   };
 }
 
+function dateAttributionWarning(row: PipelineReviewRow): string | null {
+  if (row.source.modifiedDate || row.source.modifiedDateTime) return null;
+  if (row.source.examDate || row.source.examDateTime) {
+    return 'Missing Modified time/date - productivity date will use selected log date unless corrected.';
+  }
+  return 'Missing Exam and Modified dates - productivity date will use selected log date after approval.';
+}
+
 function buildManualSelectionPatch(
   row: PipelineReviewRow,
   candidatesToSelect: MatchCandidate[],
@@ -1691,6 +1699,7 @@ export function Import({ onImported }: ImportProps) {
             const reviewReason = manualReviewReason(row);
             const canApproveRow = canApproveReviewRow(row);
             const rowStatus = reviewRowStatusLabel(row);
+            const dateWarning = dateAttributionWarning(row);
             const procedureName = procedureNameForSource(row.source);
             const cptSummary = selected.length > 0
               ? selected.map((candidate) => candidate.cptCode).join(' + ')
@@ -1832,6 +1841,12 @@ export function Import({ onImported }: ImportProps) {
                 {isPossibleDupe && row.included && (
                   <div className="mb-2 px-3 py-2 rounded-lg bg-orange-500/8 border border-orange-500/20 text-xs text-orange-300/80">
                     {row.duplicateReason} — verify before saving or exclude this row.
+                  </div>
+                )}
+
+                {dateWarning && row.included && (
+                  <div className="mb-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs text-amber-200/85">
+                    {dateWarning}
                   </div>
                 )}
 
