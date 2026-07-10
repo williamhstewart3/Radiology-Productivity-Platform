@@ -303,6 +303,58 @@ export function normalizeBrowserVisionRows(output: unknown): { rows: PowerScribe
   return { rows, invalidRowCount };
 }
 
+const DATE_TIME_FRAGMENT = /\b\d{1,2}\/\d{1,2}\/(?:\d{4}|\d{2})(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM)?)?/gi;
+const ROW_PREFIX = /^\s*(?:row\s*)?#?\d{1,3}[\).\-\s:|]+/i;
+
+export function salvageBrowserVisionRowsFromText(text: string): { rows: PowerScribeVisionRow[]; invalidRowCount: number } {
+  const rows: PowerScribeVisionRow[] = [];
+  let invalidRowCount = 0;
+  const lines = text
+    .split(/\r?\n|(?:\s{2,})/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    if (!/\b(?:XR|CT|CTA|MRI|MRA|US|PET|NM|MAMMO|FLUORO)\b/i.test(line)) {
+      invalidRowCount++;
+      continue;
+    }
+    const dateMatches = [...line.matchAll(DATE_TIME_FRAGMENT)].map((match) => match[0].trim());
+    let procedure = line.replace(DATE_TIME_FRAGMENT, ' ').replace(ROW_PREFIX, ' ');
+    procedure = procedure
+      .replace(/[|,;]+/g, ' ')
+      .replace(/\b(?:exam\s*date|modified|read|procedure|confidence|row)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!procedure) {
+      invalidRowCount++;
+      continue;
+    }
+
+    const reviewReasons = [
+      dateMatches.length < 1 ? 'Browser Vision text salvage did not find Exam Date/Time.' : null,
+      dateMatches.length < 2 ? 'Browser Vision text salvage did not find Modified/Read Date/Time.' : null,
+      'Browser Vision returned text instead of structured JSON.',
+    ].filter(Boolean) as string[];
+
+    rows.push({
+      procedureName: procedure,
+      examDateTime: dateMatches[0] ?? null,
+      modifiedDateTime: dateMatches[1] ?? null,
+      rawProcedureText: procedure,
+      rawExamDateText: dateMatches[0] ?? '',
+      rawModifiedText: dateMatches[1] ?? '',
+      rowIndex: null,
+      confidence: dateMatches.length >= 2 ? 0.55 : 0.35,
+      needsReview: true,
+      reviewReason: reviewReasons.join(' '),
+    });
+  }
+
+  return { rows, invalidRowCount };
+}
+
 async function cropWorklistTable(imageBlob: Blob): Promise<{ blob: Blob; expectedVisibleRows: number | null }> {
   if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') {
     return { blob: imageBlob, expectedVisibleRows: null };
@@ -383,8 +435,23 @@ export async function extractPowerScribeRows(imageBlob: Blob, options: {
     if (!decoder) throw new Error('Browser Vision tokenizer cannot decode model output.');
     const rawModelOutput = decoder.call(processor.batch_decode ? processor : tokenizer, generatedIds, { skip_special_tokens: true })[0] ?? '';
     const inferenceMs = Math.round(performance.now() - start);
-    const parsed = extractJsonFromModelText(rawModelOutput);
-    const { rows, invalidRowCount } = normalizeBrowserVisionRows(parsed);
+    let parseMode: BrowserVisionDiagnostics['parseMode'] = 'json';
+    let rows: PowerScribeVisionRow[];
+    let invalidRowCount: number;
+    try {
+      const parsed = extractJsonFromModelText(rawModelOutput);
+      const normalized = normalizeBrowserVisionRows(parsed);
+      rows = normalized.rows;
+      invalidRowCount = normalized.invalidRowCount;
+    } catch {
+      parseMode = 'text_salvage';
+      const salvaged = salvageBrowserVisionRowsFromText(rawModelOutput);
+      rows = salvaged.rows;
+      invalidRowCount = salvaged.invalidRowCount;
+      if (rows.length === 0) {
+        throw new Error(`Browser Vision did not return parseable JSON. Raw output: ${rawModelOutput.slice(0, 500) || '(empty)'}`);
+      }
+    }
     const warning =
       expectedVisibleRows != null && rows.length < Math.max(1, Math.floor(expectedVisibleRows * 0.85))
         ? 'Possible missed studies: expected worklist appears to contain more rows than were extracted.'
@@ -406,6 +473,8 @@ export async function extractPowerScribeRows(imageBlob: Blob, options: {
       invalidRowCount,
       expectedVisibleRows,
       warning,
+      rawModelOutputPreview: rawModelOutput.slice(0, 1000),
+      parseMode,
     };
     state.status = 'ready';
     return { rows, diagnostics, rawModelOutput };

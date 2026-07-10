@@ -2381,11 +2381,17 @@ export function Import({ onImported }: ImportProps) {
                 <p><span className="text-slate-500">Extracted rows:</span> {browserVisionDiagnostics.extractedRowCount}</p>
                 <p><span className="text-slate-500">Invalid rows:</span> {browserVisionDiagnostics.invalidRowCount}</p>
                 <p><span className="text-slate-500">Expected visible rows:</span> {browserVisionDiagnostics.expectedVisibleRows ?? BROWSER_VISION_EXPECTED_ROWS}</p>
+                <p><span className="text-slate-500">Parse mode:</span> {browserVisionDiagnostics.parseMode ?? 'json'}</p>
               </div>
               {browserVisionDiagnostics.warning && (
                 <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-amber-200">
                   {browserVisionDiagnostics.warning}
                 </p>
+              )}
+              {browserVisionDiagnostics.rawModelOutputPreview && (
+                <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-white/8 bg-black/20 p-2 font-mono text-[11px] leading-relaxed text-slate-500">
+                  {browserVisionDiagnostics.rawModelOutputPreview}
+                </pre>
               )}
             </details>
           )}

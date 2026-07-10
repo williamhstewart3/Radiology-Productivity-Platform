@@ -3,6 +3,7 @@ import {
   extractJsonFromModelText,
   getBrowserVisionModelInfo,
   normalizeBrowserVisionRows,
+  salvageBrowserVisionRowsFromText,
 } from '../src/web/services/browserVisionService';
 
 describe('browserVisionService structured output handling', () => {
@@ -45,5 +46,21 @@ describe('browserVisionService structured output handling', () => {
 
   test('invalid free-form output fails instead of silently falling back', () => {
     expect(() => extractJsonFromModelText('XR CHEST PORTABLE 7/1/2026 5:18 PM')).toThrow(/parseable JSON/);
+  });
+
+  test('salvages line-oriented table text into review rows without OCR fallback', () => {
+    const { rows, invalidRowCount } = salvageBrowserVisionRowsFromText([
+      '1 XR CHEST PORTABLE 7/1/2026 5:18 PM 7/2/2026 7:59 AM',
+      '2 CT APPENDIX PROTOCOL 7/2/2026 6:51 AM 7/2/2026 8:31 AM',
+      'Browse Status Today',
+    ].join('\n'));
+
+    expect(invalidRowCount).toBe(1);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].procedureName).toBe('XR CHEST PORTABLE');
+    expect(rows[0].examDateTime).toBe('7/1/2026 5:18 PM');
+    expect(rows[0].modifiedDateTime).toBe('7/2/2026 7:59 AM');
+    expect(rows[0].needsReview).toBe(true);
+    expect(rows[1].procedureName).toBe('CT APPENDIX PROTOCOL');
   });
 });

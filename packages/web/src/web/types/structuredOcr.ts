@@ -28,6 +28,8 @@ export interface BrowserVisionDiagnostics {
   invalidRowCount: number;
   expectedVisibleRows: number | null;
   warning: string | null;
+  rawModelOutputPreview?: string | null;
+  parseMode?: 'json' | 'text_salvage';
 }
 
 export interface BrowserVisionExtractionResult {
