@@ -72,6 +72,8 @@ const MODEL_INFO: BrowserVisionModelInfo = {
   notes: 'Transformers.js-compatible ONNX Florence-2 model. This is an experimental benchmark for small-table screenshot extraction, not a validated production parser.',
 };
 
+const FLORENCE_READ_TEXT_TASK = '<OCR>';
+
 const state: BrowserVisionState = {
   status: 'uninitialized',
   model: null,
@@ -308,17 +310,26 @@ export function normalizeBrowserVisionRows(output: unknown): { rows: PowerScribe
 
 const DATE_TIME_FRAGMENT = /\b\d{1,2}\/\d{1,2}\/(?:\d{4}|\d{2})(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM)?)?/gi;
 const ROW_PREFIX = /^\s*(?:row\s*)?#?\d{1,3}[\).\-\s:|]+/i;
+const MODALITY_START = /\b(?:XR|CT|CTA|MRI|MRA|US|PET|NM|MAMMO|FLUORO)\b/i;
+
+function splitVisionTextIntoCandidateRows(text: string): string[] {
+  return text
+    .replace(/\r?\n/g, '\n')
+    .replace(/\s+(?=(?:row\s*)?#?\d{1,3}[\).\-\s:|]+(?:XR|CT|CTA|MRI|MRA|US|PET|NM|MAMMO|FLUORO)\b)/gi, '\n')
+    .replace(/\s+(?=(?:row\s*)?#?\d{1,3}[\).\-\s:|]+\s+(?:XR|CT|CTA|MRI|MRA|US|PET|NM|MAMMO|FLUORO)\b)/gi, '\n')
+    .replace(/(?<!\d)\s+(?=(?:XR|CT|CTA|MRI|MRA|US|PET|NM|MAMMO|FLUORO)\s+[A-Z][A-Z/ ]{2,}?\s+\d{1,2}\/\d{1,2}\/(?:\d{4}|\d{2}))/g, '\n')
+    .split(/\n|(?:\s{3,})/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
 
 export function salvageBrowserVisionRowsFromText(text: string): { rows: PowerScribeVisionRow[]; invalidRowCount: number } {
   const rows: PowerScribeVisionRow[] = [];
   let invalidRowCount = 0;
-  const lines = text
-    .split(/\r?\n|(?:\s{2,})/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lines = splitVisionTextIntoCandidateRows(text);
 
   for (const line of lines) {
-    if (!/\b(?:XR|CT|CTA|MRI|MRA|US|PET|NM|MAMMO|FLUORO)\b/i.test(line)) {
+    if (!MODALITY_START.test(line)) {
       invalidRowCount++;
       continue;
     }
@@ -358,9 +369,9 @@ export function salvageBrowserVisionRowsFromText(text: string): { rows: PowerScr
   return { rows, invalidRowCount };
 }
 
-async function cropWorklistTable(imageBlob: Blob): Promise<{ blob: Blob; expectedVisibleRows: number | null }> {
+async function cropWorklistTable(imageBlob: Blob): Promise<{ blob: Blob; expectedVisibleRows: number | null; width: number | null; height: number | null }> {
   if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') {
-    return { blob: imageBlob, expectedVisibleRows: null };
+    return { blob: imageBlob, expectedVisibleRows: null, width: null, height: null };
   }
   const bitmap = await createImageBitmap(imageBlob);
   const crop = {
@@ -373,13 +384,13 @@ async function cropWorklistTable(imageBlob: Blob): Promise<{ blob: Blob; expecte
   canvas.width = crop.width;
   canvas.height = crop.height;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return { blob: imageBlob, expectedVisibleRows: null };
+  if (!ctx) return { blob: imageBlob, expectedVisibleRows: null, width: bitmap.width, height: bitmap.height };
   ctx.drawImage(bitmap, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
   const expectedVisibleRows = Math.max(1, Math.round((crop.height - 34) / 18));
   const croppedBlob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Browser Vision crop could not be encoded.')), 'image/png');
   });
-  return { blob: croppedBlob, expectedVisibleRows };
+  return { blob: croppedBlob, expectedVisibleRows, width: crop.width, height: crop.height };
 }
 
 async function blobToRawImage(blob: Blob): Promise<unknown> {
@@ -389,15 +400,27 @@ async function blobToRawImage(blob: Blob): Promise<unknown> {
   return blob;
 }
 
-function browserVisionPrompt(): string {
-  return [
-    'Read only the PowerScribe completed-studies table in this screenshot.',
-    'Return JSON only. Use this shape: {"rows":[{"rowNumber":1,"procedure":"XR CHEST PORTABLE","examDateTime":"7/1/2026 5:18 PM","modifiedDateTime":"7/2/2026 7:59 AM","confidence":0.98}]}',
-    'Include every visible study row exactly once.',
-    'Preserve Procedure, Exam Date with time, and Modified Date with time.',
-    'Do not assign CPT codes, RVUs, duplicate status, or inferred invisible rows.',
-    'If uncertain, keep the row and lower confidence.',
-  ].join('\n');
+function readImageDimension(image: unknown, key: 'width' | 'height'): number | null {
+  if (!image || typeof image !== 'object') return null;
+  const value = (image as Record<string, unknown>)[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export function extractTextFromFlorencePostProcess(output: unknown, task = FLORENCE_READ_TEXT_TASK): string | null {
+  if (!output || typeof output !== 'object') return null;
+  const taskOutput = (output as Record<string, unknown>)[task];
+  if (typeof taskOutput === 'string') return taskOutput.trim() || null;
+  if (!taskOutput || typeof taskOutput !== 'object') return null;
+  const labels = (taskOutput as { labels?: unknown }).labels;
+  if (Array.isArray(labels)) {
+    const text = labels
+      .filter((label): label is string => typeof label === 'string' && label.trim().length > 0)
+      .map((label) => label.trim())
+      .join('\n')
+      .trim();
+    return text || null;
+  }
+  return null;
 }
 
 export async function extractPowerScribeRows(imageBlob: Blob, options: {
@@ -410,7 +433,7 @@ export async function extractPowerScribeRows(imageBlob: Blob, options: {
     throw new Error(support.reason ?? 'Browser Vision model is not ready.');
   }
 
-  const { blob, expectedVisibleRows } = await cropWorklistTable(imageBlob);
+  const { blob, expectedVisibleRows, width: cropWidth, height: cropHeight } = await cropWorklistTable(imageBlob);
   const image = await blobToRawImage(blob);
   const processor = state.processor as {
     construct_prompts?: (text: string | string[]) => string[];
@@ -424,9 +447,7 @@ export async function extractPowerScribeRows(imageBlob: Blob, options: {
     generate: (inputs: Record<string, unknown>) => Promise<unknown>;
   };
 
-  const prompt = browserVisionPrompt();
-  const prompts = processor.construct_prompts ? processor.construct_prompts(prompt) : [prompt];
-  const inputs = await processor(image, prompts);
+  const inputs = await processor(image, FLORENCE_READ_TEXT_TASK);
   const start = performance.now();
   try {
     const generatedIds = await model.generate({
@@ -437,23 +458,33 @@ export async function extractPowerScribeRows(imageBlob: Blob, options: {
     const decoder = processor.batch_decode ?? tokenizer.batch_decode;
     if (!decoder) throw new Error('Browser Vision tokenizer cannot decode model output.');
     const rawModelOutput = decoder.call(processor.batch_decode ? processor : tokenizer, generatedIds, { skip_special_tokens: true })[0] ?? '';
+    const imageSize: [number, number] = [
+      cropHeight ?? readImageDimension(image, 'height') ?? 0,
+      cropWidth ?? readImageDimension(image, 'width') ?? 0,
+    ];
+    const processedOutput =
+      processor.post_process_generation && imageSize[0] > 0 && imageSize[1] > 0
+        ? processor.post_process_generation(rawModelOutput, FLORENCE_READ_TEXT_TASK, imageSize)
+        : null;
+    const postProcessedText = extractTextFromFlorencePostProcess(processedOutput);
+    const modelTextForParsing = postProcessedText ?? rawModelOutput;
     const inferenceMs = Math.round(performance.now() - start);
     let parseMode: BrowserVisionDiagnostics['parseMode'] = 'json';
     let rows: PowerScribeVisionRow[];
     let invalidRowCount: number;
     try {
-      const parsed = extractJsonFromModelText(rawModelOutput);
+      const parsed = extractJsonFromModelText(modelTextForParsing);
       const normalized = normalizeBrowserVisionRows(parsed);
       rows = normalized.rows;
       invalidRowCount = normalized.invalidRowCount;
     } catch {
       parseMode = 'text_salvage';
-      const salvaged = salvageBrowserVisionRowsFromText(rawModelOutput);
+      const salvaged = salvageBrowserVisionRowsFromText(modelTextForParsing);
       rows = salvaged.rows;
       invalidRowCount = salvaged.invalidRowCount;
       if (rows.length === 0) {
-        const rawPreview = rawModelOutput.slice(0, 500) || '(empty)';
-        if (/^(?:unanswerable|unknown|n\/a|none|no answer)$/i.test(rawModelOutput.trim())) {
+        const rawPreview = modelTextForParsing.slice(0, 500) || rawModelOutput.slice(0, 500) || '(empty)';
+        if (/^(?:unanswerable|unknown|n\/a|none|no answer)$/i.test(modelTextForParsing.trim())) {
           throw new Error(`Browser Vision model could not read the PowerScribe table. Raw output: ${rawPreview}. This browser model is not suitable for this screenshot; try Ollama Vision or a stronger local multimodal model.`);
         }
         throw new Error(`Browser Vision did not return structured rows. Raw output: ${rawPreview}`);
@@ -480,11 +511,11 @@ export async function extractPowerScribeRows(imageBlob: Blob, options: {
       invalidRowCount,
       expectedVisibleRows,
       warning,
-      rawModelOutputPreview: rawModelOutput.slice(0, 1000),
+      rawModelOutputPreview: modelTextForParsing.slice(0, 1000),
       parseMode,
     };
     state.status = 'ready';
-    return { rows, diagnostics, rawModelOutput };
+    return { rows, diagnostics, rawModelOutput: modelTextForParsing };
   } catch (error) {
     state.status = 'extraction_failed';
     state.lastError = error instanceof Error ? error.message : String(error);

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  extractTextFromFlorencePostProcess,
   extractJsonFromModelText,
   getBrowserVisionModelInfo,
   normalizeBrowserVisionRows,
@@ -66,5 +67,33 @@ describe('browserVisionService structured output handling', () => {
     expect(rows[0].modifiedDateTime).toBe('7/2/2026 7:59 AM');
     expect(rows[0].needsReview).toBe(true);
     expect(rows[1].procedureName).toBe('CT APPENDIX PROTOCOL');
+  });
+
+  test('extracts labels from Florence post-processed read-text output', () => {
+    const text = extractTextFromFlorencePostProcess({
+      '<OCR>': {
+        labels: [
+          '1 XR CHEST PORTABLE 7/1/2026 5:18 PM 7/2/2026 7:59 AM',
+          '2 CT APPENDIX PROTOCOL 7/2/2026 6:51 AM 7/2/2026 8:31 AM',
+        ],
+        quad_boxes: [],
+      },
+    });
+
+    expect(text).toContain('XR CHEST PORTABLE');
+    expect(text).toContain('CT APPENDIX PROTOCOL');
+  });
+
+  test('salvages single-stream table text into separate rows', () => {
+    const { rows, invalidRowCount } = salvageBrowserVisionRowsFromText(
+      '1 XR CHEST PORTABLE 7/1/2026 5:18 PM 7/2/2026 7:59 AM 2 CT APPENDIX PROTOCOL 7/2/2026 6:51 AM 7/2/2026 8:31 AM',
+    );
+
+    expect(invalidRowCount).toBe(0);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].procedureName).toBe('XR CHEST PORTABLE');
+    expect(rows[1].procedureName).toBe('CT APPENDIX PROTOCOL');
+    expect(rows[1].examDateTime).toBe('7/2/2026 6:51 AM');
+    expect(rows[1].modifiedDateTime).toBe('7/2/2026 8:31 AM');
   });
 });

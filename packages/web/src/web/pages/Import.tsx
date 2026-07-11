@@ -627,6 +627,7 @@ export function Import({ onImported }: ImportProps) {
   const [browserVisionProgress, setBrowserVisionProgress] = useState<number | null>(null);
   const [browserVisionMessage, setBrowserVisionMessage] = useState<string | null>(null);
   const [browserVisionDiagnostics, setBrowserVisionDiagnostics] = useState<BrowserVisionDiagnostics | null>(null);
+  const [browserVisionFailureDetail, setBrowserVisionFailureDetail] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const processingRef = useRef(false);
   const lastClipboardImageHashRef = useRef<string | null>(null);
@@ -799,6 +800,7 @@ export function Import({ onImported }: ImportProps) {
     setProcessing(true);
     setError(null);
     setBrowserVisionDiagnostics(null);
+    setBrowserVisionFailureDetail(null);
     setBrowserVisionProgress(null);
     setBrowserVisionStatus('checking');
     setBrowserVisionMessage('Checking browser Vision support...');
@@ -842,8 +844,10 @@ export function Import({ onImported }: ImportProps) {
     } catch (error) {
       setBrowserVisionStatus('extraction_failed');
       setBrowserVisionProgress(null);
-      setError(error instanceof Error ? error.message : 'Browser Vision extraction failed');
-      pushToast('danger', 'Browser Vision failed', error instanceof Error ? `${error.message} Retry or switch to Ollama Vision.` : 'Retry or switch to Ollama Vision.');
+      const detail = error instanceof Error ? error.message : 'Browser Vision extraction failed';
+      setBrowserVisionFailureDetail(detail);
+      setError('Browser Vision could not extract studies from this screenshot. Try Ollama Vision or another local model.');
+      pushToast('danger', 'Browser Vision could not extract studies', 'Try Ollama Vision or another local model.');
     } finally {
       setProcessing(false);
     }
@@ -2448,7 +2452,17 @@ export function Import({ onImported }: ImportProps) {
               </button>
             </div>
           )}
-          {error && <p className="text-red-400 text-sm">{error}</p>}
+          {error && (
+            <div className="rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+              <p>{error}</p>
+              {browserVisionFailureDetail && (
+                <details className="mt-2 text-xs text-red-200/70">
+                  <summary className="cursor-pointer select-none">Technical details</summary>
+                  <p className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px]">{browserVisionFailureDetail}</p>
+                </details>
+              )}
+            </div>
+          )}
           <button
             onClick={handleVisionProcess}
             disabled={!captureFile || processing || processingEngine === 'existing_ocr'}
