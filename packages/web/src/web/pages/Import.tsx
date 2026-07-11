@@ -1025,7 +1025,7 @@ export function Import({ onImported }: ImportProps) {
         needsReview: false,
         included: true,
         autoSkipped: false,
-        approvalStatus: 'manual_approved',
+        approvalStatus: 'approved_as_new',
       },
     ]);
   }

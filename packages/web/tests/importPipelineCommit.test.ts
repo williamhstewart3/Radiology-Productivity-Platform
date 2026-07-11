@@ -132,6 +132,25 @@ describe('commitPipelineResults — save-path accounting', () => {
     expect(secondCommit.alreadySavedCount).toBe(1);
   });
 
+  test('a force-included exact duplicate ("Import anyway") actually saves a new log', async () => {
+    const original = reviewRow({ source: study({ modifiedDateTime: '2026-07-01T13:05:00', modifiedTime: '13:05' }) });
+    const firstCommit = await commitPipelineResults([original], '2026-07-01', 0, null);
+    expect(firstCommit.importedCount).toBe(1);
+
+    const forced = reviewRow({
+      source: study({ modifiedDateTime: '2026-07-01T13:05:00', modifiedTime: '13:05' }),
+      approvalStatus: 'approved_as_new',
+    });
+    const secondCommit = await commitPipelineResults([forced], '2026-07-01', 0, null);
+
+    expect(secondCommit.importedCount).toBe(1);
+    expect(secondCommit.alreadySavedCount).toBe(0);
+
+    const allForCpt = await db.studyLogs.where('cptCode').equals('71045').toArray();
+    const matchingMinute = allForCpt.filter((log) => log.studyDateTime === '2026-07-01T13:05:00');
+    expect(matchingMinute.length).toBe(2);
+  });
+
   test('10 distinct-read-time captures of the same exam on the same day all save', async () => {
     const rows = Array.from({ length: 10 }, (_, i) =>
       reviewRow({

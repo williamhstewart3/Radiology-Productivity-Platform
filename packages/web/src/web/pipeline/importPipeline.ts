@@ -305,8 +305,10 @@ export async function commitPipelineResults(
     let rowCommitted = false;
     let rowAlreadySaved = false;
 
+    const isForcedOverDuplicate = row.approvalStatus === 'approved_as_new';
+
     for (const cand of selectedCandidates) {
-      const fingerprint = buildFingerprint(
+      const baseFingerprint = buildFingerprint(
         procedureName,
         cand.cptCode,
         productivityDate,
@@ -319,8 +321,9 @@ export async function commitPipelineResults(
           modifiedDateTime,
         },
       );
+      const fingerprint = isForcedOverDuplicate ? `${baseFingerprint}|forced:${rowSessionId}` : baseFingerprint;
 
-      const existing = isStrongDuplicateFingerprint(fingerprint)
+      const existing = !isForcedOverDuplicate && isStrongDuplicateFingerprint(fingerprint)
         ? await db.studyLogs.where('studyFingerprint').equals(fingerprint).first()
         : null;
       if (existing && !(existing as any).deletedAt) {
