@@ -74,6 +74,19 @@ function Percentile([double[]] $Values, [double] $P) {
   return $sorted[$index]
 }
 
+function Lock-BitmapBytes([System.Drawing.Bitmap] $Bitmap) {
+  $rect = New-Object System.Drawing.Rectangle 0, 0, $Bitmap.Width, $Bitmap.Height
+  $bitmapData = $Bitmap.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  try {
+    $stride = $bitmapData.Stride
+    $bytes = New-Object byte[] ($stride * $Bitmap.Height)
+    [System.Runtime.InteropServices.Marshal]::Copy($bitmapData.Scan0, $bytes, 0, $bytes.Length)
+  } finally {
+    $Bitmap.UnlockBits($bitmapData)
+  }
+  return [pscustomobject]@{ bytes = $bytes; stride = $stride; width = $Bitmap.Width; height = $Bitmap.Height }
+}
+
 function Longest-ActiveBand([double[]] $Values, [int] $MinIndex, [int] $MaxIndex, [double] $Threshold) {
   $best = $null
   $start = $null
@@ -122,14 +135,18 @@ function Detect-TableCrop([System.Drawing.Bitmap] $Bitmap) {
     $yMin = [int][Math]::Floor($height * 0.20)
     $yMax = [int][Math]::Floor($height * 0.88)
 
+    $locked = Lock-BitmapBytes $small
+    $bytes = $locked.bytes
+    $stride = $locked.stride
+
     for ($y = $yMin + 1; $y -lt $yMax; $y++) {
       for ($x = $xMin + 1; $x -lt $xMax; $x++) {
-        $pixel = $small.GetPixel($x, $y)
-        $left = $small.GetPixel($x - 1, $y)
-        $up = $small.GetPixel($x, $y - 1)
-        $lum = ($pixel.R + $pixel.G + $pixel.B) / 3.0
-        $leftLum = ($left.R + $left.G + $left.B) / 3.0
-        $upLum = ($up.R + $up.G + $up.B) / 3.0
+        $offset = $y * $stride + $x * 4
+        $leftOffset = $y * $stride + ($x - 1) * 4
+        $upOffset = ($y - 1) * $stride + $x * 4
+        $lum = ($bytes[$offset + 2] + $bytes[$offset + 1] + $bytes[$offset]) / 3.0
+        $leftLum = ($bytes[$leftOffset + 2] + $bytes[$leftOffset + 1] + $bytes[$leftOffset]) / 3.0
+        $upLum = ($bytes[$upOffset + 2] + $bytes[$upOffset + 1] + $bytes[$upOffset]) / 3.0
         $contrast = [Math]::Max([Math]::Abs($lum - $leftLum), [Math]::Abs($lum - $upLum))
         if ($contrast -gt 18 -or $lum -lt 88) {
           $rowSignal[$y] += 1
@@ -289,12 +306,16 @@ function Detect-ColumnLayout([System.Drawing.Bitmap] $Bitmap, $TableRect) {
     $projection = New-Object double[] $width
     $yMin = [int][Math]::Floor($height * 0.06)
     $yMax = [int][Math]::Floor($height * 0.98)
+    $locked = Lock-BitmapBytes $small
+    $bytes = $locked.bytes
+    $stride = $locked.stride
+
     for ($y = $yMin + 1; $y -lt $yMax; $y++) {
       for ($x = 1; $x -lt ($width - 1); $x++) {
-        $pixel = $small.GetPixel($x, $y)
-        $leftPixel = $small.GetPixel($x - 1, $y)
-        $lum = $pixel.R * 0.299 + $pixel.G * 0.587 + $pixel.B * 0.114
-        $leftLum = $leftPixel.R * 0.299 + $leftPixel.G * 0.587 + $leftPixel.B * 0.114
+        $offset = $y * $stride + $x * 4
+        $leftOffset = $y * $stride + ($x - 1) * 4
+        $lum = $bytes[$offset + 2] * 0.299 + $bytes[$offset + 1] * 0.587 + $bytes[$offset] * 0.114
+        $leftLum = $bytes[$leftOffset + 2] * 0.299 + $bytes[$leftOffset + 1] * 0.587 + $bytes[$leftOffset] * 0.114
         if ($lum -lt 150 -or [Math]::Abs($lum - $leftLum) -gt 28) {
           $projection[$x] += 1
         }
