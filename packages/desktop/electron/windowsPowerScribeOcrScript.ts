@@ -776,6 +776,47 @@ function Get-TableRectFromAnchors($Words, $Anchors) {
   }
 }
 
+function Get-InkProjectionRowEstimate([System.Drawing.Bitmap] $Bitmap) {
+  $locked = Lock-BitmapBytes $Bitmap
+  $bytes = $locked.bytes
+  $stride = $locked.stride
+  $width = $locked.width
+  $height = $locked.height
+
+  $luminance = New-Object double[] ($width * $height)
+  $histogram = New-Object int[] 256
+  for ($y = 0; $y -lt $height; $y++) {
+    for ($x = 0; $x -lt $width; $x++) {
+      $offset = $y * $stride + $x * 4
+      $lum = ($bytes[$offset + 2] + $bytes[$offset + 1] + $bytes[$offset]) / 3.0
+      $luminance[$y * $width + $x] = $lum
+      $bucket = [Math]::Max(0, [Math]::Min(255, [int][Math]::Round($lum)))
+      $histogram[$bucket] += 1
+    }
+  }
+  $darkThreshold = Get-OtsuThreshold $histogram ($width * $height)
+
+  $rowSignal = New-Object double[] $height
+  for ($y = 0; $y -lt $height; $y++) {
+    $count = 0
+    for ($x = 0; $x -lt $width; $x++) {
+      if ($luminance[$y * $width + $x] -lt $darkThreshold) { $count++ }
+    }
+    $rowSignal[$y] = $count / [Math]::Max(1, $width)
+  }
+
+  $smoothed = Smooth-Values $rowSignal 2
+  $rowThreshold = [Math]::Max(0.01, (Percentile $smoothed 0.6))
+  $runs = 0
+  $active = $false
+  for ($y = 0; $y -lt $height; $y++) {
+    $isActive = $smoothed[$y] -ge $rowThreshold
+    if ($isActive -and -not $active) { $runs++ }
+    $active = $isActive
+  }
+  return $runs
+}
+
 if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) {
   throw 'Clipboard does not contain an image.'
 }
@@ -846,7 +887,23 @@ try {
     $examOcr = Invoke-Ocr $examBitmap
     $modifiedOcr = Invoke-Ocr $modifiedBitmap
     $rows = Band-Rows $procedureOcr $examOcr $modifiedOcr
-    $rows | ConvertTo-Json -Depth 8 -Compress
+
+    $anchorCount = @($modifiedOcr.lines | Where-Object { Parse-DateTimeText $_.text }).Count
+    $suspectedMissedRows = @($rows | Where-Object { $_.reviewReason -and $_.reviewReason -like '*Possible undetected row above this one*' }).Count
+    $inkProjectionRowEstimate = Get-InkProjectionRowEstimate $procedureBitmap
+
+    $accounting = [pscustomobject]@{
+      cropMethod = $cropMethod
+      anchorCount = $anchorCount
+      procedureLineCount = $procedureOcr.lines.Count
+      examLineCount = $examOcr.lines.Count
+      modifiedLineCount = $modifiedOcr.lines.Count
+      bandCount = $rows.Count
+      suspectedMissedRows = $suspectedMissedRows
+      inkProjectionRowEstimate = $inkProjectionRowEstimate
+    }
+
+    [pscustomobject]@{ rows = $rows; accounting = $accounting } | ConvertTo-Json -Depth 8 -Compress
   } finally {
     $procedureBitmap.Dispose()
     $examBitmap.Dispose()

@@ -29,6 +29,7 @@ import {
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
 import type { ParsedLine } from '../utils/powerScribeParser';
 import type { OcrPositionedLine, OcrResult } from '../utils/ocrProvider';
+import type { PowerScribeOcrAccounting } from '../types/structuredOcr';
 
 export interface OCRImportOptions {
   cropBeforeOcr?: boolean;
@@ -72,6 +73,8 @@ export interface OCRImportDebugInfo {
   columnText?: Record<PowerScribeColumnName, string>;
   detectedRows: OCRImportDebugRow[];
   ocrConfidence: number;
+  accounting?: PowerScribeOcrAccounting | null;
+  reconciliationWarning?: string | null;
 }
 
 type ColumnOcrResults = Record<PowerScribeColumnName, OcrResult>;

@@ -905,17 +905,17 @@ export function Import({ onImported }: ImportProps) {
 
     try {
       pushToast('info', 'Reading PowerScribe...', 'Using the Windows structured OCR helper.');
-      const rows = await desktop.extractPowerScribeClipboardRows();
-      if (rows.length === 0) return false;
+      const helperResult = await desktop.extractPowerScribeClipboardRows();
+      if (helperResult.rows.length === 0) return false;
       pushToast('info', 'Matching CPT codes...', 'Using structured procedure names only.');
-      const processed = await processStructuredPowerScribeOcrImport(rows, {
+      const processed = await processStructuredPowerScribeOcrImport(helperResult.rows, {
         profileId: activeProfile?.id ?? null,
         siteId: activePractice?.id ?? null,
         sessionId,
         logDate,
-      });
+      }, helperResult.accounting);
       setOcrFile(file);
-      setOcrDebug(null);
+      setOcrDebug(processed.ocrDebug ?? null);
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
       setClipboardFile(null);
       return true;

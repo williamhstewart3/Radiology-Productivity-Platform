@@ -24,6 +24,22 @@ interface PowerScribeStructuredOcrRow {
   reviewReason: string | null;
 }
 
+interface PowerScribeOcrAccounting {
+  cropMethod: string | null;
+  anchorCount: number;
+  procedureLineCount: number;
+  examLineCount: number;
+  modifiedLineCount: number;
+  bandCount: number;
+  suspectedMissedRows: number;
+  inkProjectionRowEstimate: number;
+}
+
+interface PowerScribeStructuredOcrResult {
+  rows: PowerScribeStructuredOcrRow[];
+  accounting: PowerScribeOcrAccounting | null;
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1200,
@@ -77,7 +93,7 @@ async function ensureWindowsOcrHelperScript(): Promise<string> {
   return scriptPath;
 }
 
-function normalizeHelperRows(value: unknown): PowerScribeStructuredOcrRow[] {
+function normalizeHelperRowList(value: unknown): PowerScribeStructuredOcrRow[] {
   const rawRows = Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
   return rawRows
     .map((row) => {
@@ -104,7 +120,35 @@ function normalizeHelperRows(value: unknown): PowerScribeStructuredOcrRow[] {
     .filter((row) => row.procedureName || row.rawExamDateText || row.rawModifiedText);
 }
 
-async function runWindowsPowerScribeOcrHelper(): Promise<PowerScribeStructuredOcrRow[]> {
+function normalizeAccounting(value: unknown): PowerScribeOcrAccounting | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const num = (key: string): number => (typeof record[key] === "number" && Number.isFinite(record[key] as number) ? (record[key] as number) : 0);
+  return {
+    cropMethod: typeof record.cropMethod === "string" ? record.cropMethod : null,
+    anchorCount: num("anchorCount"),
+    procedureLineCount: num("procedureLineCount"),
+    examLineCount: num("examLineCount"),
+    modifiedLineCount: num("modifiedLineCount"),
+    bandCount: num("bandCount"),
+    suspectedMissedRows: num("suspectedMissedRows"),
+    inkProjectionRowEstimate: num("inkProjectionRowEstimate"),
+  };
+}
+
+function normalizeHelperRows(value: unknown): PowerScribeStructuredOcrResult {
+  const isEnvelope = Boolean(value) && typeof value === "object" && !Array.isArray(value) && "rows" in (value as Record<string, unknown>);
+  if (isEnvelope) {
+    const record = value as Record<string, unknown>;
+    return {
+      rows: normalizeHelperRowList(record.rows),
+      accounting: normalizeAccounting(record.accounting),
+    };
+  }
+  return { rows: normalizeHelperRowList(value), accounting: null };
+}
+
+async function runWindowsPowerScribeOcrHelper(): Promise<PowerScribeStructuredOcrResult> {
   if (process.platform !== "win32") {
     throw new Error("Windows PowerScribe OCR helper is only available on Windows.");
   }
@@ -136,7 +180,7 @@ async function runWindowsPowerScribeOcrHelper(): Promise<PowerScribeStructuredOc
       }
       const output = stdout.trim();
       if (!output) {
-        resolve([]);
+        resolve({ rows: [], accounting: null });
         return;
       }
       try {

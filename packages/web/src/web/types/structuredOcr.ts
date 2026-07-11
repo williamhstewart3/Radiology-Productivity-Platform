@@ -9,3 +9,19 @@ export interface PowerScribeStructuredOcrRow {
   needsReview: boolean;
   reviewReason: string | null;
 }
+
+export interface PowerScribeOcrAccounting {
+  cropMethod: string | null;
+  anchorCount: number;
+  procedureLineCount: number;
+  examLineCount: number;
+  modifiedLineCount: number;
+  bandCount: number;
+  suspectedMissedRows: number;
+  inkProjectionRowEstimate: number;
+}
+
+export interface PowerScribeStructuredOcrResult {
+  rows: PowerScribeStructuredOcrRow[];
+  accounting: PowerScribeOcrAccounting | null;
+}

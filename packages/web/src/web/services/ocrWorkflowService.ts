@@ -1,12 +1,12 @@
 import { CSVImportProvider } from '../providers/CSVImportProvider';
-import { OCRImportProvider, type OCRImportDebugInfo } from '../providers/OCRImportProvider';
+import { OCRImportProvider, type OCRImportDebugInfo, type OCRImportDebugRow } from '../providers/OCRImportProvider';
 import { StructuredPowerScribeOcrImportProvider } from '../providers/StructuredPowerScribeOcrImportProvider';
 import { runImportPipeline, type PipelineResult, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
 import { ensureUserSettings } from '../db/database';
 import { buildFingerprint } from '../utils/duplicateDetection';
 import type { ImportProvider } from '../types/importProvider';
-import type { PowerScribeStructuredOcrRow } from '../types/structuredOcr';
+import type { PowerScribeOcrAccounting, PowerScribeStructuredOcrRow } from '../types/structuredOcr';
 
 interface WorkflowContext {
   profileId: string | null;
@@ -173,9 +173,45 @@ export async function processOcrImport(
   return { ...processed, ocrDebug: attachOcrMatchDebug(provider.getDebugInfo(), processed.result) };
 }
 
+function structuredRowRawLine(row: PowerScribeStructuredOcrRow): string {
+  return JSON.stringify({
+    procedure: row.rawProcedureText,
+    examDate: row.rawExamDateText,
+    modified: row.rawModifiedText,
+  });
+}
+
+function structuredRowToDebugRow(row: PowerScribeStructuredOcrRow): OCRImportDebugRow {
+  return {
+    rawText: structuredRowRawLine(row),
+    rawProcedureColumnText: row.rawProcedureText,
+    rawExamDateColumnText: row.rawExamDateText,
+    rawModifiedDateColumnText: row.rawModifiedText,
+    procedureName: row.procedureName,
+    examName: row.procedureName,
+    cleanedExamName: row.procedureName,
+    cleanedText: row.procedureName,
+    examDate: row.examDateTime?.slice(0, 10) ?? null,
+    examTime: row.examDateTime?.slice(11, 16) ?? null,
+    examDateTime: row.examDateTime,
+    studyDateTime: row.examDateTime,
+    studyDate: row.examDateTime?.slice(0, 10) ?? null,
+    modifiedDateTime: row.modifiedDateTime,
+    modifiedDate: row.modifiedDateTime?.slice(0, 10) ?? null,
+    modifiedTime: row.modifiedDateTime?.slice(11, 16) ?? null,
+    accessionNumber: null,
+    rowIndex: null,
+    dateTimeConfidence: row.confidence,
+    extractionConfidence: row.confidence,
+    needsReview: row.needsReview,
+    reviewReason: row.reviewReason,
+  };
+}
+
 export async function processStructuredPowerScribeOcrImport(
   rows: PowerScribeStructuredOcrRow[],
   context: WorkflowContext,
+  accounting?: PowerScribeOcrAccounting | null,
 ): Promise<ProcessedImportResult> {
   const processed = await processProvider(
     new StructuredPowerScribeOcrImportProvider(rows, context.logDate),
@@ -193,7 +229,27 @@ export async function processStructuredPowerScribeOcrImport(
       source: 'windows_structured_ocr',
       reviewRows: processed.result.reviewRows.length,
       skippedRows: processed.result.skippedRows.length,
+      accounting: accounting ?? null,
     }),
   });
-  return processed;
+
+  const debugInfo: OCRImportDebugInfo = {
+    crop: null,
+    ocrProvider: 'Windows PowerScribe OCR helper',
+    ocrText: rows.map((row) => structuredRowRawLine(row)).join('\n'),
+    ocrLines: rows.map((row) => row.rawProcedureText),
+    rawLineCount: accounting
+      ? accounting.procedureLineCount + accounting.examLineCount + accounting.modifiedLineCount
+      : rows.length,
+    cleanedLineCount: rows.length,
+    reconstructedRowCount: accounting?.bandCount ?? rows.length,
+    parsedRowCount: rows.length,
+    rejectedRowCount: 0,
+    rejectedRows: [],
+    detectedRows: rows.map(structuredRowToDebugRow),
+    ocrConfidence: rows.length > 0 ? rows.reduce((sum, row) => sum + row.confidence, 0) / rows.length : 0,
+    accounting: accounting ?? null,
+  };
+
+  return { ...processed, ocrDebug: attachOcrMatchDebug(debugInfo, processed.result) };
 }
