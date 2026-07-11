@@ -52,10 +52,8 @@ const ISO_DATE_TIME = /\b(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::\d{2})?\
 const US_DASH_DATE_TIME = /\b(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|am|pm)?\b/;
 // OCR-damaged US datetime where the colon is missing but AM/PM is present.
 const US_DATE_COMPACT_TIME = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2})\s*:?\s*(\d{2})\s*(AM|PM|am|pm)\b/;
-// Compact PowerScribe date with time: 712026 8:28 PM -> 7/1/2026 8:28 PM.
+// Compact PowerScribe date with time: 7012026 8:28 PM -> 7/01/2026 8:28 PM (8-digit MMDDYYYY only).
 const POWERSCRIBE_COMPACT_DATE_TIME = /\b(\d{6,8})\s+(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)\b/;
-// PowerScribe-damaged date fragments such as "T2026 10:12 PM" or "212026 8:16 AM".
-const POWERSCRIBE_DAMAGED_DATE_TIME = /\b([TtFf]|\d{1,2}?)(?:1)?(20\d{2})\s+(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)\b/;
 // Date only (no time): MM/DD/YYYY or MM/DD/YY
 const US_DATE_ONLY = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/;
 // ISO date only: YYYY-MM-DD
@@ -104,14 +102,6 @@ const ORDERED_DATE_PATTERNS: Array<{ pattern: RegExp; parse: (match: RegExpMatch
       const [, compactDate, hStr, minStr, ampm] = match;
       const parsed = buildPowerScribeCompactDateTime(compactDate, hStr, minStr, ampm ?? null);
       return parsed ? { ...parsed, confidence: 0.82, matchedPattern: 'POWERSCRIBE_COMPACT_DATE_TIME' } : null;
-    },
-  },
-  {
-    pattern: /\b([TtFf]|\d{1,2}?)(?:1)?(20\d{2})\s+(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)\b/g,
-    parse: (match) => {
-      const [, dayToken, yStr, hStr, minStr, ampm] = match;
-      const parsed = buildPowerScribeDamagedDateTime(dayToken, yStr, hStr, minStr, ampm ?? null);
-      return parsed ? { ...parsed, confidence: 0.72, matchedPattern: 'POWERSCRIBE_DAMAGED_DATE_TIME' } : null;
     },
   },
   {
@@ -182,13 +172,6 @@ export function parseDateTimeFromOcr(text: string): ParsedDateTime | null {
     const [, compactDate, hStr, minStr, ampm] = compactPowerScribeMatch;
     const parsed = buildPowerScribeCompactDateTime(compactDate, hStr, minStr, ampm ?? null);
     if (parsed) return { ...parsed, confidence: 0.82, matchedPattern: 'POWERSCRIBE_COMPACT_DATE_TIME' };
-  }
-
-  const damagedPowerScribeMatch = text.match(POWERSCRIBE_DAMAGED_DATE_TIME);
-  if (damagedPowerScribeMatch) {
-    const [, dayToken, yStr, hStr, minStr, ampm] = damagedPowerScribeMatch;
-    const parsed = buildPowerScribeDamagedDateTime(dayToken, yStr, hStr, minStr, ampm ?? null);
-    if (parsed) return { ...parsed, confidence: 0.72, matchedPattern: 'POWERSCRIBE_DAMAGED_DATE_TIME' };
   }
 
   const usDateOnly = text.match(US_DATE_ONLY);
@@ -374,38 +357,10 @@ function buildPowerScribeCompactDateTime(
   ampm: string | null,
 ): Omit<ParsedDateTime, 'matchedPattern'> | null {
   const digits = compactDate.replace(/\D/g, '');
-  const candidates: Array<[string, string, string]> = [];
-  const currentMonth = String(new Date().getMonth() + 1);
-  if (digits.length === 8) {
-    candidates.push([digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)]);
-  } else if (digits.length === 7) {
-    if (digits.slice(0, 1) !== currentMonth) return null;
-    candidates.push([digits.slice(0, 1), digits.slice(1, 2), digits.slice(3)]);
-    candidates.push([digits.slice(0, 1), digits.slice(1, 3), digits.slice(3)]);
-  } else if (digits.length === 6) {
-    if (digits.slice(0, 1) !== currentMonth) return null;
-    candidates.push([digits.slice(0, 1), digits.slice(1, 2), digits.slice(2)]);
-  }
+  if (digits.length !== 8) return null;
 
-  for (const [month, day, year] of candidates) {
-    const parsed = buildUsDateTime(month, day, year, hStr, minStr, ampm);
-    if (parsed) return { ...parsed, confidence: 0.82 };
-  }
-
-  return null;
-}
-
-function buildPowerScribeDamagedDateTime(
-  dayToken: string,
-  yStr: string,
-  hStr: string,
-  minStr: string,
-  ampm: string | null,
-): Omit<ParsedDateTime, 'matchedPattern'> | null {
-  const month = new Date().getMonth() + 1;
-  const normalizedDayToken = /^[TF]$/i.test(dayToken) ? '1' : dayToken;
-  const parsed = buildUsDateTime(String(month), normalizedDayToken, yStr, hStr, minStr, ampm);
-  return parsed ? { ...parsed, confidence: 0.72 } : null;
+  const parsed = buildUsDateTime(digits.slice(0, 2), digits.slice(2, 4), digits.slice(4), hStr, minStr, ampm);
+  return parsed ? { ...parsed, confidence: 0.82 } : null;
 }
 
 function buildUsDate(mStr: string, dStr: string, yStr: string): string | null {

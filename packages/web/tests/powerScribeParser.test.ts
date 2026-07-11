@@ -69,27 +69,35 @@ describe('PowerScribe OCR parser date-time preservation', () => {
     expect(row.modifiedDateTime).toBe('2026-07-08T21:05:00');
   });
 
-  test('maps damaged PowerScribe date fragments with visible times into full datetimes', () => {
+  test('never fabricates a datetime from damaged PowerScribe date fragments', () => {
     const [row] = parseOcrLines([
       'XR CHEST PORTABLE T2026 10:12 PM 212026 8:16 AM',
     ]);
 
     expect(row.procedureName).toBe('XR CHEST PORTABLE');
-    expect(row.examDateTime).toBe('2026-07-01T22:12:00');
-    expect(row.modifiedDateTime).toBe('2026-07-02T08:16:00');
-    expect(row.examTime).toBe('22:12');
-    expect(row.modifiedTime).toBe('08:16');
+    expect(row.examDateTime).toBeNull();
+    expect(row.modifiedDateTime).toBeNull();
   });
 
-  test('parses compact PowerScribe date fragments without inventing July 11', () => {
+  test('never fabricates a month/day from a 6- or 7-digit compact date fragment', () => {
     const [row] = parseOcrLines([
       'XR ABDOMEN AP 7112026 8:28 PM 722026 8:17 AM',
     ]);
 
     expect(row.procedureName).toBe('XR ABDOMEN AP');
-    expect(row.examDateTime).toBe('2026-07-01T20:28:00');
-    expect(row.modifiedDateTime).toBe('2026-07-02T08:17:00');
+    expect(row.examDateTime).toBeNull();
+    expect(row.modifiedDateTime).toBeNull();
     expect(row.examDateTime).not.toBe('2026-07-11T20:28:00');
+    expect(row.examDateTime).not.toBe('2026-07-01T20:28:00');
+  });
+
+  test('an 8-digit compact PowerScribe date still parses (digits are all present, not invented)', () => {
+    const [row] = parseOcrLines([
+      'XR CHEST PORTABLE 07082026 8:19 AM',
+    ]);
+
+    expect(row.procedureName).toBe('XR CHEST PORTABLE');
+    expect(row.examDateTime).toBe('2026-07-08T08:19:00');
   });
 
   test('removes trailing OCR date fragments from cleaned procedure names', () => {
