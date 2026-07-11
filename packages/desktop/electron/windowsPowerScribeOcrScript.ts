@@ -1,4 +1,11 @@
 export const windowsPowerScribeOcrScript = String.raw`
+param(
+  [Nullable[double]] $SavedCropX = $null,
+  [Nullable[double]] $SavedCropY = $null,
+  [Nullable[double]] $SavedCropWidth = $null,
+  [Nullable[double]] $SavedCropHeight = $null
+)
+
 $ErrorActionPreference = 'Stop'
 
 Add-Type -AssemblyName System.Drawing
@@ -390,11 +397,37 @@ function Get-LineBox($Line) {
   return [pscustomobject]@{ x0 = $left; y0 = $top; x1 = $right; y1 = $bottom }
 }
 
+function Get-WordBoxes($OcrResult) {
+  $words = @()
+  foreach ($line in $OcrResult.Lines) {
+    foreach ($word in $line.Words) {
+      $text = ($word.Text -replace '\s+', '').Trim()
+      if (-not $text) { continue }
+      $rect = $word.BoundingRect
+      $x0 = $rect.X
+      $y0 = $rect.Y
+      $x1 = $rect.X + $rect.Width
+      $y1 = $rect.Y + $rect.Height
+      $words += [pscustomobject]@{
+        text = $text
+        x0 = $x0
+        y0 = $y0
+        x1 = $x1
+        y1 = $y1
+        centerY = ($y0 + $y1) / 2.0
+        height = [Math]::Max(1.0, $y1 - $y0)
+      }
+    }
+  }
+  return $words
+}
+
 function Invoke-Ocr([System.Drawing.Bitmap] $Bitmap) {
   $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
   if ($null -eq $engine) { throw 'Windows OCR is not available for the current user language.' }
   $softwareBitmap = Get-SoftwareBitmap $Bitmap
   $result = Await-WinRt ($engine.RecognizeAsync($softwareBitmap)) ([Windows.Media.Ocr.OcrResult])
+  $words = Get-WordBoxes $result
   $lines = @()
   foreach ($line in $result.Lines) {
     $text = ($line.Text -replace '\s+', ' ').Trim()
@@ -410,6 +443,7 @@ function Invoke-Ocr([System.Drawing.Bitmap] $Bitmap) {
   return [pscustomobject]@{
     text = ($result.Text -replace ([string][char]13), '').Trim()
     lines = $lines
+    words = $words
   }
 }
 
@@ -535,6 +569,81 @@ function Recombine-Rows($ProcedureOcr, $ExamOcr, $ModifiedOcr) {
   return $rows
 }
 
+function Find-PowerScribeHeaderAnchors($Words) {
+  $procedureCandidates = $Words | Where-Object { $_.text -imatch '^Procedure$' }
+  foreach ($proc in $procedureCandidates) {
+    $rowTolerance = $proc.height * 0.7
+    $examCandidate = $Words |
+      Where-Object {
+        $_.text -imatch '^Exam$' -and
+        [Math]::Abs($_.centerY - $proc.centerY) -le $rowTolerance -and
+        $_.x0 -gt $proc.x1
+      } |
+      Sort-Object x0 |
+      Select-Object -First 1
+    if (-not $examCandidate) { continue }
+
+    $modifiedCandidate = $Words |
+      Where-Object {
+        $_.text -imatch '^Modif(?:ied|led|ted)$' -and
+        [Math]::Abs($_.centerY - $proc.centerY) -le $rowTolerance -and
+        $_.x0 -gt $examCandidate.x1
+      } |
+      Sort-Object x0 |
+      Select-Object -First 1
+    if (-not $modifiedCandidate) { continue }
+
+    $heightPad = $proc.height
+    $bottomPad = $proc.height * 0.5
+    $headerBottom = [Math]::Max($proc.y1, [Math]::Max($examCandidate.y1, $modifiedCandidate.y1)) + $bottomPad
+
+    return [pscustomobject]@{
+      found = $true
+      headerBottom = $headerBottom
+      procX0 = [Math]::Max(0.0, $proc.x0 - $heightPad)
+      examX0 = [Math]::Max(0.0, $examCandidate.x0 - $heightPad)
+      modX0 = [Math]::Max(0.0, $modifiedCandidate.x0 - $heightPad)
+    }
+  }
+
+  return [pscustomobject]@{ found = $false }
+}
+
+function Test-DateShapeWord([string] $Text) {
+  if ($Text -imatch '^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}$') { return $true }
+  if ($Text -imatch '^\d{1,2}:\d{2}$') { return $true }
+  if ($Text -imatch '^(?:AM|PM)$') { return $true }
+  if ($Text -imatch '^\d{4}-\d{2}-\d{2}$') { return $true }
+  return $false
+}
+
+function Get-TableRectFromAnchors($Words, $Anchors) {
+  $dateWords = @($Words | Where-Object {
+    $_.y0 -gt $Anchors.headerBottom -and
+    $_.x0 -ge ($Anchors.examX0 - 4) -and
+    (Test-DateShapeWord $_.text)
+  })
+  if ($dateWords.Count -eq 0) { return $null }
+
+  $avgRowHeight = ($dateWords | Measure-Object -Property height -Average).Average
+  $maxY1 = ($dateWords | Measure-Object -Property y1 -Maximum).Maximum
+  $maxX1 = ($dateWords | Measure-Object -Property x1 -Maximum).Maximum
+  $tableBottom = $maxY1 + $avgRowHeight * 0.7
+  $tableRight = $maxX1 + $avgRowHeight
+
+  return [pscustomobject]@{
+    top = $Anchors.headerBottom
+    bottom = $tableBottom
+    left = $Anchors.procX0
+    right = $tableRight
+    columns = [pscustomobject]@{
+      procedure = [pscustomobject]@{ x0 = $Anchors.procX0; x1 = $Anchors.examX0 - 6 }
+      examDate = [pscustomobject]@{ x0 = $Anchors.examX0; x1 = $Anchors.modX0 - 6 }
+      modifiedDate = [pscustomobject]@{ x0 = $Anchors.modX0; x1 = $tableRight }
+    }
+  }
+}
+
 if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) {
   throw 'Clipboard does not contain an image.'
 }
@@ -542,11 +651,60 @@ if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) {
 $image = [System.Windows.Forms.Clipboard]::GetImage()
 $bitmap = New-Object System.Drawing.Bitmap $image
 try {
-  $table = Detect-TableCrop $bitmap
-  $columnLayout = Detect-ColumnLayout $bitmap $table.rect
-  $procedureRect = Child-Rect $table.rect $columnLayout.columns.procedure
-  $examRect = Child-Rect $table.rect $columnLayout.columns.examDate
-  $modifiedRect = Child-Rect $table.rect $columnLayout.columns.modifiedDate
+  $cropMethod = $null
+  $procedureRect = $null
+  $examRect = $null
+  $modifiedRect = $null
+
+  $fullOcr = Invoke-Ocr $bitmap
+  $headerAnchors = Find-PowerScribeHeaderAnchors $fullOcr.words
+  if ($headerAnchors.found) {
+    $anchoredTable = Get-TableRectFromAnchors $fullOcr.words $headerAnchors
+    if ($null -ne $anchoredTable) {
+      $bitmapWidth = [double]$bitmap.Width
+      $bitmapHeight = [double]$bitmap.Height
+      $cropMethod = 'header-anchor'
+      $procedureRect = Normalize-Rect ([pscustomobject]@{
+        x = $anchoredTable.columns.procedure.x0 / $bitmapWidth
+        y = $anchoredTable.top / $bitmapHeight
+        width = ($anchoredTable.columns.procedure.x1 - $anchoredTable.columns.procedure.x0) / $bitmapWidth
+        height = ($anchoredTable.bottom - $anchoredTable.top) / $bitmapHeight
+      })
+      $examRect = Normalize-Rect ([pscustomobject]@{
+        x = $anchoredTable.columns.examDate.x0 / $bitmapWidth
+        y = $anchoredTable.top / $bitmapHeight
+        width = ($anchoredTable.columns.examDate.x1 - $anchoredTable.columns.examDate.x0) / $bitmapWidth
+        height = ($anchoredTable.bottom - $anchoredTable.top) / $bitmapHeight
+      })
+      $modifiedRect = Normalize-Rect ([pscustomobject]@{
+        x = $anchoredTable.columns.modifiedDate.x0 / $bitmapWidth
+        y = $anchoredTable.top / $bitmapHeight
+        width = ($anchoredTable.columns.modifiedDate.x1 - $anchoredTable.columns.modifiedDate.x0) / $bitmapWidth
+        height = ($anchoredTable.bottom - $anchoredTable.top) / $bitmapHeight
+      })
+    }
+  }
+
+  if ($null -eq $procedureRect) {
+    $table = Detect-TableCrop $bitmap
+    $hasSavedCrop = $null -ne $SavedCropX -and $null -ne $SavedCropY -and $null -ne $SavedCropWidth -and $null -ne $SavedCropHeight
+    if ($table.method -ne 'detected' -and $hasSavedCrop) {
+      $table = [pscustomobject]@{
+        rect = Normalize-Rect ([pscustomobject]@{ x = $SavedCropX; y = $SavedCropY; width = $SavedCropWidth; height = $SavedCropHeight })
+        confidence = 1.0
+        method = 'saved'
+      }
+      $cropMethod = 'saved-crop'
+    } elseif ($table.method -eq 'detected') {
+      $cropMethod = 'pixel-valley'
+    } else {
+      $cropMethod = 'default'
+    }
+    $columnLayout = Detect-ColumnLayout $bitmap $table.rect
+    $procedureRect = Child-Rect $table.rect $columnLayout.columns.procedure
+    $examRect = Child-Rect $table.rect $columnLayout.columns.examDate
+    $modifiedRect = Child-Rect $table.rect $columnLayout.columns.modifiedDate
+  }
 
   $procedureBitmap = Crop-Bitmap $bitmap $procedureRect
   $examBitmap = Crop-Bitmap $bitmap $examRect
