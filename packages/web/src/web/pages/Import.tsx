@@ -541,9 +541,9 @@ function CaptureProcessingOverlay({
 }) {
   const isBrowserVision = engine === 'browser_vision';
   const isPreparingModel = isBrowserVision && (status === 'checking' || status === 'available' || status === 'downloading' || status === 'loading');
-  const title = isPreparingModel ? 'Preparing local vision model' : CAPTURE_PROCESSING_LABEL;
+  const title = isPreparingModel ? 'Preparing capture engine' : CAPTURE_PROCESSING_LABEL;
   const subtitle = isPreparingModel
-    ? 'Downloading and caching model files in this browser. The screenshot stays on this device.'
+    ? 'One-time local setup. Your screenshot stays on this device.'
     : isBrowserVision
     ? 'Extracting studies locally and preparing the review list.'
     : 'Preparing extracted studies for review.';
@@ -569,7 +569,11 @@ function CaptureProcessingOverlay({
             <p className="mt-2 text-xs font-medium text-slate-400">{Math.round(progress * 100)}%</p>
           </div>
         )}
-        {message && <p className="mt-3 break-words text-xs text-slate-500">{message}</p>}
+        {message && (
+          <p className="mt-3 text-xs text-slate-500">
+            {status === 'downloading' ? 'Downloading local files' : status === 'loading' ? 'Preparing local engine' : message}
+          </p>
+        )}
       </div>
     </div>
   );

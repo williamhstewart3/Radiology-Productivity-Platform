@@ -180,7 +180,7 @@ export async function downloadAndInitializeVisionModel(options: {
       options.onProgress?.({
         status: state.status,
         progress,
-        message: item.file ? `Loading ${item.file}` : `Loading ${MODEL_INFO.modelId}`,
+        message: state.status === 'downloading' ? 'Downloading local capture engine' : 'Preparing local capture engine',
       });
     };
     const dtype = dtypeForSupport(support);
