@@ -918,11 +918,14 @@ export function Import({ onImported }: ImportProps) {
       }, helperResult.accounting);
       setOcrFile(file);
       setOcrDebug(processed.ocrDebug ?? null);
+      addTimeline(`Windows structured OCR extracted ${processed.extractedCount} rows`);
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
       setClipboardFile(null);
       return true;
     } catch (error) {
-      console.warn('Windows PowerScribe OCR helper failed; falling back to browser OCR.', error);
+      const message = error instanceof Error ? error.message : String(error);
+      addTimeline(`Windows structured OCR failed: ${message}`);
+      pushToast('warning', 'Windows OCR helper failed', `${message} — falling back to browser OCR.`);
       return false;
     }
   }
@@ -935,8 +938,14 @@ export function Import({ onImported }: ImportProps) {
     setClipboardFile(null);
     pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
     try {
+      const desktop = getDesktopAPI();
+      const attemptedStructuredHelper = desktop?.platform === 'win32' && Boolean(desktop.extractPowerScribeClipboardRows);
       const usedStructuredHelper = await processWindowsClipboardCapture(file, timelineSource);
       if (!usedStructuredHelper) {
+        if (attemptedStructuredHelper) {
+          addTimeline('Using browser OCR fallback');
+          pushToast('info', 'Browser OCR fallback', 'Reading the screenshot with the in-app OCR engine instead.');
+        }
         await processOcrFile(file, timelineSource);
       }
     } finally {
@@ -981,22 +990,6 @@ export function Import({ onImported }: ImportProps) {
   async function handleOcrProcess() {
     if (!ocrFile) return;
     await processOcrFile(ocrFile, 'manual file');
-    return;
-    setProcessing(true);
-    setError(null);
-    try {
-      const processed = await processOcrImport(ocrFile, {
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-      }, { filename: ocrFile.name, size: ocrFile.size });
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel, processed.extractedCount);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'OCR failed — try paste mode instead');
-    } finally {
-      setProcessing(false);
-    }
   }
 
   async function alwaysProcessClipboard(file: File) {
