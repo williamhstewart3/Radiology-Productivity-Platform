@@ -528,16 +528,49 @@ function ImportToastStack({ toasts }: { toasts: ImportToast[] }) {
   );
 }
 
-function CaptureProcessingState() {
+function CaptureProcessingOverlay({
+  engine,
+  status,
+  progress,
+  message,
+}: {
+  engine: ProcessingEngine;
+  status: BrowserVisionStatus;
+  progress: number | null;
+  message: string | null;
+}) {
+  const isBrowserVision = engine === 'browser_vision';
+  const isPreparingModel = isBrowserVision && (status === 'checking' || status === 'available' || status === 'downloading' || status === 'loading');
+  const title = isPreparingModel ? 'Preparing local vision model' : CAPTURE_PROCESSING_LABEL;
+  const subtitle = isPreparingModel
+    ? 'Downloading and caching model files in this browser. The screenshot stays on this device.'
+    : isBrowserVision
+    ? 'Extracting studies locally and preparing the review list.'
+    : 'Preparing extracted studies for review.';
+
   return (
-    <div className="rounded-xl border border-sky-500/25 bg-sky-500/8 px-4 py-5 text-center">
-      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-sky-500/25 bg-slate-950/40">
-        <div className="animate-pulse">
-          <BaptistLogoMark size={42} />
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0A0E1A]/82 px-4 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="w-full max-w-md rounded-3xl border border-sky-500/20 bg-slate-950/90 px-8 py-8 text-center shadow-2xl">
+        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl border border-sky-500/25 bg-slate-900/80">
+          <div className="animate-pulse">
+            <BaptistLogoMark size={48} />
+          </div>
         </div>
+        <p className="mt-5 text-base font-semibold text-white">{title}</p>
+        <p className="mt-2 text-sm leading-relaxed text-slate-400">{subtitle}</p>
+        {isBrowserVision && progress != null && (
+          <div className="mt-5">
+            <div className="h-1.5 overflow-hidden rounded-full bg-white/8">
+              <div
+                className="h-full rounded-full bg-sky-400 transition-all duration-300"
+                style={{ width: `${Math.max(2, Math.min(100, Math.round(progress * 100)))}%` }}
+              />
+            </div>
+            <p className="mt-2 text-xs font-medium text-slate-400">{Math.round(progress * 100)}%</p>
+          </div>
+        )}
+        {message && <p className="mt-3 break-words text-xs text-slate-500">{message}</p>}
       </div>
-      <p className="mt-3 text-sm font-semibold text-white">{CAPTURE_PROCESSING_LABEL}</p>
-      <p className="mt-1 text-xs text-slate-400">Preparing extracted studies for review.</p>
     </div>
   );
 }
@@ -763,6 +796,7 @@ export function Import({ onImported }: ImportProps) {
     setError(null);
     setBrowserVisionDiagnostics(null);
     setBrowserVisionProgress(null);
+    setBrowserVisionStatus('checking');
     setBrowserVisionMessage('Checking browser Vision support...');
     if (file) {
       setcaptureFile(file);
@@ -2312,7 +2346,6 @@ export function Import({ onImported }: ImportProps) {
               </div>
             </div>
           )}
-          {processing && <CaptureProcessingState />}
           <div>
             <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
               Paste or upload PowerScribe window grab
@@ -2436,6 +2469,14 @@ export function Import({ onImported }: ImportProps) {
       )}
     </div>
     <ImportToastStack toasts={toasts} />
+    {processing && (
+      <CaptureProcessingOverlay
+        engine={processingEngine}
+        status={browserVisionStatus}
+        progress={browserVisionProgress}
+        message={browserVisionMessage}
+      />
+    )}
     </>
   );
 }
