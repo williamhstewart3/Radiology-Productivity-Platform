@@ -1488,6 +1488,16 @@ export function Import({ onImported }: ImportProps) {
           </button>
         </div>
 
+        {ocrDebug?.reconciliationWarning && (
+          <div className="flex items-start gap-3 rounded-xl px-4 py-3 border border-red-500/40 bg-red-500/10">
+            <span className="text-lg mt-0.5">⚠️</span>
+            <div>
+              <p className="text-sm font-semibold text-red-300">Row-count reconciliation failed</p>
+              <p className="text-xs mt-0.5 text-red-300/80">{ocrDebug.reconciliationWarning}</p>
+            </div>
+          </div>
+        )}
+
         {feedbackQueueOpen && (
           <div className="card space-y-3">
             <div className="flex items-start justify-between gap-3">

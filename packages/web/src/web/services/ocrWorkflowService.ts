@@ -208,6 +208,29 @@ function structuredRowToDebugRow(row: PowerScribeStructuredOcrRow): OCRImportDeb
   };
 }
 
+export function reconciliationWarningFor(accounting: PowerScribeOcrAccounting | null | undefined): string | null {
+  if (!accounting) return null;
+  const { anchorCount, bandCount, inkProjectionRowEstimate } = accounting;
+  const values = [anchorCount, bandCount, inkProjectionRowEstimate];
+  const spread = Math.max(...values) - Math.min(...values);
+  if (spread <= 2) return null;
+  return `Row-count reconciliation failed: anchors=${anchorCount}, bands=${bandCount}, ink-estimate=${inkProjectionRowEstimate} (spread ${spread}). Every row in this batch requires manual review.`;
+}
+
+function forceReviewForReconciliation(rows: PipelineReviewRow[]): PipelineReviewRow[] {
+  return rows.map((row) => ({
+    ...row,
+    needsReview: true,
+    autoApproved: false,
+    autoApprovalLevel: null,
+    approvalStatus: row.approvalStatus === 'auto_approved' ? 'pending' : row.approvalStatus,
+  }));
+}
+
+export function __testForceReviewForReconciliation(rows: PipelineReviewRow[]): PipelineReviewRow[] {
+  return forceReviewForReconciliation(rows);
+}
+
 export async function processStructuredPowerScribeOcrImport(
   rows: PowerScribeStructuredOcrRow[],
   context: WorkflowContext,
@@ -218,6 +241,12 @@ export async function processStructuredPowerScribeOcrImport(
     context,
     (count) => `Windows PowerScribe OCR completed (${count} extracted)`,
   );
+
+  const reconciliationWarning = reconciliationWarningFor(accounting);
+  const result = reconciliationWarning
+    ? { ...processed.result, reviewRows: forceReviewForReconciliation(processed.result.reviewRows) }
+    : processed.result;
+
   await recordAuditEvent({
     profileId: context.profileId,
     siteId: context.siteId,
@@ -227,9 +256,10 @@ export async function processStructuredPowerScribeOcrImport(
     summary: `Windows PowerScribe OCR completed ${processed.extractedCount} extracted studies`,
     detailsJson: JSON.stringify({
       source: 'windows_structured_ocr',
-      reviewRows: processed.result.reviewRows.length,
-      skippedRows: processed.result.skippedRows.length,
+      reviewRows: result.reviewRows.length,
+      skippedRows: result.skippedRows.length,
       accounting: accounting ?? null,
+      reconciliationWarning,
     }),
   });
 
@@ -249,7 +279,8 @@ export async function processStructuredPowerScribeOcrImport(
     detectedRows: rows.map(structuredRowToDebugRow),
     ocrConfidence: rows.length > 0 ? rows.reduce((sum, row) => sum + row.confidence, 0) / rows.length : 0,
     accounting: accounting ?? null,
+    reconciliationWarning,
   };
 
-  return { ...processed, ocrDebug: attachOcrMatchDebug(debugInfo, processed.result) };
+  return { ...processed, result, ocrDebug: attachOcrMatchDebug(debugInfo, result) };
 }
