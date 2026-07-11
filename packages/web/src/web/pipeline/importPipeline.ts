@@ -37,6 +37,8 @@ export interface CommitResult {
   importedCount: number;
   skippedCount: number;
   reviewNeededCount: number;
+  alreadySavedCount: number;
+  blockedNoValidCptCount: number;
 }
 
 function selectedCandidatesForRow(row: PipelineReviewRow): MatchCandidate[] {
@@ -276,12 +278,14 @@ export async function commitPipelineResults(
   const importId = crypto.randomUUID();
   let importedCount = 0;
   let reviewNeededCount = 0;
+  let alreadySavedCount = 0;
+  let blockedNoValidCptCount = 0;
   const committedLogs: StudyLog[] = [];
 
   for (const row of reviewRows) {
     const selectedCandidates = selectedCandidatesForRow(row).filter(productivityRelevant);
     if (selectedCandidates.length === 0) {
-      if (row.included && !row.autoSkipped && row.approvalStatus !== 'excluded') reviewNeededCount++;
+      if (row.included && !row.autoSkipped && row.approvalStatus !== 'excluded') blockedNoValidCptCount++;
       continue;
     }
     if (!isReviewRowSaveEligible(row)) {
@@ -299,6 +303,7 @@ export async function commitPipelineResults(
     const { productivityDate, modifiedDateTime } = resolvePowerScribeProductivityDates(study, logDate);
     const rowSessionId = crypto.randomUUID();
     let rowCommitted = false;
+    let rowAlreadySaved = false;
 
     for (const cand of selectedCandidates) {
       const fingerprint = buildFingerprint(
@@ -318,7 +323,10 @@ export async function commitPipelineResults(
       const existing = isStrongDuplicateFingerprint(fingerprint)
         ? await db.studyLogs.where('studyFingerprint').equals(fingerprint).first()
         : null;
-      if (existing && !(existing as any).deletedAt) continue;
+      if (existing && !(existing as any).deletedAt) {
+        rowAlreadySaved = true;
+        continue;
+      }
 
       const isReview = false;
 
@@ -377,6 +385,8 @@ export async function commitPipelineResults(
         action: row.autoApproved ? 'confirm' : row.needsReview ? 'correct' : 'confirm',
       });
       importedCount++;
+    } else if (rowAlreadySaved) {
+      alreadySavedCount++;
     }
   }
 
@@ -391,5 +401,5 @@ export async function commitPipelineResults(
     await supabasePersistence.saveStudyLogs(committedLogs, uploadDayId);
   }
 
-  return { importedCount, skippedCount, reviewNeededCount };
+  return { importedCount, skippedCount, reviewNeededCount, alreadySavedCount, blockedNoValidCptCount };
 }

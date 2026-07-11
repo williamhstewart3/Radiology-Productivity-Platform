@@ -207,7 +207,13 @@ export async function finalizeReviewSession(input: {
     logDate: input.logDate,
     action: 'day_finalized',
     summary: `Finalized ${result.importedCount} studies; ${result.reviewNeededCount} still marked for review`,
-    detailsJson: JSON.stringify({ imported: result.importedCount, skipped: result.skippedCount, reviewNeeded: result.reviewNeededCount }),
+    detailsJson: JSON.stringify({
+      imported: result.importedCount,
+      skipped: result.skippedCount,
+      reviewNeeded: result.reviewNeededCount,
+      alreadySaved: result.alreadySavedCount,
+      blockedNoValidCpt: result.blockedNoValidCptCount,
+    }),
   });
   return result;
 }

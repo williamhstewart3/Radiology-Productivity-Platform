@@ -706,6 +706,8 @@ export function Import({ onImported }: ImportProps) {
   const [importedCount, setImportedCount]   = useState(0);
   const [skippedCount, setSkippedCount]     = useState(0);
   const [reviewNeeded, setReviewNeeded]     = useState(0);
+  const [alreadySavedCount, setAlreadySavedCount] = useState(0);
+  const [blockedNoValidCptCount, setBlockedNoValidCptCount] = useState(0);
   const [error, setError]         = useState<string | null>(null);
   const [showSkipped, setShowSkipped]       = useState(false);
   const [searchPanelTempId, setSearchPanelTempId] = useState<string | null>(null);
@@ -1047,11 +1049,15 @@ export function Import({ onImported }: ImportProps) {
       setImportedCount(result.importedCount);
       setSkippedCount(result.skippedCount);
       setReviewNeeded(result.reviewNeededCount);
+      setAlreadySavedCount(result.alreadySavedCount);
+      setBlockedNoValidCptCount(result.blockedNoValidCptCount);
       setStep('done');
       pushToast(
         result.reviewNeededCount > 0 ? 'warning' : 'success',
         `Imported ${result.importedCount} exam${result.importedCount === 1 ? '' : 's'}`,
-        `+${selectedRvu.toFixed(1)} wRVUs - ${result.skippedCount} duplicate${result.skippedCount === 1 ? '' : 's'} skipped - ${result.reviewNeededCount} require review`,
+        `+${selectedRvu.toFixed(1)} wRVUs - ${result.skippedCount} duplicate${result.skippedCount === 1 ? '' : 's'} skipped - ${result.reviewNeededCount} require review` +
+          (result.alreadySavedCount > 0 ? ` - ${result.alreadySavedCount} already saved` : '') +
+          (result.blockedNoValidCptCount > 0 ? ` - ${result.blockedNoValidCptCount} blocked (no valid CPT)` : ''),
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Import failed');
@@ -1401,6 +1407,16 @@ export function Import({ onImported }: ImportProps) {
               {reviewNeeded > 0 && (
                 <p className="text-amber-400 text-sm">
                   Needs review: {reviewNeeded}
+                </p>
+              )}
+              {alreadySavedCount > 0 && (
+                <p className="text-slate-400 text-sm">
+                  Already saved: {alreadySavedCount}
+                </p>
+              )}
+              {blockedNoValidCptCount > 0 && (
+                <p className="text-red-400 text-sm">
+                  Blocked (no valid CPT): {blockedNoValidCptCount}
                 </p>
               )}
             </div>
