@@ -57,7 +57,7 @@ export function reviewSessionRowKey(row: PipelineReviewRow): string {
   return [
     'review',
     normalizedExamKey(row),
-    row.source.modifiedDateTime ?? row.source.studyTime ?? '',
+    row.source.modifiedDateTime ?? '',
     row.source.modifiedDate ?? '',
     row.source.studyDate ?? '',
     row.source.accessionNumber ?? '',

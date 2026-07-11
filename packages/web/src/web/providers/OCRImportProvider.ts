@@ -18,6 +18,7 @@ import { getDefaultOcrProvider } from '../utils/ocrProvider';
 import { PSM } from 'tesseract.js';
 import { maybeEnhanceOcrWithLlm } from '../services/llmOcrExtractionService';
 import { parseDateTimeFromOcr } from '../utils/studyDateParser';
+import { normalizeOcrExamTextForMatching } from '../utils/ocrExamTextNormalization';
 import {
   DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
   preprocessPowerScribeColumnsForOcr,
@@ -223,36 +224,142 @@ export function __testReassembleColumnRows(results: ColumnOcrResults): string[] 
   return reassembleColumnRows(results);
 }
 
-function reassembleColumnRowsByIndex(results: ColumnOcrResults): string[] {
+function reassembleColumnRowsByIndex(results: ColumnOcrResults): ReassembledColumnRow[] {
   const maxLength = Math.max(results.procedure.lines.length, results.examDate.lines.length, results.modifiedDate.lines.length);
-  return Array.from({ length: maxLength }, (_, index) => [
-    results.procedure.lines[index] ?? 'UNCLEAR POWERSCRIBE ROW',
-    results.examDate.lines[index] ?? '',
-    results.modifiedDate.lines[index] ?? '',
-  ].join(' ').replace(/\s{2,}/g, ' ').trim()).filter(Boolean);
+  return Array.from({ length: maxLength }, (_, index) => {
+    const rawProcedureColumnText = normalizeColumnLineText(results.procedure.lines[index] ?? 'UNCLEAR POWERSCRIBE ROW');
+    const rawExamDateColumnText = normalizeColumnLineText(results.examDate.lines[index] ?? '');
+    const rawModifiedDateColumnText = normalizeColumnLineText(results.modifiedDate.lines[index] ?? '');
+    return {
+      line: [rawProcedureColumnText, rawExamDateColumnText, rawModifiedDateColumnText].join(' ').replace(/\s{2,}/g, ' ').trim(),
+      rawProcedureColumnText,
+      rawExamDateColumnText,
+      rawModifiedDateColumnText,
+    };
+  }).filter((row) => row.line.length > 0);
 }
 
-function applyColumnDateOverrides(row: ParsedLine, debugRow: ReassembledColumnRow | undefined): ParsedLine {
-  if (!debugRow) return row;
-  const exam = parseDateTimeFromOcr(debugRow.rawExamDateColumnText);
-  const modified = parseDateTimeFromOcr(debugRow.rawModifiedDateColumnText);
-  const examDateTime = exam?.studyDateTime ?? null;
-  const modifiedDateTime = modified?.studyDateTime ?? null;
+interface AnchorBand {
+  lower: number;
+  upper: number;
+  anchor: OcrPositionedLine;
+  gapFlagged: boolean;
+}
+
+function buildModifiedAnchorBands(modifiedLines: OcrPositionedLine[]): AnchorBand[] | null {
+  const anchors = modifiedLines
+    .map((line) => ({ line, center: lineCenterY(line) }))
+    .filter((item): item is { line: OcrPositionedLine; center: number } =>
+      item.center != null && Boolean(parseDateTimeFromOcr(normalizeColumnLineText(item.line.text))?.studyDateTime),
+    )
+    .sort((a, b) => a.center - b.center);
+
+  if (anchors.length === 0) return null;
+
+  const pitches: number[] = [];
+  for (let i = 1; i < anchors.length; i++) pitches.push(anchors[i].center - anchors[i - 1].center);
+  const medianPitch = pitches.length > 0 ? (median(pitches) ?? 40) : 40;
+
+  return anchors.map((anchor, index) => ({
+    lower: index === 0 ? -Infinity : (anchors[index - 1].center + anchor.center) / 2,
+    upper: index === anchors.length - 1 ? Infinity : (anchor.center + anchors[index + 1].center) / 2,
+    anchor: anchor.line,
+    gapFlagged: index > 0 && anchor.center - anchors[index - 1].center > medianPitch * 1.6,
+  }));
+}
+
+function linesInBand(lines: OcrPositionedLine[], band: AnchorBand): OcrPositionedLine[] {
+  return lines
+    .map((line) => ({ line, center: lineCenterY(line) }))
+    .filter((item): item is { line: OcrPositionedLine; center: number } => item.center != null && item.center > band.lower && item.center <= band.upper)
+    .sort((a, b) => a.center - b.center)
+    .map((item) => item.line);
+}
+
+function joinedColumnText(lines: OcrPositionedLine[]): string {
+  const parts: string[] = [];
+  for (const line of lines) {
+    const text = normalizeColumnLineText(line.text);
+    if (text && !parts.includes(text)) parts.push(text);
+  }
+  return parts.join(' ').replace(/\s{2,}/g, ' ').trim();
+}
+
+function bandColumnRows(results: ColumnOcrResults): { rows: ReassembledColumnRow[]; gapFlags: Array<string | null> } | null {
+  const bands = buildModifiedAnchorBands(results.modifiedDate.positionedLines);
+  if (!bands) return null;
+
+  const rows = bands.map((band) => {
+    const rawProcedureColumnText = joinedColumnText(linesInBand(results.procedure.positionedLines, band));
+    const rawExamDateColumnText = joinedColumnText(linesInBand(results.examDate.positionedLines, band));
+    const rawModifiedDateColumnText = normalizeColumnLineText(band.anchor.text);
+    return {
+      line: [rawProcedureColumnText, rawExamDateColumnText, rawModifiedDateColumnText].filter(Boolean).join(' ').trim(),
+      rawProcedureColumnText,
+      rawExamDateColumnText,
+      rawModifiedDateColumnText,
+    };
+  });
+  const gapFlags = bands.map((band) => (band.gapFlagged ? 'Possible undetected row above this one' : null));
+
+  return { rows, gapFlags };
+}
+
+export function __testBandColumnRows(results: ColumnOcrResults): { rows: ReassembledColumnRow[]; gapFlags: Array<string | null> } | null {
+  return bandColumnRows(results);
+}
+
+function buildParsedLineFromColumnTexts(
+  rawProcedureColumnText: string,
+  rawExamDateColumnText: string,
+  rawModifiedDateColumnText: string,
+  reviewReasonExtra: string | null = null,
+): ParsedLine {
+  const procedureText = rawProcedureColumnText || 'UNCLEAR POWERSCRIBE ROW';
+  const cleanedExamNameRaw = normalizeOcrExamTextForMatching(procedureText);
+  const cleanedExamName = cleanedExamNameRaw.length >= 2 ? cleanedExamNameRaw : 'UNCLEAR POWERSCRIBE ROW';
+
+  const exam = parseDateTimeFromOcr(rawExamDateColumnText);
+  const modified = parseDateTimeFromOcr(rawModifiedDateColumnText);
+
+  let extractionConfidence = 0.25;
+  if (cleanedExamName !== 'UNCLEAR POWERSCRIBE ROW') extractionConfidence += 0.35;
+  if (exam?.studyDateTime) extractionConfidence += 0.2;
+  if (modified?.studyDateTime) extractionConfidence += 0.2;
+  extractionConfidence = Math.max(0, Math.min(1, extractionConfidence));
+
+  const reviewReasons: string[] = [];
+  if (cleanedExamName === 'UNCLEAR POWERSCRIBE ROW') reviewReasons.push('Unclear PowerScribe procedure text');
+  if (!exam?.studyDateTime) reviewReasons.push('Missing or unclear Exam Date');
+  if (!modified?.studyDateTime) reviewReasons.push('Missing or unclear Modified Date');
+  if (reviewReasonExtra) reviewReasons.push(reviewReasonExtra);
+  const needsReview = reviewReasons.length > 0 || extractionConfidence < 0.75;
+
+  const rawText = [rawProcedureColumnText, rawExamDateColumnText, rawModifiedDateColumnText].filter(Boolean).join(' ').trim();
 
   return {
-    ...row,
-    rawProcedureColumnText: debugRow.rawProcedureColumnText,
-    rawExamDateColumnText: debugRow.rawExamDateColumnText,
-    rawModifiedDateColumnText: debugRow.rawModifiedDateColumnText,
+    rawText,
+    rawProcedureColumnText,
+    rawExamDateColumnText,
+    rawModifiedDateColumnText,
+    procedureName: cleanedExamName,
+    examName: cleanedExamName,
+    cleanedExamName,
+    cleanedText: cleanedExamName,
     examDate: exam?.studyDate ?? null,
     examTime: exam?.studyTime ?? null,
-    examDateTime,
+    examDateTime: exam?.studyDateTime ?? null,
+    studyDateTime: exam?.studyDateTime ?? null,
     studyDate: exam?.studyDate ?? null,
-    studyDateTime: examDateTime,
+    modifiedDateTime: modified?.studyDateTime ?? null,
     modifiedDate: modified?.studyDate ?? null,
     modifiedTime: modified?.studyTime ?? null,
-    modifiedDateTime,
-    dateTimeConfidence: Math.max(row.dateTimeConfidence, exam?.confidence ?? 0, modified?.confidence ?? 0),
+    accessionNumber: null,
+    rowIndex: null,
+    dateTimeConfidence: Math.max(exam?.confidence ?? 0, modified?.confidence ?? 0),
+    extractionConfidence,
+    needsReview,
+    reviewReason: reviewReasons.length > 0 ? reviewReasons.join('; ') : null,
   };
 }
 
@@ -292,31 +399,51 @@ export class OCRImportProvider implements ImportProvider {
         columnResults[column.name] = await provider.extractText(column.blob, COLUMN_OCR_PARAMS[column.name]);
       }
     }
-    let columnDebugRows = columnResults ? reassembleColumnRowsWithDebug(columnResults) : [];
-    let rowLines = columnResults ? columnDebugRows.map((row) => row.line) : result?.lines ?? [];
-    let parsedWithDebug = parseOcrLinesWithDebug(rowLines);
-    if (columnResults && parsedWithDebug.rows.length === 0) {
-      const fallbackLines = reassembleColumnRowsByIndex(columnResults);
-      const fallbackParsed = parseOcrLinesWithDebug(fallbackLines);
-      if (fallbackParsed.rows.length > 0 || fallbackLines.length > rowLines.length) {
-        rowLines = fallbackLines;
-        columnDebugRows = fallbackLines.map((line) => ({
-          line,
-          rawProcedureColumnText: '',
-          rawExamDateColumnText: '',
-          rawModifiedDateColumnText: '',
-        }));
-        parsedWithDebug = fallbackParsed;
+    let rowLines: string[];
+    let regexParsed: Array<ParsedLine & { accessionNumber: string | null }>;
+    let debugCounts: { rawLineCount: number; cleanedLineCount: number; parsedRowCount: number; rejectedRowCount: number; rejectedRows: OcrParseDebugInfo['rejectedRows'] };
+
+    if (columnResults) {
+      const banded = bandColumnRows(columnResults);
+      let columnRows: ReassembledColumnRow[];
+      let gapFlags: Array<string | null>;
+
+      if (banded) {
+        columnRows = banded.rows;
+        gapFlags = banded.gapFlags;
+      } else {
+        columnRows = reassembleColumnRowsWithDebug(columnResults);
+        if (columnRows.length === 0) {
+          columnRows = reassembleColumnRowsByIndex(columnResults);
+        }
+        gapFlags = columnRows.map(() => null);
       }
-    }
-    const columnDebugByLine = new Map(columnDebugRows.map((row) => [row.line, row]));
-    const regexParsed = parsedWithDebug.rows.map((row) => {
-      const debugRow = columnDebugByLine.get(row.rawText);
-      return {
-        ...applyColumnDateOverrides(row, debugRow),
+
+      regexParsed = columnRows.map((row, index) => ({
+        ...buildParsedLineFromColumnTexts(row.rawProcedureColumnText, row.rawExamDateColumnText, row.rawModifiedDateColumnText, gapFlags[index] ?? null),
         accessionNumber: null,
+      }));
+      rowLines = regexParsed.map((row) => row.rawText);
+      debugCounts = {
+        rawLineCount: columnResults.procedure.lines.length + columnResults.examDate.lines.length + columnResults.modifiedDate.lines.length,
+        cleanedLineCount: rowLines.length,
+        parsedRowCount: regexParsed.length,
+        rejectedRowCount: 0,
+        rejectedRows: [],
       };
-    });
+    } else {
+      rowLines = result?.lines ?? [];
+      const parsedWithDebug = parseOcrLinesWithDebug(rowLines);
+      regexParsed = parsedWithDebug.rows.map((row) => ({ ...row, accessionNumber: null }));
+      debugCounts = {
+        rawLineCount: parsedWithDebug.debug.rawLineCount,
+        cleanedLineCount: parsedWithDebug.debug.cleanedLineCount,
+        parsedRowCount: parsedWithDebug.debug.parsedRowCount,
+        rejectedRowCount: parsedWithDebug.debug.rejectedRowCount,
+        rejectedRows: parsedWithDebug.debug.rejectedRows,
+      };
+    }
+
     const now = new Date().toISOString();
     const ocrConfidence = columnResults
       ? (columnResults.procedure.confidence + columnResults.examDate.confidence + columnResults.modifiedDate.confidence) / 3
@@ -342,8 +469,8 @@ export class OCRImportProvider implements ImportProvider {
       ocrProvider: provider.constructor.name,
       ocrText,
       ocrLines,
-      rawLineCount: parsedWithDebug.debug.rawLineCount,
-      cleanedLineCount: parsedWithDebug.debug.cleanedLineCount,
+      rawLineCount: debugCounts.rawLineCount,
+      cleanedLineCount: debugCounts.cleanedLineCount,
       columnLineCounts: columnResults
         ? {
             procedure: columnResults.procedure.lines.length,
@@ -352,9 +479,9 @@ export class OCRImportProvider implements ImportProvider {
           }
         : undefined,
       reconstructedRowCount: rowLines.length,
-      parsedRowCount: parsedWithDebug.debug.parsedRowCount,
-      rejectedRowCount: parsedWithDebug.debug.rejectedRowCount,
-      rejectedRows: parsedWithDebug.debug.rejectedRows,
+      parsedRowCount: debugCounts.parsedRowCount,
+      rejectedRowCount: debugCounts.rejectedRowCount,
+      rejectedRows: debugCounts.rejectedRows,
       columnText: columnResults
         ? {
             procedure: columnResults.procedure.rawText,
@@ -380,7 +507,7 @@ export class OCRImportProvider implements ImportProvider {
         examDate: p.examDate,
         examTime: p.examTime,
         examDateTime: p.examDateTime,
-        studyTime: p.modifiedDateTime,
+        studyTime: p.examDateTime,
         modifiedDate: p.modifiedDate,
         modifiedDateTime: p.modifiedDateTime,
         modifiedTime: p.modifiedTime,

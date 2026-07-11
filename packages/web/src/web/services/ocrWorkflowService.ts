@@ -72,13 +72,13 @@ function attachOcrMatchDebug(debugInfo: OCRImportDebugInfo | null, result: Pipel
             matched.source.procedureName ?? matched.source.cleanedExamName ?? matched.source.examTitle,
             selected[0].cptCode,
             matched.source.modifiedDate ?? matched.source.modifiedDateTime?.slice(0, 10) ?? matched.source.studyDate,
-            matched.source.modifiedDateTime ?? matched.source.studyTime,
+            matched.source.modifiedDateTime,
             matched.source.accessionNumber,
             selected[0].modality,
             {
               cptCodes: selected.map((candidate) => candidate.cptCode),
               performedDateTime: matched.source.examDateTime ?? null,
-              modifiedDateTime: matched.source.modifiedDateTime ?? matched.source.studyTime,
+              modifiedDateTime: matched.source.modifiedDateTime,
             },
           )
         : null;

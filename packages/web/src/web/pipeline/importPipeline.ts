@@ -125,7 +125,7 @@ export function resolvePowerScribeProductivityDates(study: ImportedStudy, fallba
   modifiedDateTime: string | null;
 } {
   const performedDate = study.examDate ?? study.examDateTime?.slice(0, 10) ?? study.studyDate ?? fallbackLogDate;
-  const modifiedDateTime = study.modifiedDateTime ?? study.studyTime ?? null;
+  const modifiedDateTime = study.modifiedDateTime ?? null;
   const productivityDate = study.modifiedDate ?? modifiedDateTime?.slice(0, 10) ?? study.studyDate ?? fallbackLogDate;
   return { performedDate, productivityDate, modifiedDateTime };
 }
@@ -166,9 +166,9 @@ export async function runImportPipeline(
     cptCodes: selectedDuplicateCptCodes(candidates, study.cpt),
     modifier: candidates[0]?.modifier ?? null,
     logDate: study.modifiedDate ?? study.modifiedDateTime?.slice(0, 10) ?? study.studyDate ?? logDate,
-    studyDateTime: study.modifiedDateTime ?? study.studyTime,
+    studyDateTime: study.modifiedDateTime,
     performedDateTime: study.examDateTime ?? null,
-    modifiedDateTime: study.modifiedDateTime ?? study.studyTime,
+    modifiedDateTime: study.modifiedDateTime,
     studyDate: study.studyDate ?? null,
     accessionNumber: study.accessionNumber,
     rowIndex: study.rowIndex ?? null,

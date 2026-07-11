@@ -639,6 +639,68 @@ function Recombine-Rows($ProcedureOcr, $ExamOcr, $ModifiedOcr) {
   return $rows
 }
 
+function Band-Rows($ProcedureOcr, $ExamOcr, $ModifiedOcr) {
+  $anchorLines = @($ModifiedOcr.lines | Where-Object { Parse-DateTimeText $_.text } | Sort-Object centerY)
+  if ($anchorLines.Count -eq 0) {
+    return Recombine-Rows $ProcedureOcr $ExamOcr $ModifiedOcr
+  }
+
+  $pitches = @()
+  for ($i = 1; $i -lt $anchorLines.Count; $i++) {
+    $pitches += ($anchorLines[$i].centerY - $anchorLines[$i - 1].centerY)
+  }
+  $medianPitch = if ($pitches.Count -gt 0) { Median ([double[]]$pitches) } else { 40.0 }
+
+  $rows = @()
+  for ($i = 0; $i -lt $anchorLines.Count; $i++) {
+    $anchor = $anchorLines[$i]
+    $lower = if ($i -eq 0) { [double]::NegativeInfinity } else { ($anchorLines[$i - 1].centerY + $anchor.centerY) / 2.0 }
+    $upper = if ($i -eq $anchorLines.Count - 1) { [double]::PositiveInfinity } else { ($anchor.centerY + $anchorLines[$i + 1].centerY) / 2.0 }
+
+    $procedureLines = @($ProcedureOcr.lines | Where-Object { $_.centerY -gt $lower -and $_.centerY -le $upper } | Sort-Object centerY)
+    $examLines = @($ExamOcr.lines | Where-Object { $_.centerY -gt $lower -and $_.centerY -le $upper } | Sort-Object centerY)
+
+    $rawProcedure = (($procedureLines | ForEach-Object { $_.text }) -join ' ').Trim()
+    $rawExam = (($examLines | ForEach-Object { $_.text }) -join ' ').Trim()
+    $rawModified = $anchor.text
+
+    $procedureName = Clean-Procedure $rawProcedure
+    $examDateTime = Parse-DateTimeText $rawExam
+    $modifiedDateTime = Parse-DateTimeText $rawModified
+
+    $confidence = 0.25
+    if ($procedureName -ne 'UNCLEAR POWERSCRIBE ROW') { $confidence += 0.35 }
+    if ($examDateTime) { $confidence += 0.20 }
+    if ($modifiedDateTime) { $confidence += 0.20 }
+    $confidence = [Math]::Max(0.0, [Math]::Min(1.0, $confidence))
+
+    $reviewReasons = @()
+    if ($procedureName -eq 'UNCLEAR POWERSCRIBE ROW') { $reviewReasons += 'Unclear PowerScribe procedure text' }
+    if (-not $examDateTime) { $reviewReasons += 'Missing or unclear Exam Date' }
+    if (-not $modifiedDateTime) { $reviewReasons += 'Missing or unclear Modified Date' }
+    if ($i -gt 0) {
+      $gap = $anchor.centerY - $anchorLines[$i - 1].centerY
+      if ($gap -gt $medianPitch * 1.6) {
+        $reviewReasons += 'Possible undetected row above this one'
+      }
+    }
+    $needsReview = $reviewReasons.Count -gt 0 -or $confidence -lt 0.75
+
+    $rows += [pscustomobject]@{
+      procedureName = $procedureName
+      examDateTime = $examDateTime
+      modifiedDateTime = $modifiedDateTime
+      rawProcedureText = $rawProcedure
+      rawExamDateText = $rawExam
+      rawModifiedText = $rawModified
+      confidence = [Math]::Round($confidence, 3)
+      needsReview = $needsReview
+      reviewReason = if ($reviewReasons.Count -gt 0) { $reviewReasons -join '; ' } else { $null }
+    }
+  }
+  return $rows
+}
+
 function Find-PowerScribeHeaderAnchors($Words) {
   $procedureCandidates = $Words | Where-Object { $_.text -imatch '^Procedure$' }
   foreach ($proc in $procedureCandidates) {
@@ -783,7 +845,7 @@ try {
     $procedureOcr = Invoke-Ocr $procedureBitmap
     $examOcr = Invoke-Ocr $examBitmap
     $modifiedOcr = Invoke-Ocr $modifiedBitmap
-    $rows = Recombine-Rows $procedureOcr $examOcr $modifiedOcr
+    $rows = Band-Rows $procedureOcr $examOcr $modifiedOcr
     $rows | ConvertTo-Json -Depth 8 -Compress
   } finally {
     $procedureBitmap.Dispose()
