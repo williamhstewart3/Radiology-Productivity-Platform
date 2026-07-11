@@ -48,6 +48,10 @@ describe('browserVisionService structured output handling', () => {
     expect(() => extractJsonFromModelText('XR CHEST PORTABLE 7/1/2026 5:18 PM')).toThrow(/parseable JSON/);
   });
 
+  test('unanswerable model output is reported as an unsuitable model result', () => {
+    expect(() => extractJsonFromModelText('unanswerable')).toThrow(/could not read the PowerScribe table/);
+  });
+
   test('salvages line-oriented table text into review rows without OCR fallback', () => {
     const { rows, invalidRowCount } = salvageBrowserVisionRowsFromText([
       '1 XR CHEST PORTABLE 7/1/2026 5:18 PM 7/2/2026 7:59 AM',

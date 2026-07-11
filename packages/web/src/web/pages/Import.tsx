@@ -837,6 +837,7 @@ export function Import({ onImported }: ImportProps) {
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
     } catch (error) {
       setBrowserVisionStatus('extraction_failed');
+      setBrowserVisionProgress(null);
       setError(error instanceof Error ? error.message : 'Browser Vision extraction failed');
       pushToast('danger', 'Browser Vision failed', error instanceof Error ? `${error.message} Retry or switch to Ollama Vision.` : 'Retry or switch to Ollama Vision.');
     } finally {
@@ -2289,7 +2290,7 @@ export function Import({ onImported }: ImportProps) {
                 {browserVisionStatus !== 'uninitialized' && (
                   <span>
                     {browserVisionStatus.replace(/_/g, ' ')}
-                    {browserVisionProgress != null ? ` · ${Math.round(browserVisionProgress * 100)}%` : ''}
+                    {browserVisionProgress != null && (browserVisionStatus === 'downloading' || browserVisionStatus === 'loading') ? ` · ${Math.round(browserVisionProgress * 100)}%` : ''}
                   </span>
                 )}
                 <details className="relative">

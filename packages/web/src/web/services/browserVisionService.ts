@@ -232,6 +232,9 @@ export async function disposeVisionModel(): Promise<void> {
 
 export function extractJsonFromModelText(text: string): unknown {
   const trimmed = text.trim();
+  if (/^(?:unanswerable|unknown|n\/a|none|no answer)$/i.test(trimmed)) {
+    throw new Error(`Browser Vision model could not read the PowerScribe table. Raw output: ${trimmed}`);
+  }
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const candidate = fenced?.[1]?.trim() ?? trimmed;
   try {
@@ -449,7 +452,11 @@ export async function extractPowerScribeRows(imageBlob: Blob, options: {
       rows = salvaged.rows;
       invalidRowCount = salvaged.invalidRowCount;
       if (rows.length === 0) {
-        throw new Error(`Browser Vision did not return parseable JSON. Raw output: ${rawModelOutput.slice(0, 500) || '(empty)'}`);
+        const rawPreview = rawModelOutput.slice(0, 500) || '(empty)';
+        if (/^(?:unanswerable|unknown|n\/a|none|no answer)$/i.test(rawModelOutput.trim())) {
+          throw new Error(`Browser Vision model could not read the PowerScribe table. Raw output: ${rawPreview}. This browser model is not suitable for this screenshot; try Ollama Vision or a stronger local multimodal model.`);
+        }
+        throw new Error(`Browser Vision did not return structured rows. Raw output: ${rawPreview}`);
       }
     }
     const warning =
