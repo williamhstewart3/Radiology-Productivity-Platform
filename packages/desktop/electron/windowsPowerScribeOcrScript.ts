@@ -51,15 +51,33 @@ function Normalize-Rect($Rect) {
 
 function Bound-ToStudyListArea($Rect) {
   $bounded = Normalize-Rect $Rect
-  $minX = 0.18
-  $minY = 0.20
   $maxRight = 0.98
-  $maxBottom = 0.88
-  $x = [Math]::Max($minX, $bounded.x)
-  $y = [Math]::Max($minY, $bounded.y)
-  $right = [Math]::Min($maxRight, [Math]::Max($x + 0.45, $bounded.x + $bounded.width))
-  $bottom = [Math]::Min($maxBottom, [Math]::Max($y + 0.24, $bounded.y + $bounded.height))
-  return Normalize-Rect ([pscustomobject]@{ x = $x; y = $y; width = $right - $x; height = $bottom - $y })
+  $right = [Math]::Min($maxRight, $bounded.x + $bounded.width)
+  return Normalize-Rect ([pscustomobject]@{ x = $bounded.x; y = $bounded.y; width = $right - $bounded.x; height = $bounded.height })
+}
+
+function Get-OtsuThreshold([int[]] $Histogram, [int] $Total) {
+  $sumAll = 0.0
+  for ($i = 0; $i -lt 256; $i++) { $sumAll += $i * $Histogram[$i] }
+  $sumB = 0.0
+  $weightB = 0
+  $maxVariance = 0.0
+  $threshold = 128
+  for ($t = 0; $t -lt 256; $t++) {
+    $weightB += $Histogram[$t]
+    if ($weightB -eq 0) { continue }
+    $weightF = $Total - $weightB
+    if ($weightF -eq 0) { break }
+    $sumB += $t * $Histogram[$t]
+    $meanB = $sumB / $weightB
+    $meanF = ($sumAll - $sumB) / $weightF
+    $variance = $weightB * $weightF * ($meanB - $meanF) * ($meanB - $meanF)
+    if ($variance -gt $maxVariance) {
+      $maxVariance = $variance
+      $threshold = $t
+    }
+  }
+  return $threshold
 }
 
 function Smooth-Values([double[]] $Values, [int] $Radius) {
@@ -135,27 +153,48 @@ function Detect-TableCrop([System.Drawing.Bitmap] $Bitmap) {
   $graphics.Dispose()
 
   try {
-    $rowSignal = New-Object double[] $height
-    $colSignal = New-Object double[] $width
-    $xMin = [int][Math]::Floor($width * 0.18)
-    $xMax = [int][Math]::Floor($width * 0.98)
-    $yMin = [int][Math]::Floor($height * 0.20)
-    $yMax = [int][Math]::Floor($height * 0.88)
-
     $locked = Lock-BitmapBytes $small
     $bytes = $locked.bytes
     $stride = $locked.stride
 
-    for ($y = $yMin + 1; $y -lt $yMax; $y++) {
-      for ($x = $xMin + 1; $x -lt $xMax; $x++) {
+    $luminance = New-Object double[] ($width * $height)
+    $histogram = New-Object int[] 256
+    for ($y = 0; $y -lt $height; $y++) {
+      for ($x = 0; $x -lt $width; $x++) {
         $offset = $y * $stride + $x * 4
-        $leftOffset = $y * $stride + ($x - 1) * 4
-        $upOffset = ($y - 1) * $stride + $x * 4
         $lum = ($bytes[$offset + 2] + $bytes[$offset + 1] + $bytes[$offset]) / 3.0
-        $leftLum = ($bytes[$leftOffset + 2] + $bytes[$leftOffset + 1] + $bytes[$leftOffset]) / 3.0
-        $upLum = ($bytes[$upOffset + 2] + $bytes[$upOffset + 1] + $bytes[$upOffset]) / 3.0
+        $luminance[$y * $width + $x] = $lum
+        $bucket = [Math]::Max(0, [Math]::Min(255, [int][Math]::Round($lum)))
+        $histogram[$bucket] += 1
+      }
+    }
+    $darkThreshold = Get-OtsuThreshold $histogram ($width * $height)
+
+    $gradients = New-Object System.Collections.Generic.List[double]
+    for ($y = 1; $y -lt $height; $y++) {
+      for ($x = 1; $x -lt $width; $x++) {
+        $lum = $luminance[$y * $width + $x]
+        $leftLum = $luminance[$y * $width + $x - 1]
+        $upLum = $luminance[($y - 1) * $width + $x]
+        $gradients.Add([Math]::Max([Math]::Abs($lum - $leftLum), [Math]::Abs($lum - $upLum)))
+      }
+    }
+    $contrastThreshold = Percentile ([double[]]$gradients.ToArray()) 0.80
+
+    $rowSignal = New-Object double[] $height
+    $colSignal = New-Object double[] $width
+    $xMin = 1
+    $xMax = $width - 1
+    $yMin = 1
+    $yMax = $height - 1
+
+    for ($y = $yMin; $y -lt $yMax; $y++) {
+      for ($x = $xMin; $x -lt $xMax; $x++) {
+        $lum = $luminance[$y * $width + $x]
+        $leftLum = $luminance[$y * $width + $x - 1]
+        $upLum = $luminance[($y - 1) * $width + $x]
         $contrast = [Math]::Max([Math]::Abs($lum - $leftLum), [Math]::Abs($lum - $upLum))
-        if ($contrast -gt 18 -or $lum -lt 88) {
+        if ($contrast -gt $contrastThreshold -or $lum -lt $darkThreshold) {
           $rowSignal[$y] += 1
           $colSignal[$x] += 1
         }
@@ -181,8 +220,8 @@ function Detect-TableCrop([System.Drawing.Bitmap] $Bitmap) {
     $detected = Bound-ToStudyListArea ([pscustomobject]@{
       x = ($colBand.start / [double]$width) - 0.02
       y = ($rowBand.start / [double]$height) - 0.015
-      width = [Math]::Min(0.8, ([Math]::Min($width - 1, $colBand.end + [Math]::Round($width * 0.035)) / [double]$width) - (($colBand.start / [double]$width) - 0.02))
-      height = [Math]::Min(0.68, ([Math]::Min($height - 1, $rowBand.end + [Math]::Round($height * 0.025)) / [double]$height) - (($rowBand.start / [double]$height) - 0.015))
+      width = ([Math]::Min($width - 1, $colBand.end + [Math]::Round($width * 0.035)) / [double]$width) - (($colBand.start / [double]$width) - 0.02)
+      height = ([Math]::Min($height - 1, $rowBand.end + [Math]::Round($height * 0.025)) / [double]$height) - (($rowBand.start / [double]$height) - 0.015)
     })
 
     $rowCoverage = ($rowBand.end - $rowBand.start + 1) / [Math]::Max(1, $yMax - $yMin)
@@ -211,33 +250,42 @@ function Get-FallbackColumnLayout {
   }
 }
 
-function Best-GutterBand([double[]] $Values, [double] $MinRatio, [double] $MaxRatio, [double] $Threshold) {
-  $minIndex = [Math]::Max(0, [int][Math]::Floor($Values.Length * $MinRatio))
-  $maxIndex = [Math]::Min($Values.Length - 1, [int][Math]::Ceiling($Values.Length * $MaxRatio))
+function Get-TextMassMidpointIndex([double[]] $Values) {
+  $total = 0.0
+  foreach ($v in $Values) { $total += $v }
+  if ($total -le 0) { return [int][Math]::Floor($Values.Length / 2) }
+  $half = $total / 2.0
+  $cumulative = 0.0
+  for ($i = 0; $i -lt $Values.Length; $i++) {
+    $cumulative += $Values[$i]
+    if ($cumulative -ge $half) { return $i }
+  }
+  return $Values.Length - 1
+}
+
+function Find-LowInkValleys([double[]] $Values, [int] $MinIndex, [int] $MaxIndex, [double] $Threshold) {
   $minWidth = [Math]::Max(6, [int][Math]::Round($Values.Length * 0.012))
-  $best = $null
+  $valleys = @()
   $start = $null
   $sum = 0.0
 
-  for ($i = $minIndex; $i -le $maxIndex; $i++) {
+  for ($i = $MinIndex; $i -le $MaxIndex; $i++) {
     $low = $Values[$i] -le $Threshold
     if ($low -and $null -eq $start) {
       $start = $i
       $sum = 0.0
     }
     if ($low) { $sum += $Values[$i] }
-    if ((-not $low -or $i -eq $maxIndex) -and $null -ne $start) {
+    if ((-not $low -or $i -eq $MaxIndex) -and $null -ne $start) {
       $end = if ($low) { $i } else { $i - 1 }
       $width = $end - $start + 1
       if ($width -ge $minWidth) {
         $average = $sum / [Math]::Max(1, $width)
         $score = $width * [Math]::Max(0.0001, $Threshold - $average)
-        if ($null -eq $best -or $score -gt $best.score) {
-          $best = [pscustomobject]@{
-            center = (($start + $end) / 2.0) / [double]$Values.Length
-            width = $width / [double]$Values.Length
-            score = $score
-          }
+        $valleys += [pscustomobject]@{
+          center = (($start + $end) / 2.0) / [double]$Values.Length
+          width = $width / [double]$Values.Length
+          score = $score
         }
       }
       $start = $null
@@ -245,7 +293,7 @@ function Best-GutterBand([double[]] $Values, [double] $MinRatio, [double] $MaxRa
     }
   }
 
-  return $best
+  return $valleys
 }
 
 function Detect-ColumnLayoutFromProjection([double[]] $Projection) {
@@ -253,16 +301,17 @@ function Detect-ColumnLayoutFromProjection([double[]] $Projection) {
 
   $smoothRadius = [Math]::Max(2, [int][Math]::Round($Projection.Length * 0.006))
   $smoothed = Smooth-Values $Projection $smoothRadius
-  $windowStart = [Math]::Floor($smoothed.Length * 0.10)
-  $windowEnd = [Math]::Floor($smoothed.Length * 0.96)
-  $window = [double[]]($smoothed[$windowStart..$windowEnd])
-  $lowThreshold = [Math]::Max(0.0015, (Percentile $window 0.24))
-  $firstGutter = Best-GutterBand $smoothed 0.45 0.68 $lowThreshold
-  $secondGutter = Best-GutterBand $smoothed 0.66 0.90 $lowThreshold
+  $lowThreshold = [Math]::Max(0.0015, (Percentile $smoothed 0.24))
+  $midpointIndex = Get-TextMassMidpointIndex $smoothed
+  $valleys = @(Find-LowInkValleys $smoothed $midpointIndex ($smoothed.Length - 1) $lowThreshold)
+  $topValleys = @($valleys | Sort-Object -Property width -Descending | Select-Object -First 2 | Sort-Object -Property center)
 
-  if ($null -eq $firstGutter -or $null -eq $secondGutter -or ($secondGutter.center - $firstGutter.center) -lt 0.10) {
+  if ($topValleys.Count -lt 2 -or ($topValleys[1].center - $topValleys[0].center) -lt 0.10) {
     return Get-FallbackColumnLayout
   }
+
+  $firstGutter = $topValleys[0]
+  $secondGutter = $topValleys[1]
 
   $padding = 0.012
   $left = 0.13
@@ -317,13 +366,34 @@ function Detect-ColumnLayout([System.Drawing.Bitmap] $Bitmap, $TableRect) {
     $bytes = $locked.bytes
     $stride = $locked.stride
 
+    $luminance = New-Object double[] ($width * $height)
+    $histogram = New-Object int[] 256
+    for ($y = $yMin; $y -lt $yMax; $y++) {
+      for ($x = 0; $x -lt $width; $x++) {
+        $offset = $y * $stride + $x * 4
+        $lum = $bytes[$offset + 2] * 0.299 + $bytes[$offset + 1] * 0.587 + $bytes[$offset] * 0.114
+        $luminance[$y * $width + $x] = $lum
+        $bucket = [Math]::Max(0, [Math]::Min(255, [int][Math]::Round($lum)))
+        $histogram[$bucket] += 1
+      }
+    }
+    $darkThreshold = Get-OtsuThreshold $histogram (($yMax - $yMin) * $width)
+
+    $gradients = New-Object System.Collections.Generic.List[double]
+    for ($y = $yMin + 1; $y -lt $yMax; $y++) {
+      for ($x = 1; $x -lt $width; $x++) {
+        $lum = $luminance[$y * $width + $x]
+        $leftLum = $luminance[$y * $width + $x - 1]
+        $gradients.Add([Math]::Abs($lum - $leftLum))
+      }
+    }
+    $contrastThreshold = Percentile ([double[]]$gradients.ToArray()) 0.80
+
     for ($y = $yMin + 1; $y -lt $yMax; $y++) {
       for ($x = 1; $x -lt ($width - 1); $x++) {
-        $offset = $y * $stride + $x * 4
-        $leftOffset = $y * $stride + ($x - 1) * 4
-        $lum = $bytes[$offset + 2] * 0.299 + $bytes[$offset + 1] * 0.587 + $bytes[$offset] * 0.114
-        $leftLum = $bytes[$leftOffset + 2] * 0.299 + $bytes[$leftOffset + 1] * 0.587 + $bytes[$leftOffset] * 0.114
-        if ($lum -lt 150 -or [Math]::Abs($lum - $leftLum) -gt 28) {
+        $lum = $luminance[$y * $width + $x]
+        $leftLum = $luminance[$y * $width + $x - 1]
+        if ($lum -lt $darkThreshold -or [Math]::Abs($lum - $leftLum) -gt $contrastThreshold) {
           $projection[$x] += 1
         }
       }

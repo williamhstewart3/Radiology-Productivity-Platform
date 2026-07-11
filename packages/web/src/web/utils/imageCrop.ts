@@ -52,20 +52,79 @@ function normalizeCrop(rect: RelativeCropRect): RelativeCropRect {
 
 function boundToStudyListArea(rect: RelativeCropRect): RelativeCropRect {
   const bounded = normalizeCrop(rect);
-  const minX = 0.18;
-  const minY = 0.2;
   const maxRight = 0.98;
-  const maxBottom = 0.965;
-  const x = Math.max(minX, bounded.x);
-  const y = Math.max(minY, bounded.y);
-  const right = Math.min(maxRight, Math.max(x + 0.45, bounded.x + bounded.width));
-  const bottom = Math.min(maxBottom, Math.max(y + 0.24, bounded.y + bounded.height));
+  const right = Math.min(maxRight, bounded.x + bounded.width);
   return normalizeCrop({
-    x,
-    y,
-    width: right - x,
-    height: bottom - y,
+    x: bounded.x,
+    y: bounded.y,
+    width: right - bounded.x,
+    height: bounded.height,
   });
+}
+
+function otsuThreshold(histogram: number[], total: number): number {
+  let sumAll = 0;
+  for (let i = 0; i < 256; i++) sumAll += i * histogram[i];
+  let sumB = 0;
+  let weightB = 0;
+  let maxVariance = 0;
+  let threshold = 128;
+  for (let t = 0; t < 256; t++) {
+    weightB += histogram[t];
+    if (weightB === 0) continue;
+    const weightF = total - weightB;
+    if (weightF === 0) break;
+    sumB += t * histogram[t];
+    const meanB = sumB / weightB;
+    const meanF = (sumAll - sumB) / weightF;
+    const variance = weightB * weightF * (meanB - meanF) * (meanB - meanF);
+    if (variance > maxVariance) {
+      maxVariance = variance;
+      threshold = t;
+    }
+  }
+  return threshold;
+}
+
+function textMassMidpointIndex(values: number[]): number {
+  const total = values.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return Math.floor(values.length / 2);
+  const half = total / 2;
+  let cumulative = 0;
+  for (let i = 0; i < values.length; i++) {
+    cumulative += values[i];
+    if (cumulative >= half) return i;
+  }
+  return values.length - 1;
+}
+
+function findLowInkValleys(values: number[], minIndex: number, maxIndex: number, threshold: number): Array<{ center: number; width: number; score: number }> {
+  const minWidth = Math.max(6, Math.round(values.length * 0.012));
+  const valleys: Array<{ center: number; width: number; score: number }> = [];
+  let start: number | null = null;
+  let sum = 0;
+
+  for (let i = minIndex; i <= maxIndex; i++) {
+    const low = values[i] <= threshold;
+    if (low && start === null) {
+      start = i;
+      sum = 0;
+    }
+    if (low) sum += values[i];
+    if ((!low || i === maxIndex) && start !== null) {
+      const end = low ? i : i - 1;
+      const width = end - start + 1;
+      if (width >= minWidth) {
+        const average = sum / Math.max(1, width);
+        const score = width * Math.max(0.0001, threshold - average);
+        valleys.push({ center: (start + end) / 2 / values.length, width: width / values.length, score });
+      }
+      start = null;
+      sum = 0;
+    }
+  }
+
+  return valleys;
 }
 
 function smooth(values: number[], radius: number): number[] {
@@ -134,24 +193,44 @@ function detectPowerScribeStudyListCropFromBitmap(bitmap: ImageBitmap): Detected
   }
 
   const { data, width, height } = image;
+  const luminance = new Float64Array(width * height);
+  const histogram = new Array<number>(256).fill(0);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const lum = (data[index] + data[index + 1] + data[index + 2]) / 3;
+      luminance[y * width + x] = lum;
+      histogram[Math.max(0, Math.min(255, Math.round(lum)))] += 1;
+    }
+  }
+  const darkThreshold = otsuThreshold(histogram, width * height);
+
+  const gradients: number[] = [];
+  for (let y = 1; y < height; y++) {
+    for (let x = 1; x < width; x++) {
+      const lum = luminance[y * width + x];
+      const leftLum = luminance[y * width + x - 1];
+      const upLum = luminance[(y - 1) * width + x];
+      gradients.push(Math.max(Math.abs(lum - leftLum), Math.abs(lum - upLum)));
+    }
+  }
+  const contrastThreshold = percentile(gradients, 0.8);
+
   const rowSignal = new Array<number>(height).fill(0);
   const colSignal = new Array<number>(width).fill(0);
 
-  const xMin = Math.floor(width * 0.18);
-  const xMax = Math.floor(width * 0.98);
-  const yMin = Math.floor(height * 0.2);
-  const yMax = Math.floor(height * 0.965);
+  const xMin = 1;
+  const xMax = width - 1;
+  const yMin = 1;
+  const yMax = height - 1;
 
-  for (let y = yMin + 1; y < yMax; y++) {
-    for (let x = xMin + 1; x < xMax; x++) {
-      const index = (y * width + x) * 4;
-      const leftIndex = (y * width + x - 1) * 4;
-      const upIndex = ((y - 1) * width + x) * 4;
-      const luminance = (data[index] + data[index + 1] + data[index + 2]) / 3;
-      const leftLum = (data[leftIndex] + data[leftIndex + 1] + data[leftIndex + 2]) / 3;
-      const upLum = (data[upIndex] + data[upIndex + 1] + data[upIndex + 2]) / 3;
-      const contrast = Math.max(Math.abs(luminance - leftLum), Math.abs(luminance - upLum));
-      const content = contrast > 18 || luminance < 88;
+  for (let y = yMin; y < yMax; y++) {
+    for (let x = xMin; x < xMax; x++) {
+      const lum = luminance[y * width + x];
+      const leftLum = luminance[y * width + x - 1];
+      const upLum = luminance[(y - 1) * width + x];
+      const contrast = Math.max(Math.abs(lum - leftLum), Math.abs(lum - upLum));
+      const content = contrast > contrastThreshold || lum < darkThreshold;
       if (content) {
         rowSignal[y] += 1;
         colSignal[x] += 1;
@@ -173,8 +252,8 @@ function detectPowerScribeStudyListCropFromBitmap(bitmap: ImageBitmap): Detected
   const detected = boundToStudyListArea({
     x: colBand.start / width - 0.02,
     y: rowBand.start / height - 0.015,
-    width: Math.min(0.8, (Math.min(width - 1, colBand.end + Math.round(width * 0.035)) / width) - (colBand.start / width - 0.02)),
-    height: Math.min(0.78, (Math.min(height - 1, rowBand.end + Math.round(height * 0.025)) / height) - (rowBand.start / height - 0.015)),
+    width: (Math.min(width - 1, colBand.end + Math.round(width * 0.035)) / width) - (colBand.start / width - 0.02),
+    height: (Math.min(height - 1, rowBand.end + Math.round(height * 0.025)) / height) - (rowBand.start / height - 0.015),
   });
 
   const rowCoverage = (rowBand.end - rowBand.start + 1) / Math.max(1, yMax - yMin);
@@ -296,57 +375,22 @@ function fallbackColumnLayout(): PowerScribeColumnLayout {
   };
 }
 
-function bestGutterBand(
-  values: number[],
-  minRatio: number,
-  maxRatio: number,
-  threshold: number,
-): { center: number; width: number; score: number } | null {
-  const minIndex = Math.max(0, Math.floor(values.length * minRatio));
-  const maxIndex = Math.min(values.length - 1, Math.ceil(values.length * maxRatio));
-  const minWidth = Math.max(6, Math.round(values.length * 0.012));
-  let best: { center: number; width: number; score: number } | null = null;
-  let start: number | null = null;
-  let sum = 0;
-
-  for (let i = minIndex; i <= maxIndex; i++) {
-    const low = values[i] <= threshold;
-    if (low && start === null) {
-      start = i;
-      sum = 0;
-    }
-    if (low) sum += values[i];
-    if ((!low || i === maxIndex) && start !== null) {
-      const end = low ? i : i - 1;
-      const width = end - start + 1;
-      if (width >= minWidth) {
-        const average = sum / Math.max(1, width);
-        const score = width * Math.max(0.0001, threshold - average);
-        if (!best || score > best.score) {
-          best = { center: (start + end) / 2 / values.length, width: width / values.length, score };
-        }
-      }
-      start = null;
-      sum = 0;
-    }
-  }
-
-  return best;
-}
-
 function detectPowerScribeColumnLayoutFromProjection(projection: number[]): PowerScribeColumnLayout {
   if (projection.length < 80) return fallbackColumnLayout();
 
   const smoothed = smooth(projection, Math.max(2, Math.round(projection.length * 0.006)));
-  const searchValues = smoothed.slice(Math.floor(smoothed.length * 0.10), Math.floor(smoothed.length * 0.96));
-  const lowThreshold = Math.max(0.0015, percentile(searchValues, 0.24));
-  const firstGutter = bestGutterBand(smoothed, 0.45, 0.68, lowThreshold);
-  const secondGutter = bestGutterBand(smoothed, 0.66, 0.90, lowThreshold);
+  const lowThreshold = Math.max(0.0015, percentile(smoothed, 0.24));
+  const midpointIndex = textMassMidpointIndex(smoothed);
+  const valleys = findLowInkValleys(smoothed, midpointIndex, smoothed.length - 1, lowThreshold)
+    .sort((a, b) => b.width - a.width)
+    .slice(0, 2)
+    .sort((a, b) => a.center - b.center);
 
-  if (!firstGutter || !secondGutter || secondGutter.center - firstGutter.center < 0.10) {
+  if (valleys.length < 2 || valleys[1].center - valleys[0].center < 0.10) {
     return fallbackColumnLayout();
   }
 
+  const [firstGutter, secondGutter] = valleys;
   const padding = 0.012;
   const left = 0.13;
   const right = 0.99;
@@ -389,13 +433,33 @@ function detectPowerScribeColumnLayoutFromBitmap(bitmap: ImageBitmap, tableRect:
   const yMin = Math.floor(height * 0.06);
   const yMax = Math.floor(height * 0.98);
 
+  const luminance = new Float64Array(width * height);
+  const histogram = new Array<number>(256).fill(0);
+  for (let y = yMin; y < yMax; y++) {
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 4;
+      const lum = imageData[offset] * 0.299 + imageData[offset + 1] * 0.587 + imageData[offset + 2] * 0.114;
+      luminance[y * width + x] = lum;
+      histogram[Math.max(0, Math.min(255, Math.round(lum)))] += 1;
+    }
+  }
+  const darkThreshold = otsuThreshold(histogram, (yMax - yMin) * width);
+
+  const gradients: number[] = [];
+  for (let y = yMin + 1; y < yMax; y++) {
+    for (let x = 1; x < width; x++) {
+      const lum = luminance[y * width + x];
+      const leftLum = luminance[y * width + x - 1];
+      gradients.push(Math.abs(lum - leftLum));
+    }
+  }
+  const contrastThreshold = percentile(gradients, 0.8);
+
   for (let y = yMin + 1; y < yMax; y++) {
     for (let x = 1; x < width - 1; x++) {
-      const offset = (y * width + x) * 4;
-      const leftOffset = (y * width + x - 1) * 4;
-      const lum = imageData[offset] * 0.299 + imageData[offset + 1] * 0.587 + imageData[offset + 2] * 0.114;
-      const leftLum = imageData[leftOffset] * 0.299 + imageData[leftOffset + 1] * 0.587 + imageData[leftOffset + 2] * 0.114;
-      if (lum < 150 || Math.abs(lum - leftLum) > 28) {
+      const lum = luminance[y * width + x];
+      const leftLum = luminance[y * width + x - 1];
+      if (lum < darkThreshold || Math.abs(lum - leftLum) > contrastThreshold) {
         projection[x] += 1;
       }
     }

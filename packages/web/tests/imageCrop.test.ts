@@ -44,6 +44,28 @@ describe('PowerScribe column crop detection', () => {
     expect(bounded.y + bounded.height).toBeGreaterThanOrEqual(0.95);
   });
 
+  test('no ratio constant caps the table bottom, even past the old 0.965 clamp', () => {
+    const bounded = __testBoundToStudyListArea({
+      x: 0.1,
+      y: 0.05,
+      width: 0.85,
+      height: 0.94,
+    });
+
+    expect(bounded.y + bounded.height).toBeCloseTo(0.99, 5);
+  });
+
+  test('a detection reaching the very edge of the frame is not clamped to a fixed ratio', () => {
+    const bounded = __testBoundToStudyListArea({
+      x: 0.15,
+      y: 0.1,
+      width: 0.83,
+      height: 0.89,
+    });
+
+    expect(bounded.y + bounded.height).toBeCloseTo(0.99, 5);
+  });
+
   test('detects Procedure, Exam Date, and Modified columns from vertical gutters', () => {
     const layout = __testDetectPowerScribeColumnLayoutFromProjection(syntheticThreeColumnProjection());
 
