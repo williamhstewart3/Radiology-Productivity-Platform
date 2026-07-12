@@ -40,6 +40,7 @@ import {
   type AssistantResponse,
 } from '../services/aiReviewAssistantService';
 import { processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { dedupeReasons } from '../utils/reviewReasons';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { CorrectionAction, FeedbackEvent, FeedbackEventCategory, DuplicateStatus, MatchCandidate, UserSettings } from '../types';
 
@@ -353,32 +354,34 @@ function StructuredDetails({
   const topCandidate = selected[0] ?? row.candidates[0];
   const normalized = topCandidate?.explanation?.normalizedText ?? normalizeRadiologyDescription(procedureName);
   const rawOcr = row.source.parserRawLine ?? row.source.examTitle;
-  const detailRows = [
-    ['Modality', row.source.modality ?? topCandidate?.modality ?? 'Unavailable'],
-    ['Anatomy/body regions', structuredSourceValue(row.source, ['bodyRegions', 'bodyRegion', 'anatomy']) ?? 'Unavailable'],
-    ['Contrast', structuredSourceValue(row.source, ['contrast', 'contrastStatus']) ?? 'Unavailable'],
-    ['CPT(s)', selected.length > 0 ? selected.map((candidate) => candidate.cptCode).join(' + ') : 'Unselected'],
-    ['Exam date', row.source.examDate ?? row.source.studyDate ?? 'Unavailable'],
-    ['Exam time', row.source.examTime ?? 'Unavailable'],
-    ['Modified date', row.source.modifiedDate ?? row.source.modifiedDateTime?.slice(0, 10) ?? 'Unavailable'],
-    ['Modified time', row.source.modifiedTime ?? row.source.modifiedDateTime?.slice(11, 16) ?? 'Unavailable'],
-    ['Review reasons', [row.reviewReason, row.source.parserReviewReason, reviewReason].filter(Boolean).join(' | ') || 'None'],
-  ];
+  const dedupedReviewReason = dedupeReasons(row.reviewReason, row.source.parserReviewReason, reviewReason);
+  const detailRows: Array<[string, string]> = [
+    ['Modality', row.source.modality ?? topCandidate?.modality ?? ''],
+    ['Anatomy/body regions', structuredSourceValue(row.source, ['bodyRegions', 'bodyRegion', 'anatomy']) ?? ''],
+    ['Contrast', structuredSourceValue(row.source, ['contrast', 'contrastStatus']) ?? ''],
+    ['CPT(s)', selected.length > 0 ? selected.map((candidate) => candidate.cptCode).join(' + ') : ''],
+    ['Exam date', row.source.examDate ?? row.source.studyDate ?? ''],
+    ['Exam time', row.source.examTime ?? ''],
+    ['Modified date', row.source.modifiedDate ?? row.source.modifiedDateTime?.slice(0, 10) ?? ''],
+    ['Modified time', row.source.modifiedTime ?? row.source.modifiedDateTime?.slice(11, 16) ?? ''],
+    ['Accession', shouldShowAccession(row.source.accessionNumber) ? (row.source.accessionNumber as string) : ''],
+    ['Source row', row.source.rowIndex ?? ''],
+    ['Review reasons', dedupedReviewReason ?? ''],
+  ].filter(([, value]) => value.trim().length > 0);
 
   return (
-    <details className="mb-2 rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2 text-xs">
-      <summary className="cursor-pointer select-none text-[11px] font-semibold uppercase tracking-wide text-slate-400 transition-colors hover:text-slate-200">
-        Structured details
-      </summary>
-      <div className="mt-3 grid gap-3">
-        <div className="grid gap-2 md:grid-cols-3">
-          {detailRows.map(([label, value]) => (
-            <div key={label} className="rounded-lg border border-white/8 bg-black/15 px-2.5 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-              <p className="mt-1 break-words font-mono text-[11px] leading-snug text-slate-300">{value}</p>
-            </div>
-          ))}
-        </div>
+    <div className="mb-2 rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2 text-xs">
+      <div className="grid gap-3">
+        {detailRows.length > 0 && (
+          <div className="grid gap-2 md:grid-cols-3">
+            {detailRows.map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-white/8 bg-black/15 px-2.5 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+                <p className="mt-1 break-words font-mono text-[11px] leading-snug text-slate-300">{value}</p>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="grid gap-2 lg:grid-cols-2">
           <div className="rounded-lg border border-white/8 bg-black/15 p-2.5">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Raw OCR text</p>
@@ -390,7 +393,7 @@ function StructuredDetails({
           </div>
         </div>
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -454,13 +457,6 @@ function confidenceLabel(row: PipelineReviewRow, candidate?: MatchCandidate): { 
   return { label: 'Fuzzy match needs review', tone: 'amber' };
 }
 
-function labelClass(tone: 'green' | 'sky' | 'amber' | 'red'): string {
-  if (tone === 'green') return 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400';
-  if (tone === 'sky') return 'bg-sky-500/15 border-sky-500/30 text-sky-300';
-  if (tone === 'amber') return 'bg-amber-500/15 border-amber-500/30 text-amber-300';
-  return 'bg-red-500/15 border-red-500/30 text-red-300';
-}
-
 function manualReviewReason(row: PipelineReviewRow): string | null {
   const selected = getSelectedCandidates(row);
   const candidate = selected[0] ?? row.candidates[0];
@@ -508,6 +504,24 @@ export function reviewRowStatusLabel(row: PipelineReviewRow): string {
   }
   if (row.duplicateStatus === 'possible') return 'Possible duplicate pending approval';
   return 'Pending approval';
+}
+
+/**
+ * Collapses the previous badge zoo (pending/inferred/OCR%/confidence/multi-CPT/
+ * missing-CPT) into the single status a reviewer actually needs to act on.
+ */
+export function computeCardStatus(row: PipelineReviewRow): { label: string; tone: 'green' | 'amber' | 'gray' } {
+  if (!row.included) return { label: 'Excluded', tone: 'gray' };
+  if (row.duplicateStatus === 'possible') return { label: 'Possible duplicate', tone: 'amber' };
+  const reason = dedupeReasons(row.reviewReason, manualReviewReason(row));
+  if (reason && /exam date|modified date/i.test(reason)) return { label: 'Check dates', tone: 'amber' };
+  if (!hasValidSelectedProductivityRvu(row) || reason) return { label: 'Check CPT', tone: 'amber' };
+  return { label: 'Ready to approve', tone: 'green' };
+}
+
+/** A row that needs a click but has no substantive date/CPT/duplicate problem. */
+export function isBenignFlagRow(row: PipelineReviewRow): boolean {
+  return row.included && row.needsReview && computeCardStatus(row).label === 'Ready to approve';
 }
 
 export function buildUserApprovalPatch(row: PipelineReviewRow): Partial<PipelineReviewRow> | null {
@@ -710,6 +724,7 @@ export function Import({ onImported }: ImportProps) {
   const [blockedNoValidCptCount, setBlockedNoValidCptCount] = useState(0);
   const [error, setError]         = useState<string | null>(null);
   const [showSkipped, setShowSkipped]       = useState(false);
+  const [showAutoApproved, setShowAutoApproved] = useState(false);
   const [searchPanelTempId, setSearchPanelTempId] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<ReviewMode>('unknowns');
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
@@ -1139,6 +1154,25 @@ export function Import({ onImported }: ImportProps) {
     approveRows((row) => isSafeAutoApprovalRow(row));
   }
 
+  /** Bulk-approves rows in the review queue whose only flag is benign (no date/CPT/duplicate issue). */
+  function approveAllReady() {
+    let approved = 0;
+    let approvedWrvu = 0;
+    setReviewRows((rows) =>
+      rows.map((row) => {
+        if (!isBenignFlagRow(row)) return row;
+        const patch = buildUserApprovalPatch(row);
+        if (!patch) return row;
+        approved++;
+        approvedWrvu += getSelectedWorkRvu(row);
+        return { ...row, ...patch };
+      }),
+    );
+    if (approved > 0) {
+      pushToast('success', `Approved ${approved} ready stud${approved === 1 ? 'y' : 'ies'}`, `+${approvedWrvu.toFixed(1)} wRVUs now finalizable.`);
+    }
+  }
+
   function approvePriorMappings() {
     approveRows((row) => isPriorApprovedMappingRow(row));
   }
@@ -1364,7 +1398,10 @@ export function Import({ onImported }: ImportProps) {
   ).length;
   const safeApprovalCount = reviewRows.filter(isSafeAutoApprovalRow).length;
   const priorMappingCount = reviewRows.filter(isPriorApprovedMappingRow).length;
-  const autoCodedCount = reviewRows.filter((row) => row.included && !row.needsReview).length;
+  const autoApprovedRows = reviewRows.filter((row) => row.included && !row.needsReview);
+  const autoCodedCount = autoApprovedRows.length;
+  const autoApprovedWrvu = autoApprovedRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
+  const readyToApproveCount = reviewRows.filter(isBenignFlagRow).length;
   const requiresReviewCount = reviewRows.filter((row) => row.included && row.needsReview).length;
   const approvalSummary = summarizeReviewApproval(reviewRows, skippedRows);
   const reviewableWarningCount = reviewRows.filter((row) => row.needsReview && row.duplicateStatus === 'possible' && canApproveReviewRow(row)).length;
@@ -1766,6 +1803,52 @@ export function Import({ onImported }: ImportProps) {
           </div>
         )}
 
+        {/* ── Auto-approved summary strip ───────────────────────────────── */}
+        {autoApprovedRows.length > 0 && reviewMode !== 'everything' && reviewMode !== 'auto' && (
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/8 overflow-hidden">
+            <button
+              onClick={() => setShowAutoApproved((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 text-sm hover:bg-white/3 transition-colors"
+            >
+              <span className="text-emerald-300 font-medium">
+                {autoApprovedRows.length} auto-approved · {autoApprovedWrvu.toFixed(1)} wRVU
+              </span>
+              <span className="text-emerald-400/70 text-xs">{showAutoApproved ? 'Hide ▲' : 'Show ▼'}</span>
+            </button>
+            {showAutoApproved && (
+              <div className="border-t border-emerald-500/15 divide-y divide-emerald-500/10">
+                {autoApprovedRows.map((row) => {
+                  const selected = getSelectedCandidates(row);
+                  const cptSummary = selected.map((candidate) => candidate.cptCode).join(' + ');
+                  return (
+                    <div key={row.tempId} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                      <p className="text-sm text-slate-300 truncate">{procedureNameForSource(row.source)}</p>
+                      <div className="flex items-center gap-2 shrink-0 text-xs text-slate-500">
+                        {cptSummary && <span className="font-mono text-slate-400">{cptSummary}</span>}
+                        <span>{getSelectedWorkRvu(row).toFixed(2)} wRVU</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {readyToApproveCount > 0 && (
+          <div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/3 px-4 py-2.5">
+            <span className="text-xs text-slate-400">
+              {readyToApproveCount} row{readyToApproveCount > 1 ? 's' : ''} ready to approve — no date, CPT, or duplicate issue
+            </span>
+            <button
+              onClick={approveAllReady}
+              className="text-xs px-3 py-1.5 rounded-lg border border-emerald-500/35 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/18 transition-colors font-medium"
+            >
+              Approve all ready
+            </button>
+          </div>
+        )}
+
         {/* ── Review rows ───────────────────────────────────────────────── */}
         <div className="space-y-3">
           {visibleReviewRows.map((row, i) => {
@@ -1773,15 +1856,12 @@ export function Import({ onImported }: ImportProps) {
             const selectedIndices = getSelectedCandidateIndices(row);
             const selected = getSelectedCandidates(row);
             const selectedTotal = getSelectedWorkRvu(row);
-            const label = confidenceLabel(row);
             const reviewReason = manualReviewReason(row);
             const canApproveRow = canApproveReviewRow(row);
-            const rowStatus = reviewRowStatusLabel(row);
             const dateWarning = dateAttributionWarning(row);
             const procedureName = procedureNameForSource(row.source);
-            const cptSummary = selected.length > 0
-              ? selected.map((candidate) => candidate.cptCode).join(' + ')
-              : row.candidates.slice(0, 2).map((candidate) => candidate.cptCode).join(' + ');
+            const status = computeCardStatus(row);
+            const chipCandidates = selected.length > 0 ? selected : row.candidates.slice(0, 2);
             const examDateTime = formatOcrDateTime(
               row.source.examDate ?? row.source.examDateTime?.slice(0, 10) ?? row.source.studyDate,
               row.source.examTime ?? row.source.examDateTime?.slice(11, 16),
@@ -1792,97 +1872,25 @@ export function Import({ onImported }: ImportProps) {
               row.source.modifiedTime,
               row.source.modifiedDateTime,
             );
+            const metaLine = [examDateTime && `Exam ${examDateTime}`, readDateTime && `Read ${readDateTime}`]
+              .filter(Boolean)
+              .join(' → ');
+            const statusToneClass = status.tone === 'green'
+              ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
+              : status.tone === 'amber'
+              ? 'border-amber-500/25 bg-amber-500/10 text-amber-300'
+              : 'border-slate-500/25 bg-slate-500/10 text-slate-300';
+
             return (
               <div
                 key={row.tempId}
                 className={`card transition-opacity duration-200 ${!row.included ? 'opacity-40' : ''}`}
               >
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="min-w-0">
-                    <p className="text-xs text-slate-400">#{i + 1}</p>
-                    <p className="text-sm text-white font-medium truncate">{procedureName}</p>
-                    {cptSummary && (
-                      <p className="mt-0.5 text-xs font-mono text-sky-300">{cptSummary}</p>
-                    )}
-                    {shouldShowAccession(row.source.accessionNumber) && (
-                      <p className="text-xs text-slate-500">Acc: {row.source.accessionNumber}</p>
-                    )}
-                    {row.source.rowIndex && (
-                      <p className="text-xs text-slate-500">Source row: {row.source.rowIndex}</p>
-                    )}
-                    <div className="mt-2 grid gap-1 text-xs">
-                      {examDateTime && (
-                        <div className="flex gap-2">
-                          <span className="w-10 shrink-0 text-slate-500">Exam:</span>
-                          <span className="font-mono text-slate-300">{examDateTime}</span>
-                        </div>
-                      )}
-                      {readDateTime && (
-                        <div className="flex gap-2">
-                          <span className="w-10 shrink-0 text-slate-500">Read:</span>
-                          <span className="font-mono text-slate-300">{readDateTime}</span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
-                        !row.included ? 'border-slate-500/25 bg-slate-500/10 text-slate-300' :
-                        !row.needsReview ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300' :
-                        row.duplicateStatus === 'possible' ? 'border-orange-500/25 bg-orange-500/10 text-orange-300' :
-                        'border-amber-500/25 bg-amber-500/10 text-amber-300'
-                      }`}>
-                        {rowStatus}
-                      </span>
-                      {/* Source confidence badge */}
-                      {row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) >= 1.0 ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 font-medium">
-                          OCR {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
-                        </span>
-                      ) : row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) > 0 ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/25 text-sky-400 font-medium">
-                          OCR {Math.round((row.source.dateTimeConfidence ?? 0) * 100)}%
-                        </span>
-                      ) : (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/25 text-amber-400/80 font-medium" title="Date was not extracted from OCR — using the log date you selected">
-                          ⚠ inferred
-                        </span>
-                      )}
-                      {row.source.ocrConfidence != null && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300 font-medium">
-                          OCR text {Math.round(row.source.ocrConfidence * 100)}%
-                        </span>
-                      )}
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${labelClass(label.tone)}`}>
-                        {label.label}
-                      </span>
-                      {reviewReason && row.included && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded border border-amber-500/25 bg-amber-500/10 text-amber-300">
-                          {reviewReason}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-                    {isPossibleDupe && row.included && (
-                      <span
-                        className="text-xs bg-orange-500/15 border border-orange-500/30 text-orange-300 px-2 py-0.5 rounded-lg"
-                        title={row.duplicateReason ?? ''}
-                      >
-                        ⚠ Possible dup
-                      </span>
-                    )}
-                    {!row.needsReview && row.included && !isPossibleDupe &&
-                      row.candidates[0]?.method === 'alias_match' &&
-                      row.candidates[0]?.confidence >= 0.95 && (
-                      <span className="text-xs bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-lg">
-                        ✓ Learned
-                      </span>
-                    )}
-                    {row.needsReview && row.included && (
-                      <span className="text-xs bg-amber-500/20 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded-lg">
-                        Review
-                      </span>
-                    )}
+                {/* Line 1: procedure name + wRVU total, Approve / Exclude */}
+                <div className="flex items-start justify-between gap-3">
+                  <p className="min-w-0 truncate text-sm font-medium text-white">{procedureName}</p>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="text-xs font-semibold text-white">{selectedTotal.toFixed(2)} wRVU</span>
                     {canApproveRow && row.included && (
                       <button
                         onClick={() => approveReviewRow(row.tempId)}
@@ -1916,293 +1924,324 @@ export function Import({ onImported }: ImportProps) {
                   </div>
                 </div>
 
-                {isPossibleDupe && row.included && (
-                  <div className="mb-2 px-3 py-2 rounded-lg bg-orange-500/8 border border-orange-500/20 text-xs text-orange-300/80">
-                    {row.duplicateReason} — verify before saving or exclude this row.
-                  </div>
-                )}
-
-                {dateWarning && row.included && (
-                  <div className="mb-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs text-amber-200/85">
-                    {dateWarning}
-                  </div>
-                )}
-
-                {row.included && (
-                  <div className="mb-2 rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setAssistantTempId(assistantTempId === row.tempId ? null : row.tempId);
-                          setAssistantPrompt('');
-                          setAssistantPanel(null);
-                        }}
-                        className="text-xs px-2.5 py-1 rounded-lg border border-sky-500/25 text-sky-300 hover:bg-sky-500/10 transition-colors"
+                {/* Line 2: CPT chip(s) — code + short name only */}
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  {chipCandidates.length > 0 ? (
+                    chipCandidates.map((candidate) => (
+                      <span
+                        key={candidateKey(candidate)}
+                        className="text-[11px] px-1.5 py-0.5 rounded border border-sky-500/25 bg-sky-500/8 text-sky-300"
                       >
-                        Ask Assistant / Fix
-                      </button>
-                      <span className="text-[11px] text-slate-500">Report / Teach:</span>
-                      {ASSISTANT_QUICK_OPTIONS.slice(0, 6).map((option) => (
-                        <button
-                          key={`${row.tempId}-${option.category}-${option.label}`}
-                          onClick={() => askAssistant(row, i, option.prompt, option.category)}
-                          disabled={assistantBusy}
-                          className="text-[11px] px-2 py-0.5 rounded-lg border border-white/10 text-slate-400 hover:border-white/25 hover:text-white disabled:opacity-40"
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
+                        <span className="font-mono font-semibold">{candidate.cptCode}</span>{' '}
+                        <span className="text-slate-400">
+                          {candidate.description.slice(0, 32)}{candidate.description.length > 32 ? '…' : ''}
+                        </span>
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-[11px] italic text-red-400">No CPT match</span>
+                  )}
+                </div>
 
-                    {assistantTempId === row.tempId && (
-                      <div className="mt-3 space-y-3">
-                        <div className="flex gap-2">
-                          <input
-                            value={assistantPrompt}
-                            onChange={(event) => setAssistantPrompt(event.target.value)}
-                            placeholder="Tell the assistant what is wrong with this row..."
-                            className="input min-w-0 flex-1 text-xs"
-                          />
+                {/* Line 3: exam/read datetimes + at most one status badge */}
+                <div className="mt-1.5 flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-mono text-slate-500">{metaLine}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium shrink-0 ${statusToneClass}`}>
+                    {status.label}
+                  </span>
+                </div>
+
+                {/* Everything else lives behind one disclosure. */}
+                {row.included && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer select-none text-[11px] font-semibold uppercase tracking-wide text-slate-500 transition-colors hover:text-slate-300">
+                      Details
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      {isPossibleDupe && (
+                        <div className="px-3 py-2 rounded-lg bg-orange-500/8 border border-orange-500/20 text-xs text-orange-300/80">
+                          {row.duplicateReason} — verify before saving or exclude this row.
+                        </div>
+                      )}
+
+                      {dateWarning && (
+                        <div className="px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs text-amber-200/85">
+                          {dateWarning}
+                        </div>
+                      )}
+
+                      <StructuredDetails row={row} selected={selected} reviewReason={reviewReason} />
+
+                      <div className="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <button
-                            onClick={() => askAssistant(row, i, assistantPrompt)}
-                            disabled={assistantBusy || !assistantPrompt.trim()}
-                            className="px-3 py-1.5 rounded-lg border border-sky-500/35 text-xs font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-40"
+                            onClick={() => {
+                              setAssistantTempId(assistantTempId === row.tempId ? null : row.tempId);
+                              setAssistantPrompt('');
+                              setAssistantPanel(null);
+                            }}
+                            className="text-xs px-2.5 py-1 rounded-lg border border-sky-500/25 text-sky-300 hover:bg-sky-500/10 transition-colors"
                           >
-                            Ask
+                            Ask Assistant / Fix
                           </button>
+                          <span className="text-[11px] text-slate-500">Report / Teach:</span>
+                          {ASSISTANT_QUICK_OPTIONS.slice(0, 6).map((option) => (
+                            <button
+                              key={`${row.tempId}-${option.category}-${option.label}`}
+                              onClick={() => askAssistant(row, i, option.prompt, option.category)}
+                              disabled={assistantBusy}
+                              className="text-[11px] px-2 py-0.5 rounded-lg border border-white/10 text-slate-400 hover:border-white/25 hover:text-white disabled:opacity-40"
+                            >
+                              {option.label}
+                            </button>
+                          ))}
                         </div>
 
-                        {assistantPanel?.rowId === row.tempId && (
-                          <div className="rounded-xl border border-sky-500/20 bg-sky-500/8 p-3 text-xs">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <p className="font-semibold text-sky-200">Assistant interpretation</p>
-                                <p className="mt-1 text-slate-300">{assistantPanel.response.explanation}</p>
-                              </div>
+                        {assistantTempId === row.tempId && (
+                          <div className="mt-3 space-y-3">
+                            <div className="flex gap-2">
+                              <input
+                                value={assistantPrompt}
+                                onChange={(event) => setAssistantPrompt(event.target.value)}
+                                placeholder="Tell the assistant what is wrong with this row..."
+                                className="input min-w-0 flex-1 text-xs"
+                              />
                               <button
-                                onClick={saveAssistantFeedbackOnly}
-                                className="rounded-lg border border-white/12 px-2 py-1 text-[11px] text-slate-300 hover:border-white/25"
+                                onClick={() => askAssistant(row, i, assistantPrompt)}
+                                disabled={assistantBusy || !assistantPrompt.trim()}
+                                className="px-3 py-1.5 rounded-lg border border-sky-500/35 text-xs font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-40"
                               >
-                                Save feedback only
+                                Ask
                               </button>
                             </div>
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
-                                {assistantPanel.response.problemType.replace(/_/g, ' ')}
-                              </span>
-                              <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
-                                {Math.round(assistantPanel.response.confidence * 100)}% confidence
-                              </span>
-                              {assistantPanel.response.requiresUserApproval && (
-                                <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-amber-300">
-                                  approval required
-                                </span>
-                              )}
-                            </div>
-                            {assistantPanel.response.safetyConcerns.length > 0 && (
-                              <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/8 px-2 py-1.5 text-amber-200/80">
-                                {assistantPanel.response.safetyConcerns.join(' ')}
-                              </div>
-                            )}
-                            {assistantPanel.actions.length > 0 && (
-                              <div className="mt-3 space-y-2">
-                                {assistantPanel.actions.map((action) => (
-                                  <div key={action.id} className="rounded-lg border border-white/10 bg-black/15 px-2.5 py-2">
-                                    <p className="font-semibold text-slate-200">{action.actionType.replace(/_/g, ' ')}</p>
-                                    <p className="mt-1 text-slate-400">{action.explanation}</p>
-                                    {action.proposedNewRowsJson && (
-                                      <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-black/20 p-2 font-mono text-[11px] text-slate-400">
-                                        {JSON.stringify(JSON.parse(action.proposedNewRowsJson), null, 2)}
-                                      </pre>
-                                    )}
-                                    <div className="mt-2 flex justify-end">
-                                      <button
-                                        onClick={() => applyAssistantAction(action)}
-                                        disabled={assistantBusy || action.approvedByUser || action.actionType === 'ignore'}
-                                        className="rounded-lg border border-emerald-500/30 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40"
-                                      >
-                                        {action.approvedByUser ? 'Applied' : 'Apply'}
-                                      </button>
-                                    </div>
+
+                            {assistantPanel?.rowId === row.tempId && (
+                              <div className="rounded-xl border border-sky-500/20 bg-sky-500/8 p-3 text-xs">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <p className="font-semibold text-sky-200">Assistant interpretation</p>
+                                    <p className="mt-1 text-slate-300">{assistantPanel.response.explanation}</p>
                                   </div>
-                                ))}
+                                  <button
+                                    onClick={saveAssistantFeedbackOnly}
+                                    className="rounded-lg border border-white/12 px-2 py-1 text-[11px] text-slate-300 hover:border-white/25"
+                                  >
+                                    Save feedback only
+                                  </button>
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
+                                    {assistantPanel.response.problemType.replace(/_/g, ' ')}
+                                  </span>
+                                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
+                                    {Math.round(assistantPanel.response.confidence * 100)}% confidence
+                                  </span>
+                                  {assistantPanel.response.requiresUserApproval && (
+                                    <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-amber-300">
+                                      approval required
+                                    </span>
+                                  )}
+                                </div>
+                                {assistantPanel.response.safetyConcerns.length > 0 && (
+                                  <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/8 px-2 py-1.5 text-amber-200/80">
+                                    {assistantPanel.response.safetyConcerns.join(' ')}
+                                  </div>
+                                )}
+                                {assistantPanel.actions.length > 0 && (
+                                  <div className="mt-3 space-y-2">
+                                    {assistantPanel.actions.map((action) => (
+                                      <div key={action.id} className="rounded-lg border border-white/10 bg-black/15 px-2.5 py-2">
+                                        <p className="font-semibold text-slate-200">{action.actionType.replace(/_/g, ' ')}</p>
+                                        <p className="mt-1 text-slate-400">{action.explanation}</p>
+                                        {action.proposedNewRowsJson && (
+                                          <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-black/20 p-2 font-mono text-[11px] text-slate-400">
+                                            {JSON.stringify(JSON.parse(action.proposedNewRowsJson), null, 2)}
+                                          </pre>
+                                        )}
+                                        <div className="mt-2 flex justify-end">
+                                          <button
+                                            onClick={() => applyAssistantAction(action)}
+                                            disabled={assistantBusy || action.approvedByUser || action.actionType === 'ignore'}
+                                            className="rounded-lg border border-emerald-500/30 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40"
+                                          >
+                                            {action.approvedByUser ? 'Applied' : 'Apply'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
                         )}
                       </div>
-                    )}
-                  </div>
-                )}
 
-                {row.included && (
-                  <StructuredDetails row={row} selected={selected} reviewReason={reviewReason} />
-                )}
-
-                {/* ── Candidate list or no-match state ─────────────── */}
-                {row.included && selected.length > 0 && (
-                  <div className="mb-2 rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2">
-                    <div className="flex items-center justify-between gap-3 mb-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-sky-300">
-                        Selected CPTs
-                      </span>
-                      <span className="text-xs font-semibold text-white">
-                        {selectedTotal.toFixed(2)} wRVU total
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-stretch gap-2">
-                      {selected.map((candidate, candidateIndex) => (
-                        <div key={candidateKey(candidate)} className="contents">
-                          {candidateIndex > 0 && (
-                            <span className="self-center text-sky-300 text-sm font-bold px-0.5">+</span>
-                          )}
-                          <div className="min-w-[11rem] max-w-full flex-1 sm:flex-none rounded-xl border border-white/12 bg-white/5 px-3 py-2">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="text-xs font-medium text-white truncate">
-                                  {candidate.description.slice(0, 52)}
-                                  {candidate.description.length > 52 ? '...' : ''}
-                                </p>
-                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                                  <span className="font-mono text-[11px] font-bold text-sky-300">{candidate.cptCode}</span>
-                                  {candidate.modifier && <span className="text-[10px] text-slate-400">mod {candidate.modifier}</span>}
-                                  <span className="text-[10px] text-emerald-400">{candidate.workRvu?.toFixed(2)} wRVU</span>
+                      {selected.length > 0 && (
+                        <div className="rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2">
+                          <div className="flex items-center justify-between gap-3 mb-2">
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-sky-300">
+                              Selected CPTs
+                            </span>
+                            <span className="text-xs font-semibold text-white">
+                              {selectedTotal.toFixed(2)} wRVU total
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-stretch gap-2">
+                            {selected.map((candidate, candidateIndex) => (
+                              <div key={candidateKey(candidate)} className="contents">
+                                {candidateIndex > 0 && (
+                                  <span className="self-center text-sky-300 text-sm font-bold px-0.5">+</span>
+                                )}
+                                <div className="min-w-[11rem] max-w-full flex-1 sm:flex-none rounded-xl border border-white/12 bg-white/5 px-3 py-2">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-medium text-white truncate">
+                                        {candidate.description.slice(0, 52)}
+                                        {candidate.description.length > 52 ? '...' : ''}
+                                      </p>
+                                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                        <span className="font-mono text-[11px] font-bold text-sky-300">{candidate.cptCode}</span>
+                                        {candidate.modifier && <span className="text-[10px] text-slate-400">mod {candidate.modifier}</span>}
+                                        <span className="text-[10px] text-emerald-400">{candidate.workRvu?.toFixed(2)} wRVU</span>
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setSelectedCandidates(
+                                          row,
+                                          selectedIndices.filter((index) => candidateKey(row.candidates[index]) !== candidateKey(candidate)),
+                                        )
+                                      }
+                                      className="text-slate-500 hover:text-red-300 transition-colors"
+                                      title="Remove this study bubble"
+                                    >
+                                      x
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {row.candidates.length === 0 ? (
+                        <div className="space-y-2">
+                          <p className="text-xs text-red-400 italic">
+                            No confident match found — search the exam library to assign manually.
+                          </p>
+                          <button
+                            onClick={() =>
+                              setSearchPanelTempId(
+                                searchPanelTempId === row.tempId ? null : row.tempId,
+                              )
+                            }
+                            className="text-xs px-3 py-1.5 rounded-lg border border-sky-500/35 text-sky-400 hover:border-sky-400/60 hover:bg-sky-500/8 transition-all font-medium"
+                          >
+                            {searchPanelTempId === row.tempId ? '↑ Close search' : '🔍 Search exam library'}
+                          </button>
+                          {searchPanelTempId === row.tempId && (
+                            <ExamSearchPanel
+                              initialQuery={procedureNameForSource(row.source)}
+                              onSelect={(c) => handleManualSelect(row.tempId, c)}
+                              onClose={() => setSearchPanelTempId(null)}
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          {row.candidates.map((c, ci) => {
+                            const isSelected = selectedIndices.includes(ci);
+                            const candidateLabel = confidenceLabel(row, c);
+                            return (
                               <button
-                                type="button"
+                                key={`${c.cptCode}-${c.modifier}-${ci}`}
                                 onClick={() =>
                                   setSelectedCandidates(
                                     row,
-                                    selectedIndices.filter((index) => candidateKey(row.candidates[index]) !== candidateKey(candidate)),
+                                    isSelected
+                                      ? selectedIndices.filter((index) => index !== ci)
+                                      : [...selectedIndices, ci],
                                   )
                                 }
-                                className="text-slate-500 hover:text-red-300 transition-colors"
-                                title="Remove this study bubble"
+                                className={`w-full text-left rounded-lg border px-3 py-2 text-xs transition-all ${
+                                  isSelected
+                                    ? 'text-white'
+                                    : 'bg-white/3 border-white/8 text-slate-400 hover:border-white/20'
+                                }`}
+                                style={isSelected ? {
+                                  background: 'rgba(37,99,168,0.15)',
+                                  borderColor: 'rgba(37,99,168,0.4)',
+                                } : {}}
                               >
-                                x
+                                <span className="font-mono font-bold mr-2">{c.cptCode}</span>
+                                {c.modifier && (
+                                  <span className="mr-1.5 text-slate-500">mod {c.modifier}</span>
+                                )}
+                                <span className="mr-2">
+                                  {c.description.slice(0, 55)}
+                                  {c.description.length > 55 ? '…' : ''}
+                                </span>
+                                <span className="font-medium">{c.workRvu?.toFixed(2)} wRVU</span>
+                                <span
+                                  className={`ml-2 ${
+                                    c.confidence >= 0.85
+                                      ? 'text-emerald-400'
+                                      : c.confidence >= 0.65
+                                      ? 'text-amber-400'
+                                      : 'text-red-400'
+                                  }`}
+                                >
+                                  {Math.round(c.confidence * 100)}%
+                                </span>
+                                <span className={`ml-1.5 text-[10px] font-semibold uppercase tracking-wide ${
+                                  candidateLabel.tone === 'green' ? 'text-emerald-500/70' :
+                                  candidateLabel.tone === 'sky' ? 'text-sky-400/80' :
+                                  candidateLabel.tone === 'amber' ? 'text-amber-500/70' : 'text-red-400/80'
+                                }`}>
+                                  {candidateLabel.label}
+                                </span>
+                                {isSelected && (
+                                  <span className="ml-1.5 text-sky-300 text-[10px] font-semibold uppercase tracking-wide">
+                                    selected
+                                  </span>
+                                )}
+                                <span className="mt-1 block text-[10px] leading-snug text-slate-500">
+                                  {candidateExplanationText(c, procedureNameForSource(row.source))}
+                                </span>
+                                {c.confidence < 0.75 && row.candidates.length > 1 && (
+                                  <span className="mt-0.5 block text-[10px] text-amber-300/80">
+                                    Alternatives: {row.candidates.filter((alt, altIndex) => altIndex !== ci).slice(0, 3).map((alt) => `${alt.cptCode}${alt.modifier ? `-${alt.modifier}` : ''} ${Math.round(alt.confidence * 100)}%`).join(' | ')}
+                                  </span>
+                                )}
                               </button>
-                            </div>
+                            );
+                          })}
+                          <div className="flex items-center justify-end pt-0.5">
+                            <button
+                              onClick={() =>
+                                setSearchPanelTempId(
+                                  searchPanelTempId === row.tempId ? null : row.tempId,
+                                )
+                              }
+                              className="text-[11px] text-slate-500 hover:text-sky-400 transition-colors"
+                            >
+                              {searchPanelTempId === row.tempId ? '↑ Close search' : 'Add another CPT'}
+                            </button>
                           </div>
+                          {searchPanelTempId === row.tempId && (
+                            <ExamSearchPanel
+                              initialQuery={procedureNameForSource(row.source)}
+                              onSelect={(c) => handleManualSelect(row.tempId, c)}
+                              onClose={() => setSearchPanelTempId(null)}
+                            />
+                          )}
                         </div>
-                      ))}
+                      )}
                     </div>
-                  </div>
-                )}
-
-                {row.candidates.length === 0 ? (
-                  <div className="space-y-2">
-                    <p className="text-xs text-red-400 italic">
-                      No confident match found — search the exam library to assign manually.
-                    </p>
-                    <button
-                      onClick={() =>
-                        setSearchPanelTempId(
-                          searchPanelTempId === row.tempId ? null : row.tempId,
-                        )
-                      }
-                      className="text-xs px-3 py-1.5 rounded-lg border border-sky-500/35 text-sky-400 hover:border-sky-400/60 hover:bg-sky-500/8 transition-all font-medium"
-                    >
-                      {searchPanelTempId === row.tempId ? '↑ Close search' : '🔍 Search exam library'}
-                    </button>
-                    {searchPanelTempId === row.tempId && (
-                      <ExamSearchPanel
-                        initialQuery={procedureNameForSource(row.source)}
-                        onSelect={(c) => handleManualSelect(row.tempId, c)}
-                        onClose={() => setSearchPanelTempId(null)}
-                      />
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    {row.candidates.map((c, ci) => {
-                      const isSelected = selectedIndices.includes(ci);
-                      const candidateLabel = confidenceLabel(row, c);
-                      return (
-                        <button
-                          key={`${c.cptCode}-${c.modifier}-${ci}`}
-                          onClick={() =>
-                            setSelectedCandidates(
-                              row,
-                              isSelected
-                                ? selectedIndices.filter((index) => index !== ci)
-                                : [...selectedIndices, ci],
-                            )
-                          }
-                          className={`w-full text-left rounded-lg border px-3 py-2 text-xs transition-all ${
-                            isSelected
-                              ? 'text-white'
-                              : 'bg-white/3 border-white/8 text-slate-400 hover:border-white/20'
-                          }`}
-                          style={isSelected ? {
-                            background: 'rgba(37,99,168,0.15)',
-                            borderColor: 'rgba(37,99,168,0.4)',
-                          } : {}}
-                        >
-                          <span className="font-mono font-bold mr-2">{c.cptCode}</span>
-                          {c.modifier && (
-                            <span className="mr-1.5 text-slate-500">mod {c.modifier}</span>
-                          )}
-                          <span className="mr-2">
-                            {c.description.slice(0, 55)}
-                            {c.description.length > 55 ? '…' : ''}
-                          </span>
-                          <span className="font-medium">{c.workRvu?.toFixed(2)} wRVU</span>
-                          <span
-                            className={`ml-2 ${
-                              c.confidence >= 0.85
-                                ? 'text-emerald-400'
-                                : c.confidence >= 0.65
-                                ? 'text-amber-400'
-                                : 'text-red-400'
-                            }`}
-                          >
-                            {Math.round(c.confidence * 100)}%
-                          </span>
-                          <span className={`ml-1.5 text-[10px] font-semibold uppercase tracking-wide ${
-                            candidateLabel.tone === 'green' ? 'text-emerald-500/70' :
-                            candidateLabel.tone === 'sky' ? 'text-sky-400/80' :
-                            candidateLabel.tone === 'amber' ? 'text-amber-500/70' : 'text-red-400/80'
-                          }`}>
-                            {candidateLabel.label}
-                          </span>
-                          {isSelected && (
-                            <span className="ml-1.5 text-sky-300 text-[10px] font-semibold uppercase tracking-wide">
-                              selected
-                            </span>
-                          )}
-                          <span className="mt-1 block text-[10px] leading-snug text-slate-500">
-                            {candidateExplanationText(c, procedureNameForSource(row.source))}
-                          </span>
-                          {c.confidence < 0.75 && row.candidates.length > 1 && (
-                            <span className="mt-0.5 block text-[10px] text-amber-300/80">
-                              Alternatives: {row.candidates.filter((alt, altIndex) => altIndex !== ci).slice(0, 3).map((alt) => `${alt.cptCode}${alt.modifier ? `-${alt.modifier}` : ''} ${Math.round(alt.confidence * 100)}%`).join(' | ')}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                    {/* Add another CPT is always available for combined-code studies. */}
-                    <div className="flex items-center justify-end pt-0.5">
-                      <button
-                        onClick={() =>
-                          setSearchPanelTempId(
-                            searchPanelTempId === row.tempId ? null : row.tempId,
-                          )
-                        }
-                        className="text-[11px] text-slate-500 hover:text-sky-400 transition-colors"
-                      >
-                        {searchPanelTempId === row.tempId ? '↑ Close search' : 'Add another CPT'}
-                      </button>
-                    </div>
-                    {searchPanelTempId === row.tempId && (
-                      <ExamSearchPanel
-                        initialQuery={procedureNameForSource(row.source)}
-                        onSelect={(c) => handleManualSelect(row.tempId, c)}
-                        onClose={() => setSearchPanelTempId(null)}
-                      />
-                    )}
-                  </div>
+                  </details>
                 )}
               </div>
             );

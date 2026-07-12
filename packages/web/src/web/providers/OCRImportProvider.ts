@@ -19,6 +19,7 @@ import { PSM } from 'tesseract.js';
 import { maybeEnhanceOcrWithLlm } from '../services/llmOcrExtractionService';
 import { parseDateTimeFromDateColumn } from '../utils/studyDateParser';
 import { normalizeOcrExamTextForMatching } from '../utils/ocrExamTextNormalization';
+import { dedupeReasons } from '../utils/reviewReasons';
 import {
   DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
   preprocessPowerScribeColumnsForOcr,
@@ -557,7 +558,7 @@ export class OCRImportProvider implements ImportProvider {
         extractionConfidence: p.extractionConfidence,
         parserNeedsReview: p.needsReview || missingModifiedDate,
         parserReviewReason: missingModifiedDate
-          ? [p.reviewReason, 'Missing Modified time/date - productivity date will use selected log date unless corrected.'].filter(Boolean).join(' | ')
+          ? dedupeReasons(p.reviewReason, 'Missing Modified time/date - productivity date will use selected log date unless corrected.')
           : p.reviewReason,
         parserRawLine: p.rawText,
         ocrConfidence,

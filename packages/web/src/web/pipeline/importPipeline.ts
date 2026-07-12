@@ -3,6 +3,7 @@ import { checkBatchDuplicates, buildFingerprint, isStrongDuplicateFingerprint } 
 import { db } from '../db/database';
 import { supabasePersistence } from '../services/supabasePersistence';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import { dedupeReasons } from '../utils/reviewReasons';
 import type { MatchCandidate, StudyLog, DuplicateStatus } from '../types';
 import type { ImportedStudy, ImportSource } from '../types/importProvider';
 import type { StudyCandidate } from '../utils/duplicateDetection';
@@ -219,7 +220,10 @@ export async function runImportPipeline(
       .map((index) => candidates[index])
       .filter((candidate): candidate is MatchCandidate => Boolean(candidate));
     const matchReviewReason = reviewReasonFor(top, candidates, dupStatus, dupReason);
-    const reviewReason = study.parserReviewReason ?? matchReviewReason;
+    // Single join point for the whole pipeline: every upstream layer's reason
+    // text funnels through here exactly once, deduplicated, so the same
+    // phrase can never repeat even if two layers independently noticed it.
+    const reviewReason = dedupeReasons(study.parserReviewReason, matchReviewReason);
     const exactInstitutionAutoAccept =
       !parserNeedsReview &&
       dupStatus === null &&
