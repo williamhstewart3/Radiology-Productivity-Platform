@@ -6,6 +6,7 @@ import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNorm
 import type { MatchCandidate, StudyLog, DuplicateStatus } from '../types';
 import type { ImportedStudy, ImportSource } from '../types/importProvider';
 import type { StudyCandidate } from '../utils/duplicateDetection';
+import { effectiveAutoCommitThreshold } from '../services/automationSettings';
 
 export interface PipelineReviewRow {
   tempId: string;
@@ -150,6 +151,8 @@ export async function runImportPipeline(
   }
 
   const sources = [...new Set(studies.map((s) => s.source))];
+  const userSettings = await db.userSettings.get('default');
+  const autoCommitThreshold = effectiveAutoCommitThreshold(userSettings?.lowConfidenceThreshold);
   const matched: Array<{ study: ImportedStudy; candidates: MatchCandidate[] }> = [];
 
   for (const study of studies) {
@@ -232,9 +235,9 @@ export async function runImportPipeline(
         ? 'learned'
         : !parserNeedsReview && top && isDeterministicProtocolCandidate(top) && dupStatus === null
         ? 'learned'
-        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= 0.99 && dupStatus === null
+        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= Math.max(0.99, autoCommitThreshold) && dupStatus === null
         ? 'silent'
-        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= 0.95 && dupStatus === null
+        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= autoCommitThreshold && dupStatus === null
         ? 'learned'
         : null;
     const autoAccept = Boolean(autoApprovalLevel && !reviewReason);

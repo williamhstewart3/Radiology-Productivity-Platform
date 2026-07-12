@@ -41,6 +41,7 @@ import {
 import { processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import { restoreCaptureState, snapshotCaptureState, type CaptureUndoSnapshot } from '../services/captureUndoService';
 import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
+import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { CorrectionAction, FeedbackEvent, FeedbackEventCategory, DuplicateStatus, MatchCandidate, UserSettings } from '../types';
 
@@ -894,6 +895,10 @@ export function Import({ onImported }: ImportProps) {
         : `Ready to review ${readyCount} exam${readyCount === 1 ? '' : 's'}`,
       `+${estimatedRvu.toFixed(1)} wRVUs pending - ${nextSkippedRows.length} duplicate${nextSkippedRows.length === 1 ? '' : 's'} skipped - ${reviewCount} require review`,
     );
+    const desktop = getDesktopAPI();
+    if (desktop && document.visibilityState !== 'visible' && readyCount > 0) {
+      void desktop.showNotification('Watcher receipt', watcherReceiptBody(readyCount, reviewCount));
+    }
   }
 
   async function hashImageBlob(blob: Blob): Promise<string> {

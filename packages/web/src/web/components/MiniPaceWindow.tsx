@@ -71,6 +71,10 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
     [today, profileId],
     [],
   );
+  const inboxCount = useLiveQuery(async () => {
+    const sessions = await db.activeReviewSessions.where('status').equals('active').toArray();
+    return sessions.filter((session) => session.profileId === profileId || session.profileId == null).reduce((sum, session) => sum + session.needsReviewCount, 0);
+  }, [profileId], 0);
 
   const paceSettings: DailyPaceSettings = useMemo(() => ({
     dailyRvuGoal: activeProfile?.dailyRvuGoal ?? DEFAULT_DAILY_PACE_SETTINGS.dailyRvuGoal,
@@ -179,6 +183,9 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
           >
             {paceDeltaText(metrics)}
           </span>
+          <button type="button" onClick={() => { window.opener?.location.assign('/inbox'); window.focus(); }} style={{ border: 0, padding: 0, background: 'transparent', color: inboxCount > 0 ? HUD_CAUTION : HUD_LABEL_SECONDARY, textAlign: 'left', fontSize: 13, cursor: 'pointer' }}>
+            {inboxCount > 0 ? `${inboxCount} inbox` : 'All counted'}
+          </button>
         </div>
       </div>
     </div>
