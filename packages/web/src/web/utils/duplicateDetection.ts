@@ -251,8 +251,10 @@ export async function checkOneDuplicate(
   const candidateMinutes = isoToMinutes(candidate.studyDateTime);
   const normCandidate = normalizeExamText(candidate.examNameRaw);
 
+  // ── Pass 1: exact matches always win, regardless of log iteration order ──
+  // (accession number, then full fingerprint). These must not be shadowed
+  // by a lower-confidence 'possible' match found earlier in `logs`.
   for (const log of logs) {
-    // ── Tier 1: exact — accession number match ──────────────────────────
     if (
       normalizeAccessionAnchor(candidate.accessionNumber) &&
       normalizeAccessionAnchor(log.accessionNumber) &&
@@ -265,8 +267,8 @@ export async function checkOneDuplicate(
         reason: `Same accession number (${candidate.accessionNumber})`,
       };
     }
-
-    // ── Tier 1: exact — full fingerprint match ──────────────────────────
+  }
+  for (const log of logs) {
     if (
       isStrongDuplicateFingerprint(candidateFingerprint) &&
       (
@@ -280,16 +282,19 @@ export async function checkOneDuplicate(
         reason: 'Same CPT set, performed time, and read time',
       };
     }
+  }
 
-    const normLog = normalizeExamText(log.examNameRaw);
-    if (normCandidate && normLog === normCandidate) {
-      // ── Secondary anchor: Modified time missing, but performed time matches ──
-      // One failed Modified-column OCR read must not multiply rows across
-      // repeated same-day captures. This never returns 'exact' — a missing
-      // Modified time is never strong enough to auto-skip.
+  // ── Pass 2: secondary anchor — Modified time missing, but performed time
+  // matches. One failed Modified-column OCR read must not multiply rows
+  // across repeated same-day captures. This must win over the looser "same
+  // title, no time at all" fallback further below, which would otherwise
+  // match whichever log happens to come first in iteration order rather
+  // than the log with the matching performed time. This never returns
+  // 'exact' — a missing Modified time is never strong enough to auto-skip.
+  if (normCandidate && !candidate.modifiedDateTime && candidate.performedDateTime) {
+    for (const log of logs) {
       if (
-        !candidate.modifiedDateTime &&
-        candidate.performedDateTime &&
+        normalizeExamText(log.examNameRaw) === normCandidate &&
         log.examDateTime &&
         sameMinute(candidate.performedDateTime, log.examDateTime)
       ) {
@@ -299,7 +304,13 @@ export async function checkOneDuplicate(
           reason: 'Same exam title and performed time; Modified time missing',
         };
       }
+    }
+  }
 
+  // ── Pass 3: remaining possible / very_likely tiers ────────────────────
+  for (const log of logs) {
+    const normLog = normalizeExamText(log.examNameRaw);
+    if (normCandidate && normLog === normCandidate) {
       if (sameMinute(candidate.studyDateTime, log.studyDateTime)) {
         return {
           confidence: 'possible',

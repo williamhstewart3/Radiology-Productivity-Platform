@@ -90,6 +90,7 @@ describe('modality-first CPT matching', () => {
     'XR CHESTPORTABLE',
     'XRCHEST PORTABLE',
     'XR CHEST-PORTABLE',
+    'XR CHEST  PORTABLE',
   ])('maps portable chest OCR variant %s to 71045 deterministically', (raw) => {
     const parsed = __testParseModalityFirst(raw);
     expect(parsed.cleanedProcedure).toBe('XR CHEST PORTABLE');
