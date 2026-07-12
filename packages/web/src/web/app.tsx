@@ -25,7 +25,8 @@ import {
   Sun,
 } from 'lucide-react';
 import { Log } from './pages/Log';
-import { History } from './pages/History';
+import { LegacyHistory } from './pages/History';
+import { TimelineHistory } from './pages/TimelineHistory';
 import { Settings } from './pages/Settings';
 import { Locations } from './pages/Locations';
 import { CptExplorer } from './pages/CptExplorer';
@@ -339,7 +340,8 @@ function MainApp() {
                   <Route path="/trends/history">
                     <Redirect to="/history" />
                   </Route>
-                  <Route path="/history"><History /></Route>
+                  <Route path="/history"><TimelineHistory onOpenLegacy={() => navigate('/history/legacy')} /></Route>
+                  <Route path="/history/legacy"><LegacyHistory /></Route>
                   <Route path="/inbox"><Inbox onOpenLegacyReview={() => navigate('/log')} /></Route>
                   <Route path="/log">
                     <Log onImported={() => navigate('/today')} onClose={() => navigate('/today')} />

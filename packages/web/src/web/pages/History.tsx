@@ -31,7 +31,7 @@ function displayTitle(log: StudyLog): string {
   return log.examTitleDisplay?.trim() || log.examNameRaw;
 }
 
-export function History() {
+export function LegacyHistory() {
   const [range, setRange] = useState<Range>('30d');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState(todayDateString());
