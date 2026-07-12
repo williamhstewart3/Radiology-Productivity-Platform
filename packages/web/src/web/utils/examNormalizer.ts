@@ -276,8 +276,8 @@ export function normalizeForRadiology(raw: string): NormalizationResult {
   let text = normalizeOcrExamTextForMatching(raw)
     .toLowerCase()
     .trim()
-    .replace(/[_\-]+/g, ' ')
-    .replace(/[.,;:()\[\]{}@#]/g, ' ')
+    .replace(/[_-]+/g, ' ')
+    .replace(/[.,;:()[\]{}@#]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 

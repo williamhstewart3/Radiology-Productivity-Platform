@@ -29,10 +29,11 @@ type Segment = 'capture' | 'manual' | 'camera';
 
 interface LogProps {
   onImported: () => void;
+  onReviewReady: () => void;
   onClose: () => void;
 }
 
-export function Log({ onImported, onClose }: LogProps) {
+export function Log({ onImported, onReviewReady, onClose }: LogProps) {
   const { activeProfile } = useOrg();
   const profileId = activeProfile?.id ?? null;
   const [segment, setSegment] = useState<Segment>('capture');
@@ -69,7 +70,7 @@ export function Log({ onImported, onClose }: LogProps) {
         onChange={setSegment}
       />
 
-      {segment === 'capture' && <Import onImported={onImported} />}
+      {segment === 'capture' && <Import onImported={onImported} onReviewReady={onReviewReady} />}
       {segment === 'manual' && (
         <div className="space-y-3">
           <LogStudy onSaved={onImported} />

@@ -28,7 +28,7 @@ export function loadState(): AppState {
     if (!raw) return getDefaultState();
     const parsed = JSON.parse(raw) as Partial<AppState>;
     return {
-      settings: { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) },
+      settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
       quickAdds: parsed.quickAdds ?? DEFAULT_QUICK_ADDS,
       entries: parsed.entries ?? [],
       theme: parsed.theme ?? "dark",

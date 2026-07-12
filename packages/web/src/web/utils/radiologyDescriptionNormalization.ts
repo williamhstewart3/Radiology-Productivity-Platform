@@ -90,7 +90,7 @@ export function normalizeRadiologyDescription(raw: string): string {
   text = text
     .replace(/[\u2010-\u2015]/g, '-')
     .replace(/&/g, ' AND ')
-    .replace(/[_.,;:()\[\]{}+]/g, ' ')
+    .replace(/[_.,;:()[\]{}+]/g, ' ')
     .replace(/-/g, ' ')
     .replace(/\s*\/\s*/g, ' / ')
     .replace(/\s+/g, ' ')
