@@ -9,7 +9,8 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { theme } from '../lib/theme';
+import { cn } from '@/lib/utils';
+import { Card } from '../components/ui/Card';
 import { useProfile } from '../hooks/useProfile';
 import { getDesktopAPI } from '../lib/desktop';
 import { todayDateString } from '../utils/calculations';
@@ -63,33 +64,33 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
   ];
 
   return (
-    <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs">
-      <summary className="cursor-pointer font-semibold text-slate-300">
+    <details className="rounded-[10px] border border-rd-separator bg-rd-surface-2 p-3 text-[13px]">
+      <summary className="cursor-pointer font-semibold text-rd-label-primary">
         OCR debug: {debug.parsedRowCount ?? debug.detectedRows.length} parsed / {debug.rawLineCount ?? debug.ocrLines.length} raw lines, {Math.round(debug.ocrConfidence * 100)}% text confidence
       </summary>
       <div className="mt-3 grid gap-3">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {debugStats.map(([label, value]) => (
-            <div key={label} className="rounded-lg border border-white/8 bg-black/20 p-2">
-              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
-              <p className="mt-1 font-mono text-[11px] text-slate-300">{value}</p>
+            <div key={label} className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-rd-label-secondary">{label}</p>
+              <p className="mt-1 font-mono text-[11px] text-rd-label-primary">{value}</p>
             </div>
           ))}
         </div>
         {debug.crop && (
-          <div className="rounded-lg border border-white/8 bg-black/20 p-2">
-            <p className="font-medium text-slate-300">
+          <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+            <p className="font-medium text-rd-label-primary">
               Crop: {debug.crop.method} ({Math.round(debug.crop.confidence * 100)}%)
             </p>
-            <p className="mt-1 font-mono text-[11px] text-slate-400">
+            <p className="mt-1 font-mono text-[11px] text-rd-label-secondary">
               x {debug.crop.rect.x.toFixed(3)}, y {debug.crop.rect.y.toFixed(3)}, w {debug.crop.rect.width.toFixed(3)}, h {debug.crop.rect.height.toFixed(3)}, bottom {(debug.crop.rect.y + debug.crop.rect.height).toFixed(3)}
             </p>
           </div>
         )}
         {previewUrl && debug.crop && (
-          <div className="rounded-lg border border-white/8 bg-black/20 p-2">
-            <p className="font-medium text-slate-300">Crop preview</p>
-            <div className="relative mt-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+          <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+            <p className="font-medium text-rd-label-primary">Crop preview</p>
+            <div className="relative mt-2 overflow-hidden rounded-[8px] border border-rd-separator">
               <img src={previewUrl} alt="OCR crop debug preview" className="block w-full opacity-80" />
               <div
                 className="absolute border-2 border-sky-400/90 bg-sky-400/10"
@@ -116,14 +117,14 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
             </div>
           </div>
         )}
-        <div className="rounded-lg border border-white/8 bg-black/20 p-2">
-          <p className="font-medium text-slate-300">Detected rows</p>
+        <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+          <p className="font-medium text-rd-label-primary">Detected rows</p>
           <div className="mt-2 max-h-36 overflow-y-auto space-y-1">
             {debug.detectedRows.length === 0 ? (
-              <p className="text-slate-500">No exam rows were detected from the OCR text.</p>
+              <p className="text-rd-label-secondary">No exam rows were detected from the OCR text.</p>
             ) : (
               debug.detectedRows.map((row, index) => (
-                <p key={`${row.rawText}-${index}`} className="font-mono text-[11px] text-slate-400">
+                <p key={`${row.rawText}-${index}`} className="font-mono text-[11px] text-rd-label-secondary">
                   {index + 1}. {row.cleanedExamName ?? row.examName}
                   {row.rawProcedureColumnText ? ` | proc "${row.rawProcedureColumnText}"` : ''}
                   {row.rawExamDateColumnText ? ` | exam raw "${row.rawExamDateColumnText}"` : ''}
@@ -143,29 +144,29 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
           </div>
         </div>
         {debug.rejectedRows && debug.rejectedRows.length > 0 && (
-          <div className="rounded-lg border border-white/8 bg-black/20 p-2">
-            <p className="font-medium text-slate-300">Rejected rows</p>
+          <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+            <p className="font-medium text-rd-label-primary">Rejected rows</p>
             <div className="mt-2 max-h-32 overflow-y-auto space-y-1">
               {debug.rejectedRows.map((row, index) => (
-                <p key={`${row.reason}-${row.rawText}-${index}`} className="font-mono text-[11px] text-slate-400">
+                <p key={`${row.reason}-${row.rawText}-${index}`} className="font-mono text-[11px] text-rd-label-secondary">
                   {index + 1}. {row.reason}: {row.rawText}
                 </p>
               ))}
             </div>
           </div>
         )}
-        <div className="rounded-lg border border-white/8 bg-black/20 p-2">
-          <p className="font-medium text-slate-300">OCR text</p>
-          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">
+        <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+          <p className="font-medium text-rd-label-primary">OCR text</p>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-rd-label-secondary">
             {debug.ocrText}
           </pre>
         </div>
         {debug.columnText && (
           <div className="grid gap-2 md:grid-cols-3">
             {(['procedure', 'examDate', 'modifiedDate'] as const).map((column) => (
-              <div key={column} className="rounded-lg border border-white/8 bg-black/20 p-2">
-                <p className="font-medium text-slate-300">{column}</p>
-                <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">
+              <div key={column} className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+                <p className="font-medium text-rd-label-primary">{column}</p>
+                <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-rd-label-secondary">
                   {debug.columnText?.[column]}
                 </pre>
               </div>
@@ -323,21 +324,22 @@ interface ImportToast {
 function ImportToastStack({ toasts }: { toasts: ImportToast[] }) {
   if (toasts.length === 0) return null;
   const toneClass: Record<ImportToastTone, string> = {
-    info: 'border-sky-500/25 bg-sky-500/10 text-sky-200',
-    success: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200',
-    warning: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
-    danger: 'border-red-500/30 bg-red-500/10 text-red-200',
+    info: 'text-rd-label-primary',
+    success: 'text-rd-positive',
+    warning: 'text-rd-caution',
+    danger: 'text-rd-negative',
   };
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2 pointer-events-none">
+    <div className="pointer-events-none fixed bottom-5 right-5 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-200 ${toneClass[toast.tone]}`}
+          className="animate-in fade-in slide-in-from-bottom-2 rounded-[10px] border border-rd-separator bg-rd-surface px-4 py-3 duration-200"
+          style={{ boxShadow: 'var(--rd-shadow-card)' }}
         >
-          <p className="text-sm font-semibold">{toast.title}</p>
-          {toast.body && <p className="mt-1 text-xs leading-relaxed opacity-80">{toast.body}</p>}
+          <p className={`text-[13px] font-semibold ${toneClass[toast.tone]}`}>{toast.title}</p>
+          {toast.body && <p className="mt-1 text-[12px] leading-relaxed text-rd-label-secondary">{toast.body}</p>}
         </div>
       ))}
     </div>
@@ -649,119 +651,133 @@ export function Import({ onReviewReady }: ImportProps) {
   }
 
   // ── Input screen ──────────────────────────────────────────────────────────
+  const modeTabClass = (active: boolean) =>
+    cn(
+      'min-h-8 flex-1 rounded-[8px] px-3 py-1.5 text-[13px] font-medium transition-colors',
+      active ? 'bg-rd-surface text-rd-label-primary shadow-sm' : 'text-rd-label-secondary',
+    );
+
   return (
     <>
-    <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
-      <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">PowerScribe Capture</h1>
-        <p className="text-slate-400 text-sm mt-0.5">Paste or upload a PowerScribe window grab to extract exam rows</p>
-      </div>
-
+    <div className="mx-auto max-w-2xl space-y-5">
       {/* Mode toggle */}
-      <div className="flex gap-2 p-1 bg-white/5 rounded-xl">
+      <div role="tablist" className="inline-flex w-full gap-0.5 rounded-[10px] bg-rd-bg p-0.5">
         <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'paste'}
           onClick={() => { setMode('paste'); setError(null); }}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-            mode === 'paste' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-300'
-          }`}
+          className={modeTabClass(mode === 'paste')}
         >
           Paste / CSV
         </button>
         <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'ocr'}
           onClick={() => { setMode('ocr'); setError(null); }}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-            mode === 'ocr' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-300'
-          }`}
+          className={modeTabClass(mode === 'ocr')}
         >
           Screen Capture Intake
         </button>
         {/* PowerScribe — architecture ready, live sync coming */}
         <button
+          type="button"
+          role="tab"
           disabled
           title="PowerScribe live sync — architecture implemented, activation coming soon"
-          className="flex-1 py-2 rounded-lg text-sm font-medium text-slate-600 cursor-not-allowed relative group"
+          className="group relative min-h-8 flex-1 cursor-not-allowed rounded-[8px] px-3 py-1.5 text-[13px] font-medium text-rd-label-secondary opacity-50"
         >
           <span>⚡ PowerScribe</span>
-          <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+          <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide">
             Soon
           </span>
           {/* Tooltip on hover */}
-          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-left shadow-xl z-10">
+          <span
+            className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-52 -translate-x-1/2 rounded-[10px] border border-rd-separator bg-rd-surface px-3 py-2 text-left text-[12px] text-rd-label-secondary opacity-0 transition-opacity group-hover:opacity-100"
+            style={{ boxShadow: 'var(--rd-shadow-card)' }}
+          >
             Live PowerScribe sync is architecturally supported — the provider interface and pipeline are ready. Authentication and site configuration coming soon.
           </span>
         </button>
       </div>
 
       {mode === 'paste' && (
-        <div className="card space-y-4">
+        <Card className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+            <label htmlFor="paste-text" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
               Paste exam names, CPT codes, or CSV
             </label>
             <textarea
+              id="paste-text"
+              aria-label="Paste exam names, CPT codes, or CSV"
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
               placeholder={`CT Abdomen Pelvis with contrast\nMRI Brain without contrast\n74177, 70553, 71046\n...one per line, comma-separated, or CSV with headers`}
               rows={10}
-              className="input w-full resize-none font-mono text-sm"
+              className="w-full resize-none rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 font-mono text-[13px] text-rd-label-primary placeholder:text-rd-label-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rd-label-primary"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+            <label htmlFor="paste-log-date" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
               Log Date
             </label>
             <input
+              id="paste-log-date"
+              aria-label="Log date"
               type="date"
               value={logDate}
               onChange={(e) => setLogDate(e.target.value)}
-              className="input"
+              className="rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 text-[13px] text-rd-label-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rd-label-primary"
             />
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-[12px] text-rd-label-secondary">
             Supports: one per line, comma-separated CPT codes, or CSV with headers
             (examTitle, cpt, studyDate, accessionNumber, modality…).
             Duplicates detected automatically.
           </p>
-          {error && <p className="text-red-400 text-sm">{error}</p>}
+          {error && <p className="text-[13px] text-rd-negative">{error}</p>}
           <button
+            type="button"
             onClick={handlePasteProcess}
             disabled={!pasteText.trim() || processing}
-            className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
+            className="min-h-11 w-full rounded-[10px] bg-rd-label-primary px-5 text-[15px] font-semibold text-rd-bg disabled:opacity-40"
           >
             {processing ? CAPTURE_PROCESSING_LABEL : 'Match & Review'}
           </button>
-        </div>
+        </Card>
       )}
 
       {mode === 'ocr' && (
-        <div className="card space-y-4">
+        <Card className="space-y-4">
           {clipboardFile && !processing && (
-            <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-3">
-              <p className="text-sm font-semibold text-sky-300">{CAPTURE_PROMPT_TITLE}</p>
-              <p className="text-xs text-slate-400">
+            <div className="space-y-3 rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
+              <p className="text-[13px] font-semibold text-rd-label-primary">{CAPTURE_PROMPT_TITLE}</p>
+              <p className="text-[12px] text-rd-label-secondary">
                 This looks like a PowerScribe worklist screenshot. {CAPTURE_PRIVACY_COPY}
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
+                  type="button"
                   onClick={() => processPowerScribeCapture(clipboardFile, 'confirmed clipboard')}
                   disabled={processing}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                  style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
+                  className="min-h-11 rounded-[10px] bg-rd-label-primary px-3 text-[13px] font-semibold text-rd-bg disabled:opacity-40"
                 >
                   Process this capture
                 </button>
                 <button
+                  type="button"
                   onClick={() => setClipboardFile(null)}
                   disabled={processing}
-                  className="px-3 py-1.5 rounded-lg border border-white/12 text-xs text-slate-400 hover:text-white disabled:opacity-40"
+                  className="min-h-11 px-2 text-[13px] text-rd-label-secondary disabled:opacity-40"
                 >
                   Ignore this capture
                 </button>
                 <button
+                  type="button"
                   onClick={() => alwaysProcessClipboard(clipboardFile)}
                   disabled={processing}
-                  className="px-3 py-1.5 rounded-lg border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/10 disabled:opacity-40"
+                  className="min-h-11 px-2 text-[13px] text-rd-label-primary disabled:opacity-40"
                 >
                   Always process PowerScribe captures
                 </button>
@@ -770,84 +786,86 @@ export function Import({ onReviewReady }: ImportProps) {
           )}
           {processing && <CaptureProcessingState />}
           <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+            <label htmlFor="ocr-file-input" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
               Paste or upload PowerScribe window grab
             </label>
-            <div
+            <input
+              ref={fileRef}
+              id="ocr-file-input"
+              aria-label="Upload PowerScribe window grab"
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => setOcrFile(e.target.files?.[0] ?? null)}
+            />
+            <button
+              type="button"
               onClick={() => fileRef.current?.click()}
-              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${
-                ocrFile ? '' : 'border-white/15 hover:border-white/30 hover:bg-white/3'
-              }`}
-              style={ocrFile ? {
-                borderColor: 'rgba(37,99,168,0.4)',
-                background: 'rgba(37,99,168,0.06)',
-              } : {}}
+              className={cn(
+                'w-full cursor-pointer rounded-[16px] border-2 border-dashed p-8 text-center transition-colors',
+                ocrFile ? 'border-rd-label-primary bg-rd-surface-2' : 'border-rd-separator hover:bg-rd-surface-2',
+              )}
             >
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => setOcrFile(e.target.files?.[0] ?? null)}
-              />
               {ocrFile ? (
                 <div>
-                  <p className="font-medium" style={{ color: theme.colors.accent }}>{ocrFile.name}</p>
-                  <p className="text-slate-400 text-xs mt-1">
+                  <p className="font-medium text-rd-label-primary">{ocrFile.name}</p>
+                  <p className="mt-1 text-[12px] text-rd-label-secondary">
                     {(ocrFile.size / 1024).toFixed(0)} KB · Click to change
                   </p>
                 </div>
               ) : (
                 <div>
-                  <p className="text-4xl mb-3">📸</p>
-                  <p className="text-slate-300 text-sm font-medium">Paste, drop, or click to upload</p>
-                  <p className="text-slate-500 text-xs mt-1">Copy the PowerScribe window, then paste here. Images are not stored.</p>
+                  <p className="mb-3 text-4xl">📸</p>
+                  <p className="text-[13px] font-medium text-rd-label-primary">Paste, drop, or click to upload</p>
+                  <p className="mt-1 text-[12px] text-rd-label-secondary">Copy the PowerScribe window, then paste here. Images are not stored.</p>
                 </div>
               )}
-            </div>
+            </button>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+            <label htmlFor="ocr-log-date" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
               Log Date
             </label>
             <input
+              id="ocr-log-date"
+              aria-label="Log date"
               type="date"
               value={logDate}
               onChange={(e) => setLogDate(e.target.value)}
-              className="input"
+              className="rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 text-[13px] text-rd-label-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rd-label-primary"
             />
           </div>
-          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-            <p className="text-amber-300 text-xs font-medium">Capture tips</p>
-            <p className="text-amber-300/70 text-xs mt-1">
+          <div className="rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
+            <p className="text-[12px] font-medium text-rd-label-primary">Capture tips</p>
+            <p className="mt-1 text-[12px] text-rd-label-secondary">
               Capture the PowerScribe study list with Procedure, Exam Date, and Modified columns visible.
               The screenshot is cropped, parsed, matched, and checked locally. Already-imported studies are auto-skipped.
             </p>
           </div>
           <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
-          {error && <p className="text-red-400 text-sm">{error}</p>}
+          {error && <p className="text-[13px] text-rd-negative">{error}</p>}
           <button
+            type="button"
             onClick={handleOcrProcess}
             disabled={!ocrFile || processing}
-            className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
+            className="min-h-11 w-full rounded-[10px] bg-rd-label-primary px-5 text-[15px] font-semibold text-rd-bg disabled:opacity-40"
           >
             {processing ? CAPTURE_PROCESSING_LABEL : 'Extract & Match'}
           </button>
-        </div>
+        </Card>
       )}
 
       {mode === 'powerscribe' && (
         /* This branch is unreachable while the button is disabled.
            It will be wired up when PowerScribeImportProvider goes live. */
-        <div className="card text-center py-10 space-y-3">
+        <Card className="space-y-3 py-10 text-center">
           <p className="text-2xl">⚡</p>
-          <p className="text-white font-semibold">PowerScribe Live Sync</p>
-          <p className="text-slate-400 text-sm max-w-sm mx-auto">
+          <p className="font-semibold text-rd-label-primary">PowerScribe Live Sync</p>
+          <p className="mx-auto max-w-sm text-[13px] text-rd-label-secondary">
             The import pipeline is architected to accept PowerScribe as a native
             source. Authentication and site configuration coming soon.
           </p>
-        </div>
+        </Card>
       )}
     </div>
     <ImportToastStack toasts={toasts} />
