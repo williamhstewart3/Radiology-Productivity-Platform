@@ -517,14 +517,36 @@ function Invoke-Ocr([System.Drawing.Bitmap] $Bitmap) {
   }
 }
 
+$script:OcrDateCharMap = @{
+  'O' = '0'; 'o' = '0'; 'Q' = '0'; 'D' = '0'
+  'I' = '1'; 'l' = '1'
+  'S' = '5'; 's' = '5'
+  'B' = '8'; 'F' = '7'
+}
+
+function Normalize-DateColumnText([string] $Text) {
+  if (-not $Text) { return $Text }
+  $withSeparators = [regex]::Replace($Text, '(?<=\d)[.,](?=\d)', '/')
+  $chars = $withSeparators.ToCharArray()
+  for ($i = 0; $i -lt $chars.Length; $i++) {
+    $key = [string]$chars[$i]
+    if ($script:OcrDateCharMap.ContainsKey($key)) {
+      $chars[$i] = $script:OcrDateCharMap[$key]
+    }
+  }
+  return -join $chars
+}
+
 function Parse-DateTimeText([string] $Text) {
   if (-not $Text) { return $null }
+  $normalized = Normalize-DateColumnText $Text
   $patterns = @(
     '\b(?<m>\d{1,2})/(?<d>\d{1,2})/(?<y>\d{2,4})\s+(?<h>\d{1,2}):(?<min>\d{2})(?::\d{2})?\s*(?<ampm>AM|PM|am|pm)?\b',
-    '\b(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})[T\s](?<h>\d{1,2}):(?<min>\d{2})(?::\d{2})?\b'
+    '\b(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})[T\s](?<h>\d{1,2}):(?<min>\d{2})(?::\d{2})?\b',
+    '\b(?<m>\d{1,2})/(?<d>\d{1,2})/(?<y>\d{2,4})\s*(?<h>\d{1,2})(?<min>\d{2})\s*(?<ampm>AM|PM|am|pm)\b'
   )
   foreach ($pattern in $patterns) {
-    $match = [regex]::Match($Text, $pattern)
+    $match = [regex]::Match($normalized, $pattern)
     if (-not $match.Success) { continue }
     $month = [int]$match.Groups['m'].Value
     $day = [int]$match.Groups['d'].Value

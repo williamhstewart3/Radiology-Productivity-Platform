@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseDateTimeFromOcr } from '../src/web/utils/studyDateParser';
+import { parseDateTimeFromOcr, parseDateTimeFromDateColumn } from '../src/web/utils/studyDateParser';
 
 describe('parseDateTimeFromOcr — datetime matrix', () => {
   test.each([
@@ -40,5 +40,33 @@ describe('parseDateTimeFromOcr — no fabrication', () => {
   test('a 7-digit compact date fragment does not guess a missing digit', () => {
     const result = parseDateTimeFromOcr('7112026 8:28 PM');
     expect(result?.studyDateTime ?? null).toBeNull();
+  });
+});
+
+describe('parseDateTimeFromDateColumn — column-scoped tolerant parsing', () => {
+  test('OCR char damage (O -> 0) with a missing colon is accepted in a known date column', () => {
+    const result = parseDateTimeFromDateColumn('7/2/2O26 759 AM');
+    expect(result?.studyDateTime).toBe('2026-07-02T07:59:00');
+  });
+
+  test('the same OCR-damaged string is never accepted by free-text parsing', () => {
+    const result = parseDateTimeFromOcr('7/2/2O26 759 AM');
+    expect(result?.studyDateTime ?? null).toBeNull();
+  });
+
+  test('a missing space between date and compact time is accepted in a known date column', () => {
+    const result = parseDateTimeFromDateColumn('7/2/2026759 AM');
+    expect(result?.studyTime).toBe('07:59');
+    expect(result?.studyDateTime).toBe('2026-07-02T07:59:00');
+  });
+
+  test('"." misread as "/" is accepted in a known date column', () => {
+    const result = parseDateTimeFromDateColumn('7.2.2026 7:59 AM');
+    expect(result?.studyDateTime).toBe('2026-07-02T07:59:00');
+  });
+
+  test('no pattern invents a digit not present in the input', () => {
+    expect(parseDateTimeFromDateColumn('T2026 10:12 PM')?.studyDateTime ?? null).toBeNull();
+    expect(parseDateTimeFromDateColumn('1112026')?.studyDateTime ?? null).toBeNull();
   });
 });

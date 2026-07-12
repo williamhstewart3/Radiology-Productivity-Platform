@@ -17,7 +17,7 @@ import { parseOcrLinesWithDebug, type OcrParseDebugInfo } from '../utils/powerSc
 import { getDefaultOcrProvider } from '../utils/ocrProvider';
 import { PSM } from 'tesseract.js';
 import { maybeEnhanceOcrWithLlm } from '../services/llmOcrExtractionService';
-import { parseDateTimeFromOcr } from '../utils/studyDateParser';
+import { parseDateTimeFromDateColumn } from '../utils/studyDateParser';
 import { normalizeOcrExamTextForMatching } from '../utils/ocrExamTextNormalization';
 import {
   DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
@@ -253,7 +253,7 @@ function buildModifiedAnchorBands(modifiedLines: OcrPositionedLine[]): AnchorBan
   const anchors = modifiedLines
     .map((line) => ({ line, center: lineCenterY(line) }))
     .filter((item): item is { line: OcrPositionedLine; center: number } =>
-      item.center != null && Boolean(parseDateTimeFromOcr(normalizeColumnLineText(item.line.text))?.studyDateTime),
+      item.center != null && Boolean(parseDateTimeFromDateColumn(normalizeColumnLineText(item.line.text))?.studyDateTime),
     )
     .sort((a, b) => a.center - b.center);
 
@@ -322,8 +322,8 @@ function buildParsedLineFromColumnTexts(
   const cleanedExamNameRaw = normalizeOcrExamTextForMatching(procedureText);
   const cleanedExamName = cleanedExamNameRaw.length >= 2 ? cleanedExamNameRaw : 'UNCLEAR POWERSCRIBE ROW';
 
-  const exam = parseDateTimeFromOcr(rawExamDateColumnText);
-  const modified = parseDateTimeFromOcr(rawModifiedDateColumnText);
+  const exam = parseDateTimeFromDateColumn(rawExamDateColumnText);
+  const modified = parseDateTimeFromDateColumn(rawModifiedDateColumnText);
 
   let extractionConfidence = 0.25;
   if (cleanedExamName !== 'UNCLEAR POWERSCRIBE ROW') extractionConfidence += 0.35;

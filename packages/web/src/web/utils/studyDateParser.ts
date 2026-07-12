@@ -238,6 +238,83 @@ export function parseDateTimeFromOcr(text: string): ParsedDateTime | null {
   return null;
 }
 
+// ─── Column-scoped tolerant parsing ──────────────────────────────────────────
+//
+// parseDateTimeFromDateColumn is used ONLY when the caller already knows the
+// text came from a PowerScribe Exam Date / Modified Date column. It reformats
+// OCR-damaged characters and missing punctuation that are all present in the
+// input — it never invents a digit. Free-text parsing (parseDateTimeFromOcr)
+// is unaffected and keeps its strict patterns.
+
+const COLUMN_DATE_CHAR_MAP: Record<string, string> = {
+  O: '0', o: '0', Q: '0', D: '0',
+  I: '1', l: '1',
+  S: '5', s: '5',
+  B: '8', F: '7',
+};
+
+function normalizeColumnDateText(text: string): string {
+  const withSeparators = text.replace(/(?<=\d)[.,](?=\d)/g, '/');
+  return withSeparators.replace(/[OoQDISsBlF]/g, (char) => COLUMN_DATE_CHAR_MAP[char] ?? char);
+}
+
+// Date + time with the colon and/or the space between date and time missing.
+const COLUMN_US_DATE_COMPACT_TIME = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*(\d{1,2})\s*:?\s*(\d{2})\s*(AM|PM|am|pm)\b/;
+// Time only, colon missing (no date in the matched text).
+const COLUMN_TIME_COMPACT = /\b(\d{1,2})(\d{2})\s*(AM|PM|am|pm)\b/;
+
+function buildTimeOnly(hStr: string, minStr: string, ampm: string): string | null {
+  let h = parseInt(hStr, 10);
+  const min = parseInt(minStr, 10);
+  if (isNaN(h) || isNaN(min) || min > 59) return null;
+  const ap = ampm.toUpperCase();
+  if (ap === 'PM' && h < 12) h += 12;
+  if (ap === 'AM' && h === 12) h = 0;
+  if (h > 23) return null;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
+/**
+ * Column-scoped tolerant datetime parser for text known to come from the
+ * PowerScribe Exam Date / Modified Date column. Accepts OCR character damage
+ * (O/l/S/B misread as digits), a missing colon when AM/PM is present, a
+ * missing space between the date and time, and "." or "," misread as "/".
+ * Never fabricates a date component that isn't present in the input.
+ */
+export function parseDateTimeFromDateColumn(rawText: string): ParsedDateTime | null {
+  if (!rawText || rawText.trim().length < 3) return null;
+  const normalized = normalizeColumnDateText(rawText);
+
+  const strict = parseDateTimeFromOcr(normalized);
+  if (strict?.studyDateTime) return strict;
+
+  const compactMatch = normalized.match(COLUMN_US_DATE_COMPACT_TIME);
+  if (compactMatch) {
+    const [, mStr, dStr, yStr, hStr, minStr, ampm] = compactMatch;
+    const parsed = buildUsDateTime(mStr, dStr, yStr, hStr, minStr, ampm ?? null);
+    if (parsed) return { ...parsed, confidence: 0.9, matchedPattern: 'COLUMN_US_DATE_COMPACT_TIME' };
+  }
+
+  if (strict) return strict;
+
+  const timeOnlyMatch = normalized.match(COLUMN_TIME_COMPACT);
+  if (timeOnlyMatch) {
+    const [, hStr, minStr, ampm] = timeOnlyMatch;
+    const studyTime = buildTimeOnly(hStr, minStr, ampm);
+    if (studyTime) {
+      return {
+        studyDateTime: null,
+        studyDate: null,
+        studyTime,
+        confidence: 0.6,
+        matchedPattern: 'COLUMN_TIME_COMPACT',
+      };
+    }
+  }
+
+  return null;
+}
+
 function overlapsExisting(match: ParsedDateTimeMatch, matches: ParsedDateTimeMatch[]): boolean {
   return matches.some((existing) => match.index < existing.endIndex && match.endIndex > existing.index);
 }
