@@ -361,10 +361,6 @@ export function parseOcrLinesWithDebug(lines: string[]): { rows: ParsedLine[]; d
   };
 }
 
-function parseSingleRow(rawRow: string): ParsedLine | null {
-  return parseSingleRowWithReason(rawRow).row;
-}
-
 function parseSingleRowWithReason(rawRow: string): { row: ParsedLine | null; reason: string } {
   const trimmed = rawRow.trim();
   if (trimmed.length < 3) return { row: null, reason: 'Too short after OCR cleanup' };

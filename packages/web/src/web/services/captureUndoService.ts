@@ -32,12 +32,14 @@ export async function snapshotCaptureState(): Promise<CaptureUndoSnapshot> {
 export async function restoreCaptureState(snapshot: CaptureUndoSnapshot): Promise<void> {
   await db.transaction(
     'rw',
-    db.studyLogs,
-    db.examAliases,
-    db.examDictionary,
-    db.ocrLearningEntries,
-    db.activeReviewSessions,
-    db.auditLogEntries,
+    [
+      db.studyLogs,
+      db.examAliases,
+      db.examDictionary,
+      db.ocrLearningEntries,
+      db.activeReviewSessions,
+      db.auditLogEntries,
+    ],
     async () => {
       await Promise.all([
         db.studyLogs.clear(),
