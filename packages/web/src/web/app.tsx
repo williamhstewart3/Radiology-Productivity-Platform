@@ -22,12 +22,10 @@ import {
   Sun,
   TrendingUp,
 } from 'lucide-react';
-import { LogStudy } from './pages/LogStudy';
-import { Import } from './pages/Import';
+import { Log } from './pages/Log';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 import { Locations } from './pages/Locations';
-import { CameraUploadPage } from './pages/CameraUploadPage';
 import { CptExplorer } from './pages/CptExplorer';
 import { Profiles } from './pages/Profiles';
 import { AdminData } from './pages/AdminData';
@@ -177,8 +175,8 @@ function MainApp() {
       dashboard: '/today',
       history: '/trends/history',
       import: '/log',
-      log: '/log/manual',
-      camera: '/log/camera',
+      log: '/log',
+      camera: '/log',
       explorer: '/codes',
       settings: '/settings',
     };
@@ -260,23 +258,7 @@ function MainApp() {
                     <History />
                   </Route>
                   <Route path="/log">
-                    <div className="space-y-3">
-                      <Import onImported={() => navigate('/today')} />
-                      <div className="flex gap-4">
-                        <Link href="/log/manual" className="text-[15px] font-medium text-rd-accent">
-                          Manual entry
-                        </Link>
-                        <Link href="/log/camera" className="text-[15px] font-medium text-rd-accent">
-                          Camera
-                        </Link>
-                      </div>
-                    </div>
-                  </Route>
-                  <Route path="/log/manual">
-                    <LogStudy onSaved={() => navigate('/today')} />
-                  </Route>
-                  <Route path="/log/camera">
-                    <CameraUploadPage onImported={() => navigate('/today')} />
+                    <Log onImported={() => navigate('/today')} />
                   </Route>
                   <Route path="/codes">
                     <CptExplorer onNavigate={legacyNavigate} />

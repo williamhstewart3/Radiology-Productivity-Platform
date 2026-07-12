@@ -24,6 +24,8 @@ export interface PipelineReviewRow {
   autoApprovalLevel: 'silent' | 'learned' | null;
   approvalStatus?: 'pending' | 'manual_approved' | 'approved_as_new' | 'auto_approved' | 'excluded' | 'exact_duplicate_skipped';
   reviewReason: string | null;
+  /** Caller-supplied note (e.g. manual entry's optional notes field). Overrides the auto-generated combined-CPT note. */
+  notes?: string | null;
 }
 
 export interface PipelineResult {
@@ -350,7 +352,7 @@ export async function commitPipelineResults(
         ocrConfidence: study.ocrConfidence ?? null,
         sessionId: rowSessionId,
         sourceImportId: importId,
-        notes: selectedCandidates.length > 1 ? `Combined CPT study: ${cmsDescription}` : null,
+        notes: row.notes !== undefined ? row.notes : (selectedCandidates.length > 1 ? `Combined CPT study: ${cmsDescription}` : null),
         studyFingerprint: fingerprint,
         createdAt: now,
         updatedAt: now,
@@ -372,7 +374,7 @@ export async function commitPipelineResults(
           description: candidate.description,
           modality: candidate.modality,
         })),
-        source: 'ocr_confirmed',
+        source: study.source === 'manual' ? 'manual_name_match' : 'ocr_confirmed',
         profileId: profileId ?? null,
         action: row.autoApproved ? 'confirm' : row.needsReview ? 'correct' : 'confirm',
       });
