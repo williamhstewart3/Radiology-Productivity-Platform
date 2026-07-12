@@ -312,6 +312,37 @@ export function __testBandColumnRows(results: ColumnOcrResults): { rows: Reassem
   return bandColumnRows(results);
 }
 
+const STANDALONE_DIGIT_TOKEN = /^\d+$/;
+const VIEW_TOKEN = /^VIEWS?$/i;
+const NUMERIC_CONTAMINATION_TOKEN = /^\d{3,}$/;
+
+function stripProcedureDigitNoise(text: string): { text: string; contaminated: boolean } {
+  if (!text) return { text, contaminated: false };
+  const tokens = text.split(/\s+/).filter(Boolean);
+
+  while (tokens.length > 0 && STANDALONE_DIGIT_TOKEN.test(tokens[0])) {
+    if (tokens.length > 1 && VIEW_TOKEN.test(tokens[1])) break;
+    tokens.shift();
+  }
+  while (tokens.length > 0 && STANDALONE_DIGIT_TOKEN.test(tokens[tokens.length - 1])) {
+    if (tokens.length > 1 && VIEW_TOKEN.test(tokens[tokens.length - 2])) break;
+    tokens.pop();
+  }
+
+  const contaminated = tokens.some((token) => NUMERIC_CONTAMINATION_TOKEN.test(token));
+  return { text: tokens.join(' '), contaminated };
+}
+
+function applyProcedureDigitHygiene(procedureName: string): { text: string; contaminated: boolean } {
+  const hygiene = stripProcedureDigitNoise(procedureName);
+  const text = hygiene.text.length >= 2 ? hygiene.text : 'UNCLEAR POWERSCRIBE ROW';
+  return { text, contaminated: hygiene.contaminated };
+}
+
+export function __testApplyProcedureDigitHygiene(procedureName: string): { text: string; contaminated: boolean } {
+  return applyProcedureDigitHygiene(procedureName);
+}
+
 function buildParsedLineFromColumnTexts(
   rawProcedureColumnText: string,
   rawExamDateColumnText: string,
@@ -320,7 +351,9 @@ function buildParsedLineFromColumnTexts(
 ): ParsedLine {
   const procedureText = rawProcedureColumnText || 'UNCLEAR POWERSCRIBE ROW';
   const cleanedExamNameRaw = normalizeOcrExamTextForMatching(procedureText);
-  const cleanedExamName = cleanedExamNameRaw.length >= 2 ? cleanedExamNameRaw : 'UNCLEAR POWERSCRIBE ROW';
+  const cleanedExamNameBeforeHygiene = cleanedExamNameRaw.length >= 2 ? cleanedExamNameRaw : 'UNCLEAR POWERSCRIBE ROW';
+  const digitHygiene = applyProcedureDigitHygiene(cleanedExamNameBeforeHygiene);
+  const cleanedExamName = digitHygiene.text;
 
   const exam = parseDateTimeFromDateColumn(rawExamDateColumnText);
   const modified = parseDateTimeFromDateColumn(rawModifiedDateColumnText);
@@ -335,6 +368,7 @@ function buildParsedLineFromColumnTexts(
   if (cleanedExamName === 'UNCLEAR POWERSCRIBE ROW') reviewReasons.push('Unclear PowerScribe procedure text');
   if (!exam?.studyDateTime) reviewReasons.push('Missing or unclear Exam Date');
   if (!modified?.studyDateTime) reviewReasons.push('Missing or unclear Modified Date');
+  if (digitHygiene.contaminated) reviewReasons.push('Numeric contamination in procedure text');
   if (reviewReasonExtra) reviewReasons.push(reviewReasonExtra);
   const needsReview = reviewReasons.length > 0 || extractionConfidence < 0.75;
 

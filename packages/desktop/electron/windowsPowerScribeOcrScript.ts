@@ -579,6 +579,36 @@ function Clean-Procedure([string] $Text) {
   return $cleaned
 }
 
+function Strip-ProcedureDigitNoise([string] $Text) {
+  if (-not $Text) { return [pscustomobject]@{ text = $Text; contaminated = $false } }
+  $tokens = New-Object System.Collections.Generic.List[string]
+  foreach ($token in ($Text -split '\s+')) {
+    if ($token -ne '') { $tokens.Add($token) }
+  }
+
+  while ($tokens.Count -gt 0 -and $tokens[0] -match '^\d+$') {
+    if ($tokens.Count -gt 1 -and $tokens[1] -match '(?i)^VIEWS?$') { break }
+    $tokens.RemoveAt(0)
+  }
+  while ($tokens.Count -gt 0 -and $tokens[$tokens.Count - 1] -match '^\d+$') {
+    if ($tokens.Count -gt 1 -and $tokens[$tokens.Count - 2] -match '(?i)^VIEWS?$') { break }
+    $tokens.RemoveAt($tokens.Count - 1)
+  }
+
+  $contaminated = $false
+  foreach ($token in $tokens) {
+    if ($token -match '^\d{3,}$') { $contaminated = $true }
+  }
+
+  return [pscustomobject]@{ text = ($tokens -join ' '); contaminated = $contaminated }
+}
+
+function Apply-ProcedureDigitHygiene([string] $ProcedureName) {
+  $hygiene = Strip-ProcedureDigitNoise $ProcedureName
+  $text = if ($hygiene.text.Length -ge 2) { $hygiene.text } else { 'UNCLEAR POWERSCRIBE ROW' }
+  return [pscustomobject]@{ text = $text; contaminated = $hygiene.contaminated }
+}
+
 function Median([double[]] $Values) {
   if ($Values.Length -eq 0) { return 22.0 }
   $sorted = [double[]]($Values | Sort-Object)
@@ -630,6 +660,8 @@ function Recombine-Rows($ProcedureOcr, $ExamOcr, $ModifiedOcr) {
     if (-not $rawProcedure -and -not $rawExam -and -not $rawModified) { continue }
 
     $procedureName = Clean-Procedure $rawProcedure
+    $digitHygiene = Apply-ProcedureDigitHygiene $procedureName
+    $procedureName = $digitHygiene.text
     $examDateTime = Parse-DateTimeText $rawExam
     $modifiedDateTime = Parse-DateTimeText $rawModified
     $alignmentScore = 1.0
@@ -644,6 +676,7 @@ function Recombine-Rows($ProcedureOcr, $ExamOcr, $ModifiedOcr) {
     if (-not $examDateTime) { $reviewReasons += 'Missing or unclear Exam Date' }
     if (-not $modifiedDateTime) { $reviewReasons += 'Missing or unclear Modified Date' }
     if ($alignmentScore -lt 1.0) { $reviewReasons += 'Incomplete OCR row alignment' }
+    if ($digitHygiene.contaminated) { $reviewReasons += 'Numeric contamination in procedure text' }
     $needsReview = $reviewReasons.Count -gt 0 -or $confidence -lt 0.75
 
     $rows += [pscustomobject]@{
@@ -687,6 +720,8 @@ function Band-Rows($ProcedureOcr, $ExamOcr, $ModifiedOcr) {
     $rawModified = $anchor.text
 
     $procedureName = Clean-Procedure $rawProcedure
+    $digitHygiene = Apply-ProcedureDigitHygiene $procedureName
+    $procedureName = $digitHygiene.text
     $examDateTime = Parse-DateTimeText $rawExam
     $modifiedDateTime = Parse-DateTimeText $rawModified
 
@@ -700,6 +735,7 @@ function Band-Rows($ProcedureOcr, $ExamOcr, $ModifiedOcr) {
     if ($procedureName -eq 'UNCLEAR POWERSCRIBE ROW') { $reviewReasons += 'Unclear PowerScribe procedure text' }
     if (-not $examDateTime) { $reviewReasons += 'Missing or unclear Exam Date' }
     if (-not $modifiedDateTime) { $reviewReasons += 'Missing or unclear Modified Date' }
+    if ($digitHygiene.contaminated) { $reviewReasons += 'Numeric contamination in procedure text' }
     if ($i -gt 0) {
       $gap = $anchor.centerY - $anchorLines[$i - 1].centerY
       if ($gap -gt $medianPitch * 1.6) {
