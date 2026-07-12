@@ -66,7 +66,13 @@ ipcMain.handle("fs:write", async (_, filePath: string, data: string) => {
 
 // Notifications
 ipcMain.handle("notification:show", (_, title: string, body: string) => {
-  new Notification({ title, body }).show();
+  const notification = new Notification({ title, body });
+  notification.on("click", () => {
+    win?.show();
+    win?.focus();
+    win?.webContents.send("deep-link", "wrvu://inbox");
+  });
+  notification.show();
 });
 
 async function ensureWindowsOcrHelperScript(): Promise<string> {

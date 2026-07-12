@@ -38,6 +38,7 @@ import { Inbox } from './pages/Inbox';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 import { enqueueGlobalCapture } from './services/globalCaptureQueue';
+import { getDesktopAPI } from './lib/desktop';
 
 // ─── Nav: 5 destinations on real Wouter routes ──────────────────────────────
 // Today/Trends/Log/Codes/Settings per the UI modernization spec. History,
@@ -149,6 +150,10 @@ function MainApp() {
   useEffect(() => {
     injectTheme();
   }, []);
+
+  useEffect(() => getDesktopAPI()?.onDeepLink((url) => {
+    if (url === 'wrvu://inbox') navigate('/inbox');
+  }), [navigate]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);

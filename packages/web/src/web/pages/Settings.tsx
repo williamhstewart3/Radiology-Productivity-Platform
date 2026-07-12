@@ -13,6 +13,8 @@ import { GroupedList, Row } from '../components/ui/GroupedList';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 import type { UserSettings, ExamAlias, ExamDictionaryEntry } from '../types';
 import type { ImportResult } from '../utils/rvuFileImporter';
+import { supabasePersistence } from '../services/supabasePersistence';
+import { effectiveAutoCommitThreshold } from '../services/automationSettings';
 
 interface SettingsProps {
   onNavigate?: (tab: 'automation' | 'profiles' | 'locations' | 'admin') => void;
@@ -276,6 +278,27 @@ export function Settings({ onNavigate }: SettingsProps) {
           >
             {saving ? 'Saving…' : saved ? 'Saved' : 'Save'}
           </button>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <p className="px-1 text-[13px] font-medium text-rd-label-secondary">Automation</p>
+        <div className="rounded-[16px] bg-rd-surface p-4 space-y-4" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+          <label className="grid gap-2 text-[13px] text-rd-label-secondary">
+            <span className="flex justify-between"><span>Auto-commit threshold</span><span className="font-mono text-rd-label-primary">{Math.round(effectiveAutoCommitThreshold(merged.lowConfidenceThreshold) * 100)}%</span></span>
+            <input type="range" min="0.95" max="0.99" step="0.01" value={effectiveAutoCommitThreshold(merged.lowConfidenceThreshold)} onChange={(event) => update({ lowConfidenceThreshold: Number(event.target.value) })} aria-label="Auto-commit threshold" />
+          </label>
+          <p className="text-[13px] leading-relaxed text-rd-label-secondary">Learned matches this confident are counted without asking. Lower-confidence and duplicate decisions always go to Inbox.</p>
+          <button type="button" onClick={handleSave} disabled={saving} className="min-h-11 w-full rounded-[10px] bg-rd-label-primary text-[15px] font-semibold text-rd-bg disabled:opacity-60">{saved ? 'Saved' : 'Save automation'}</button>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <p className="px-1 text-[13px] font-medium text-rd-label-secondary">Data & privacy</p>
+        <div className="rounded-[16px] bg-rd-surface p-4 text-[13px] leading-relaxed text-rd-label-secondary" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+          <p className="font-semibold text-rd-label-primary">Local-first · remote persistence {supabasePersistence.isConfigured() ? 'enabled' : 'disabled'}</p>
+          <p className="mt-1">{supabasePersistence.isConfigured() ? 'Remote persistence was explicitly enabled for this build.' : 'Study data, screenshots, OCR, aliases, and logs stay on this device.'}</p>
+          {supabasePersistence.hasCredentials() && !supabasePersistence.isConfigured() && <p className="mt-1 text-rd-caution">Credentials are present, but the privacy gate remains off.</p>}
         </div>
       </section>
 
