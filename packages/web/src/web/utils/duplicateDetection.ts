@@ -283,6 +283,23 @@ export async function checkOneDuplicate(
 
     const normLog = normalizeExamText(log.examNameRaw);
     if (normCandidate && normLog === normCandidate) {
+      // ── Secondary anchor: Modified time missing, but performed time matches ──
+      // One failed Modified-column OCR read must not multiply rows across
+      // repeated same-day captures. This never returns 'exact' — a missing
+      // Modified time is never strong enough to auto-skip.
+      if (
+        !candidate.modifiedDateTime &&
+        candidate.performedDateTime &&
+        log.examDateTime &&
+        sameMinute(candidate.performedDateTime, log.examDateTime)
+      ) {
+        return {
+          confidence: 'possible',
+          existingLog: log,
+          reason: 'Same exam title and performed time; Modified time missing',
+        };
+      }
+
       if (sameMinute(candidate.studyDateTime, log.studyDateTime)) {
         return {
           confidence: 'possible',
