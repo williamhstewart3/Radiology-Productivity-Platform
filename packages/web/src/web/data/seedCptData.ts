@@ -1,4 +1,6 @@
 import type { CptRvuRow, Modality, PcTcIndicator, StatusCategory } from '../types';
+import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from './acrRadiologyActiveCptSet';
+import { normalizeCptModifier } from '../utils/cptRowDeduplication';
 
 /**
  * ============================================================================
@@ -218,9 +220,9 @@ function nowIso() {
 export function buildSeedCptRows(): CptRvuRow[] {
   const ts = nowIso();
   return SEED_ROWS.map((row) => ({
-    id: `seed_${row.cptCode}_${row.modifier ?? 'none'}`,
+    id: `seed_${row.cptCode}_${normalizeCptModifier(row.modifier) || 'none'}`,
     cptCode: row.cptCode,
-    modifier: row.modifier,
+    modifier: normalizeCptModifier(row.modifier),
     description: row.description,
     workRvu: row.workRvu,
     nonFacilityPeRvu: null,
@@ -235,6 +237,8 @@ export function buildSeedCptRows(): CptRvuRow[] {
     modality: row.modality,
     rvuFileVersion: 'SEED_VERIFIED',
     effectiveDate: '2026-01-01',
+    includeInAutoMatch: isRadiologyActiveCpt(row.cptCode),
+    autoMatchSource: isRadiologyActiveCpt(row.cptCode) ? ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE : null,
     isUserVerified: true,
     createdAt: ts,
     updatedAt: ts,

@@ -5,15 +5,37 @@ Radiology Productivity Platform is a local-first productivity tool for radiologi
 ## Current Major Features
 
 - Manual study logging with CPT and wRVU tracking.
-- OCR screenshot import and review workflow.
-- Screenshot watcher support through the desktop shell.
+- PowerScribe clipboard/window capture with OCR screenshot import and review workflow.
+- Automatic PowerScribe screenshot preprocessing before OCR, including completed-studies table crop detection with a relative fallback.
+- OCR parsing that keeps both Exam Date and Modified Date/Time, using Modified Date/Time as the productivity timestamp.
+- OCR cleanup for row numbers, PowerScribe UI text, dates, timestamps, and other non-exam chrome before CPT matching.
+- Curated Radiology Exam Dictionary and Orbit CME seed mappings as primary OCR matching references before CMS/fuzzy fallback.
+- OCR confidence capture per imported study.
 - Learned exam aliases for faster future matching.
-- Duplicate detection across manual, OCR, CSV, and watcher-style imports.
-- Date/time extraction for imported studies.
+- Duplicate detection across manual, OCR, CSV, and PowerScribe capture imports.
+- Active review sessions for imported studies before final commit/finalization.
 - Multi-profile and multi-location context.
 - Daily Pace dashboard, Annual Dashboard, and Mini Pace Window.
 - CPT Explorer for professional-component CPT lookup and logging.
 - Mobile camera workflow foundation.
+
+## OCR Import Notes
+
+The main OCR workflow is designed around Alt+Print Screen capture of the active PowerScribe window. The app automatically crops the screenshot to the completed-studies table before OCR so the user should not need to manually crop screenshots.
+
+The crop should include the Procedure column, Modified column, and Exam Date column when visible, while excluding navigation, toolbars, filters, buttons, bottom tabs, status bars, and empty margins.
+
+Date handling is intentional:
+
+- Modified Date/Time is the productivity timestamp and determines the wRVU day.
+- Exam Date is preserved for duplicate detection and historical reference.
+- Duplicate detection prioritizes accession number, normalized exam plus Modified Date/Time, normalized exam plus Exam Date, then fuzzy matching.
+
+The OCR matcher should prefer user-approved aliases, site-specific aliases, curated dictionary entries, and Orbit CME seed mappings before falling back to CMS descriptions or fuzzy matching. CMS data remains the source of truth for CPT validation and modifier 26 wRVU values.
+
+## Project Backlog
+
+`PROJECT_BACKLOG.md` is the master backlog for active product work. Update it whenever a backlog item is completed or newly discovered.
 
 ## Tech Stack
 
@@ -63,6 +85,8 @@ The web app is intended to deploy from the repository root using the root packag
 - Create feature branches from latest `development`.
 - Open pull requests into `development`.
 - Merge `development` into `main` only after validation.
+
+Current OCR automation work is being tracked on `feature/ocr-automation`.
 
 ## Project Structure
 

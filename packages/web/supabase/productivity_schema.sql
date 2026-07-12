@@ -72,12 +72,16 @@ create table if not exists public.productivity_exam_rows (
   study_date date,
   study_datetime timestamptz,
   exam_name_raw text not null,
+  exam_title_normalized text,
+  exam_title_display text,
+  cms_description text,
   accession_number text,
   modality text,
   cpt_codes jsonb not null default '[]'::jsonb,
   modifier_26_wrvu numeric not null default 0,
   match_method text,
   match_confidence numeric,
+  ocr_confidence numeric,
   not_productivity_relevant boolean not null default false,
   notes text,
   deleted_at timestamptz,
@@ -88,16 +92,70 @@ create table if not exists public.productivity_exam_rows (
   updated_at timestamptz not null default now()
 );
 
+alter table public.productivity_exam_rows
+  add column if not exists exam_title_normalized text,
+  add column if not exists exam_title_display text,
+  add column if not exists cms_description text,
+  add column if not exists ocr_confidence numeric;
+
 create index if not exists productivity_exam_rows_date_idx
   on public.productivity_exam_rows (log_date, profile_id, deleted_at);
 
 create index if not exists productivity_exam_rows_upload_idx
   on public.productivity_exam_rows (upload_day_id);
 
+create index if not exists productivity_exam_rows_title_idx
+  on public.productivity_exam_rows (exam_title_normalized);
+
+create table if not exists public.exam_dictionary_entries (
+  id uuid primary key default gen_random_uuid(),
+  canonical_display_name text not null,
+  normalized_key text not null,
+  common_synonyms jsonb not null default '[]'::jsonb,
+  hospital_aliases jsonb not null default '[]'::jsonb,
+  powerscribe_names jsonb not null default '[]'::jsonb,
+  cms_description text,
+  cpt_codes jsonb not null default '[]'::jsonb,
+  modifier_26_wrvu numeric,
+  modality text not null default 'OTHER',
+  body_region text,
+  typical_combinations jsonb not null default '[]'::jsonb,
+  times_used integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists exam_dictionary_entries_normalized_idx
+  on public.exam_dictionary_entries (normalized_key);
+
+create table if not exists public.active_review_sessions (
+  id uuid primary key default gen_random_uuid(),
+  profile_id text,
+  reading_date date not null,
+  status text not null default 'active',
+  rows_json jsonb not null default '[]'::jsonb,
+  skipped_rows_json jsonb not null default '[]'::jsonb,
+  timeline_json jsonb not null default '[]'::jsonb,
+  total_exams integer not null default 0,
+  confirmed_wrvu numeric not null default 0,
+  estimated_pending_wrvu numeric not null default 0,
+  projected_wrvu numeric not null default 0,
+  needs_review_count integer not null default 0,
+  duplicate_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  finalized_at timestamptz
+);
+
+create index if not exists active_review_sessions_active_idx
+  on public.active_review_sessions (profile_id, reading_date, status);
+
 alter table public.rvu_datasets enable row level security;
 alter table public.cpt_rvu_rows enable row level security;
 alter table public.productivity_upload_days enable row level security;
 alter table public.productivity_exam_rows enable row level security;
+alter table public.exam_dictionary_entries enable row level security;
+alter table public.active_review_sessions enable row level security;
 
 -- Single-user deployment policy. Tighten these policies before sharing the app
 -- broadly or adding authentication.
@@ -124,4 +182,16 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 do $$ begin
   create policy "anon write productivity exams" on public.productivity_exam_rows for all using (true) with check (true);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "anon read exam dictionary" on public.exam_dictionary_entries for select using (true);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "anon write exam dictionary" on public.exam_dictionary_entries for all using (true) with check (true);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "anon read active sessions" on public.active_review_sessions for select using (true);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "anon write active sessions" on public.active_review_sessions for all using (true) with check (true);
 exception when duplicate_object then null; end $$;

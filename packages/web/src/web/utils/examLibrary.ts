@@ -17,6 +17,7 @@
 
 import type { NormalizationResult } from './examNormalizer';
 import type { Modality } from '../types';
+import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
 
 // ─── Public constant ──────────────────────────────────────────────────────────
 
@@ -66,14 +67,15 @@ const MODALITY_PATTERNS: { pattern: RegExp; modality: Modality }[] = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function extractModalityFromDescription(desc: string): Modality | null {
+  const normalizedDesc = normalizeOcrExamTextForMatching(desc);
   for (const { pattern, modality } of MODALITY_PATTERNS) {
-    if (pattern.test(desc)) return modality;
+    if (pattern.test(normalizedDesc)) return modality;
   }
   return null;
 }
 
 function extractBodyPartsFromDescription(desc: string): string[] {
-  const lower = desc.toLowerCase();
+  const lower = normalizeOcrExamTextForMatching(desc).toLowerCase();
   const found: string[] = [];
   for (const bp of SORTED_BODY_PARTS) {
     if (lower.includes(bp)) {
@@ -86,11 +88,12 @@ function extractBodyPartsFromDescription(desc: string): string[] {
 type ContrastHint = 'with' | 'without' | 'with_and_without' | null;
 
 function extractContrastFromDescription(desc: string): ContrastHint {
-  if (/with(?:out)?\s+and\s+with(?:out)?|without\s+and\s+with/i.test(desc)) {
+  const normalizedDesc = normalizeOcrExamTextForMatching(desc);
+  if (/with(?:out)?\s+and\s+with(?:out)?|without\s+and\s+with/i.test(normalizedDesc)) {
     return 'with_and_without';
   }
-  if (/\bwithout\b/i.test(desc)) return 'without';
-  if (/\bwith\s+contrast\b|\bw\/\s*c\b|\bpost.?contrast\b/i.test(desc)) return 'with';
+  if (/\bwithout\b|\bw\s*\/\s*o\b/i.test(normalizedDesc)) return 'without';
+  if (/\bwith\s+contrast\b|\bw\s+contrast\b|\bw\/\s*c\b|\bpost.?contrast\b/i.test(normalizedDesc)) return 'with';
   return null;
 }
 
@@ -167,7 +170,8 @@ export function scoreRadiologyMatch(
           }
         }
       }
-      bodyPartScore = hits / querySet.size;
+      const coverage = hits / querySet.size;
+      bodyPartScore = querySet.size >= 2 && hits < querySet.size ? coverage * 0.45 : coverage;
     }
   } else {
     bodyPartScore = 0.5; // unknown anatomy — neutral

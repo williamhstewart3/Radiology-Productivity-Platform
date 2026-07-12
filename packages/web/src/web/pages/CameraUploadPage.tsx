@@ -20,13 +20,14 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { theme } from '../lib/theme';
-import { OCRImportProvider } from '../providers/OCRImportProvider';
-import { runImportPipeline, commitPipelineResults } from '../pipeline/importPipeline';
-import { searchExamLibrary, learnAlias } from '../utils/matching';
+import { commitPipelineResults } from '../pipeline/importPipeline';
+import { searchExamLibrary } from '../utils/matching';
 import { useProfile } from '../hooks/useProfile';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { todayDateString } from '../utils/calculations';
 import { db } from '../db/database';
+import { rememberCorrectedExam } from '../services/memoryLearningService';
+import { processOcrImport } from '../services/ocrWorkflowService';
 import type { UserSettings } from '../types';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
@@ -421,11 +422,14 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
   async function processBlob(blob: Blob, previewUrl?: string) {
     setStep('processing');
     try {
-      const provider = new OCRImportProvider(blob, logDate);
-      const studies  = await provider.importStudies();
-      const result   = await runImportPipeline(studies, logDate, activeProfile?.id);
-      setReviewRows(result.reviewRows);
-      setSkippedRows(result.skippedRows);
+      const processed = await processOcrImport(blob, {
+        profileId: activeProfile?.id ?? null,
+        siteId: null,
+        sessionId: null,
+        logDate,
+      }, { cropAlreadyApplied: Boolean(previewUrl) });
+      setReviewRows(processed.result.reviewRows);
+      setSkippedRows(processed.result.skippedRows);
 
       // Revoke cropped image after OCR is done — not needed anymore
       if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -487,12 +491,13 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
       (c) => !(c.cptCode === candidate.cptCode && c.modifier === candidate.modifier),
     )];
     updateRow(tempId, { candidates: updated, selectedCandidateIndex: 0, needsReview: false });
-    await learnAlias({
+    await rememberCorrectedExam({
       rawText: row.source.examTitle,
-      canonicalExamName: candidate.description,
-      candidates: [{ cptCode: candidate.cptCode, modifier: candidate.modifier, workRvu: candidate.workRvu }],
-      source: 'user',
+      candidates: [candidate],
       profileId: activeProfile?.id ?? null,
+      siteId: null,
+      sessionId: null,
+      logDate,
     });
     setSearchPanelTempId(null);
   }
@@ -717,6 +722,11 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/25 text-sky-400 font-medium">OCR date</span>
                       ) : (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/25 text-amber-400/80 font-medium" title="Date was not extracted from OCR — using log date">⚠ inferred</span>
+                      )}
+                      {row.source.ocrConfidence != null && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300 font-medium">
+                          OCR text {Math.round(row.source.ocrConfidence * 100)}%
+                        </span>
                       )}
                     </div>
                   </div>

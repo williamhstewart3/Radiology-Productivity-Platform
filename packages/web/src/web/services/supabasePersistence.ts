@@ -1,8 +1,15 @@
 import { db } from '../db/database';
+import { dedupeCptRvuRowsForBulkPut, normalizeCptModifier } from '../utils/cptRowDeduplication';
 import type { CptRvuRow, StudyLog } from '../types';
+import {
+  hasSupabaseCredentials,
+  isSupabaseSyncEnabled,
+  type SupabaseSyncConfig,
+} from './supabaseConfig';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const SUPABASE_SYNC_ENABLED = import.meta.env.VITE_ENABLE_SUPABASE_SYNC;
 
 export interface RvuDatasetMetadata {
   id: string;
@@ -19,8 +26,16 @@ export interface RemoteImportSummary {
   rowsImported: number;
 }
 
+function currentConfig(): SupabaseSyncConfig {
+  return {
+    enabled: SUPABASE_SYNC_ENABLED,
+    url: SUPABASE_URL,
+    anonKey: SUPABASE_ANON_KEY,
+  };
+}
+
 function configured(): boolean {
-  return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+  return isSupabaseSyncEnabled(currentConfig());
 }
 
 function headers(extra?: HeadersInit): HeadersInit {
@@ -48,8 +63,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(`Supabase request failed (${response.status}): ${body || response.statusText}`);
   }
 
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  const body = await response.text();
+  if (!body) return undefined as T;
+  return JSON.parse(body) as T;
 }
 
 function toDbDataset(row: Record<string, any>): RvuDatasetMetadata {
@@ -68,7 +84,7 @@ function toRemoteRvuRow(row: CptRvuRow, datasetId: string): Record<string, any> 
   return {
     dataset_id: datasetId,
     cpt_code: row.cptCode,
-    modifier: row.modifier,
+    modifier: normalizeCptModifier(row.modifier),
     description: row.description,
     work_rvu: row.workRvu,
     non_facility_pe_rvu: row.nonFacilityPeRvu,
@@ -93,7 +109,7 @@ function toLocalRvuRow(row: Record<string, any>): CptRvuRow {
   return {
     id: row.id,
     cptCode: row.cpt_code,
-    modifier: row.modifier,
+    modifier: normalizeCptModifier(row.modifier),
     description: row.description ?? '',
     workRvu: row.work_rvu == null ? null : Number(row.work_rvu),
     nonFacilityPeRvu: row.non_facility_pe_rvu == null ? null : Number(row.non_facility_pe_rvu),
@@ -119,6 +135,7 @@ function toRemoteStudyLog(log: StudyLog, uploadDayId: string | null): Record<str
     cptCode: log.cptCode,
     modifier: log.modifier,
     workRvu: log.workRvu,
+    cmsDescription: log.cmsDescription,
   }].filter((code) => code.cptCode);
 
   return {
@@ -127,14 +144,19 @@ function toRemoteStudyLog(log: StudyLog, uploadDayId: string | null): Record<str
     profile_id: log.profileId,
     log_date: log.logDate,
     study_date: log.studyDate,
+    exam_datetime: log.examDateTime ?? null,
     study_datetime: log.studyDateTime,
     exam_name_raw: log.examNameRaw,
+    exam_title_normalized: log.examTitleNormalized,
+    exam_title_display: log.examTitleDisplay ?? log.examNameRaw,
+    cms_description: log.cmsDescription,
     accession_number: log.accessionNumber,
     modality: log.modality,
     cpt_codes: cptCodes,
     modifier_26_wrvu: log.modifier === '26' && (log.workRvu ?? 0) > 0 ? log.workRvu : 0,
     match_method: log.matchMethod,
     match_confidence: log.matchConfidence,
+    ocr_confidence: log.ocrConfidence ?? null,
     not_productivity_relevant: (log.workRvu ?? 0) <= 0 || log.modifier !== '26',
     notes: log.notes,
     deleted_at: (log as any).deletedAt ?? null,
@@ -148,6 +170,7 @@ function toRemoteStudyLog(log: StudyLog, uploadDayId: string | null): Record<str
 
 export const supabasePersistence = {
   isConfigured: configured,
+  hasCredentials: () => hasSupabaseCredentials(currentConfig()),
 
   async getActiveRvuDataset(): Promise<RvuDatasetMetadata | null> {
     if (!configured()) return null;
@@ -217,7 +240,7 @@ export const supabasePersistence = {
     if (localRows.length > 0) {
       await db.transaction('rw', db.cptRvuTable, db.userSettings, async () => {
         await db.cptRvuTable.clear();
-        await db.cptRvuTable.bulkPut(localRows);
+        await db.cptRvuTable.bulkPut(dedupeCptRvuRowsForBulkPut(localRows, 'Supabase CPT hydration'));
         const settings = await db.userSettings.get('default');
         if (settings) {
           await db.userSettings.put({
@@ -266,6 +289,20 @@ export const supabasePersistence = {
       method: 'POST',
       body: JSON.stringify(rows),
       headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    });
+  },
+
+  async updateStudyLogDisplayTitle(localIds: string[], displayTitle: string, normalizedTitle: string): Promise<void> {
+    if (!configured() || localIds.length === 0) return;
+    const encoded = localIds.map((id) => `"${id}"`).join(',');
+    await request(`productivity_exam_rows?local_log_id=in.(${encoded})`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        exam_title_display: displayTitle,
+        exam_title_normalized: normalizedTitle,
+        updated_at: new Date().toISOString(),
+      }),
+      headers: { Prefer: 'return=minimal' },
     });
   },
 

@@ -13,13 +13,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { theme } from '../lib/theme';
 import { findMatchCandidates } from '../utils/matching';
-import { checkOneDuplicate, buildFingerprint } from '../utils/duplicateDetection';
-import { db } from '../db/database';
-import { learnAlias } from '../utils/matching';
+import { checkOneDuplicate } from '../utils/duplicateDetection';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
-import { ManualImportProvider } from '../providers/ManualImportProvider';
-import type { MatchCandidate, StudyLog } from '../types';
+import { logConfirmedStudy } from '../utils/manualLog';
+import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import type { MatchCandidate } from '../types';
 import { MODALITY_LABELS } from '../types';
 import type { DuplicateMatch, StudyCandidate } from '../utils/duplicateDetection';
 
@@ -76,7 +75,9 @@ export function LogStudy({ onSaved }: LogStudyProps) {
           modifier: selected.modifier,
           logDate,
           studyDateTime: null,
+          studyDate: logDate,
           accessionNumber: null,
+          rowIndex: null,
           modality: selected.modality,
         };
         const dupeMatch = await checkOneDuplicate(candidate, undefined);
@@ -87,55 +88,14 @@ export function LogStudy({ onSaved }: LogStudyProps) {
         }
       }
 
-      // ── Build via ManualImportProvider to document the source ─────────────
-      // The provider produces an ImportedStudy. For manual entry the pipeline
-      // review step is skipped — we have the CPT selected by the user already.
-      // We construct the StudyLog directly to preserve notes + selected CPT.
-      void new ManualImportProvider({ examTitle: examInput.trim(), studyDate: logDate });
-      // (Provider instantiation above confirms the architecture path;
-      //  the DB write uses the user's explicit CPT selection below.)
-
-      const fp = buildFingerprint(
-        examInput.trim(),
-        selected.cptCode,
+      // ── Route through the shared import pipeline's commit path ───────────
+      // Same commit function OCR/CSV/PowerScribe use: centralized fingerprinting,
+      // alias learning, and Supabase sync — not a bespoke direct DB write.
+      await logConfirmedStudy({
+        examTitle: examInput.trim(),
+        candidate: selected,
         logDate,
-        null,
-        null,
-        selected.modality,
-      );
-
-      const now = new Date().toISOString();
-      const log: StudyLog = {
-        id: crypto.randomUUID(),
-        profileId: activeProfile?.id ?? null,
-        logDate,
-        studyDateTime: null,
-        studyDate: logDate,
-        dateTimeConfidence: 0,
-        dateTimeSource: 'manual',
-        examNameRaw: examInput.trim(),
-        cptCode: selected.cptCode,
-        modifier: selected.modifier,
-        workRvu: selected.workRvu,
-        modality: selected.modality,
-        matchMethod: selected.method,
-        matchConfidence: selected.confidence,
-        needsReview: selected.confidence < 0.75,
-        accessionNumber: null,
-        sessionId: null,
-        sourceImportId: null,
-        notes: notes.trim() || null,
-        studyFingerprint: fp,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      await db.studyLogs.add(log);
-      await learnAlias({
-        rawText: examInput.trim(),
-        canonicalExamName: selected.description,
-        candidates: [{ cptCode: selected.cptCode, modifier: selected.modifier, workRvu: selected.workRvu }],
-        source: 'manual_name_match',
+        notes,
         profileId: activeProfile?.id ?? null,
       });
 
@@ -170,6 +130,12 @@ export function LogStudy({ onSaved }: LogStudyProps) {
     return 'bg-red-500/10 border-red-500/40';
   };
 
+  const matchExplanationText = (candidate: MatchCandidate) => {
+    const normalized = candidate.explanation?.normalizedText ?? normalizeRadiologyDescription(examInput);
+    const source = candidate.explanation?.source ?? candidate.method.replace(/_/g, ' ');
+    return `Raw: ${examInput} | Normalized: ${normalized} | Source: ${source} | Method: ${candidate.method} | CMS: ${candidate.description}`;
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
       <div>
@@ -180,10 +146,12 @@ export function LogStudy({ onSaved }: LogStudyProps) {
       <div className="card space-y-4">
         {/* Date */}
         <div>
-          <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+          <label htmlFor="log-study-date" className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
             Date
           </label>
           <input
+            id="log-study-date"
+            aria-label="Date"
             type="date"
             value={logDate}
             onChange={(e) => setLogDate(e.target.value)}
@@ -193,17 +161,18 @@ export function LogStudy({ onSaved }: LogStudyProps) {
 
         {/* Exam input */}
         <div>
-          <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+          <label htmlFor="log-study-exam" className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
             Exam Name or CPT Code
           </label>
           <div className="relative">
             <input
+              id="log-study-exam"
+              aria-label="Exam Name or CPT Code"
               type="text"
               value={examInput}
               onChange={(e) => setExamInput(e.target.value)}
               placeholder="e.g. CT Abdomen Pelvis w contrast, or 74178"
               className="input w-full pr-8"
-              autoFocus
             />
             {searching && (
               <div className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -216,9 +185,9 @@ export function LogStudy({ onSaved }: LogStudyProps) {
         {/* Match candidates */}
         {candidates.length > 0 && (
           <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">
+            <p className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">
               Matches — select one
-            </label>
+            </p>
             <div className="space-y-2">
               {candidates.map((c) => {
                 const isSelected = selected?.cptCode === c.cptCode && selected?.modifier === c.modifier;
@@ -226,6 +195,7 @@ export function LogStudy({ onSaved }: LogStudyProps) {
                   <button
                     key={`${c.cptCode}-${c.modifier ?? 'null'}`}
                     onClick={() => setSelected(c)}
+                    aria-label={`${c.cptCode}${c.modifier ? `-${c.modifier}` : ''}, ${c.description}, ${c.workRvu?.toFixed(2) ?? 'N/A'} wRVU, ${Math.round(c.confidence * 100)}% confidence`}
                     className={`w-full text-left rounded-xl border p-3 transition-all duration-200 ${confidenceBg(c.confidence, isSelected)}`}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -242,6 +212,12 @@ export function LogStudy({ onSaved }: LogStudyProps) {
                           )}
                         </div>
                         <p className="text-slate-300 text-xs mt-0.5 line-clamp-2">{c.description}</p>
+                        <p className="text-[10px] text-slate-500 mt-1 leading-snug">{matchExplanationText(c)}</p>
+                        {c.confidence < 0.75 && candidates.length > 1 && (
+                          <p className="text-[10px] text-amber-300/80 mt-0.5">
+                            Alternatives: {candidates.filter((alt) => alt !== c).slice(0, 3).map((alt) => `${alt.cptCode}${alt.modifier ? `-${alt.modifier}` : ''} ${Math.round(alt.confidence * 100)}%`).join(' | ')}
+                          </p>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-white font-bold text-sm">{c.workRvu?.toFixed(2) ?? 'N/A'}</p>
@@ -270,10 +246,12 @@ export function LogStudy({ onSaved }: LogStudyProps) {
 
         {/* Notes */}
         <div>
-          <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+          <label htmlFor="log-study-notes" className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
             Notes (optional)
           </label>
           <textarea
+            id="log-study-notes"
+            aria-label="Notes (optional)"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Accession number, patient context, etc."

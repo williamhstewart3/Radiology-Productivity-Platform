@@ -36,6 +36,12 @@ export interface ParsedDateTime {
   matchedPattern: string;
 }
 
+export interface ParsedDateTimeMatch extends ParsedDateTime {
+  text: string;
+  index: number;
+  endIndex: number;
+}
+
 // ─── Pattern registry ────────────────────────────────────────────────────────
 
 // M/D/YY or MM/DD/YYYY with optional H:MM or HH:MM and AM/PM
@@ -44,6 +50,12 @@ const US_DATE_TIME = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})(?::\
 const ISO_DATE_TIME = /\b(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::\d{2})?\b/;
 // Dash-separated US: MM-DD-YYYY H:MM AM/PM
 const US_DASH_DATE_TIME = /\b(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|am|pm)?\b/;
+// OCR-damaged US datetime where the colon is missing but AM/PM is present.
+const US_DATE_COMPACT_TIME = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2})\s*:?\s*(\d{2})\s*(AM|PM|am|pm)\b/;
+// Compact PowerScribe date with time: 712026 8:28 PM -> 7/1/2026 8:28 PM.
+const POWERSCRIBE_COMPACT_DATE_TIME = /\b(\d{6,8})\s+(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)\b/;
+// PowerScribe-damaged date fragments such as "T2026 10:12 PM" or "212026 8:16 AM".
+const POWERSCRIBE_DAMAGED_DATE_TIME = /\b([TtFf]|\d{1,2}?)(?:1)?(20\d{2})\s+(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)\b/;
 // Date only (no time): MM/DD/YYYY or MM/DD/YY
 const US_DATE_ONLY = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/;
 // ISO date only: YYYY-MM-DD
@@ -52,6 +64,77 @@ const ISO_DATE_ONLY = /\b(\d{4})-(\d{2})-(\d{2})\b/;
 const ABBREV_MONTH = /\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:,?\s+(\d{4}))?\b/i;
 // "Today" / "Yesterday" relative markers
 const RELATIVE_DATE = /\b(Today|Yesterday)\b/i;
+
+const ORDERED_DATE_PATTERNS: Array<{ pattern: RegExp; parse: (match: RegExpMatchArray) => ParsedDateTime | null }> = [
+  {
+    pattern: /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|am|pm)?\b/g,
+    parse: (match) => {
+      const [, mStr, dStr, yStr, hStr, minStr, ampm] = match;
+      const parsed = buildUsDateTime(mStr, dStr, yStr, hStr, minStr, ampm ?? null);
+      return parsed ? { ...parsed, matchedPattern: 'US_DATE_TIME' } : null;
+    },
+  },
+  {
+    pattern: /\b(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::\d{2})?\b/g,
+    parse: (match) => {
+      const [, yStr, mStr, dStr, hStr, minStr] = match;
+      const parsed = buildIsoDateTime(yStr, mStr, dStr, hStr, minStr);
+      return parsed ? { ...parsed, matchedPattern: 'ISO_DATE_TIME' } : null;
+    },
+  },
+  {
+    pattern: /\b(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|am|pm)?\b/g,
+    parse: (match) => {
+      const [, mStr, dStr, yStr, hStr, minStr, ampm] = match;
+      const parsed = buildUsDateTime(mStr, dStr, yStr, hStr, minStr, ampm ?? null);
+      return parsed ? { ...parsed, matchedPattern: 'US_DASH_DATE_TIME' } : null;
+    },
+  },
+  {
+    pattern: /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2})\s*:?\s*(\d{2})\s*(AM|PM|am|pm)\b/g,
+    parse: (match) => {
+      const [, mStr, dStr, yStr, hStr, minStr, ampm] = match;
+      const parsed = buildUsDateTime(mStr, dStr, yStr, hStr, minStr, ampm ?? null);
+      return parsed ? { ...parsed, confidence: 0.92, matchedPattern: 'US_DATE_COMPACT_TIME' } : null;
+    },
+  },
+  {
+    pattern: /\b(\d{6,8})\s+(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)\b/g,
+    parse: (match) => {
+      const [, compactDate, hStr, minStr, ampm] = match;
+      const parsed = buildPowerScribeCompactDateTime(compactDate, hStr, minStr, ampm ?? null);
+      return parsed ? { ...parsed, confidence: 0.82, matchedPattern: 'POWERSCRIBE_COMPACT_DATE_TIME' } : null;
+    },
+  },
+  {
+    pattern: /\b([TtFf]|\d{1,2}?)(?:1)?(20\d{2})\s+(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)\b/g,
+    parse: (match) => {
+      const [, dayToken, yStr, hStr, minStr, ampm] = match;
+      const parsed = buildPowerScribeDamagedDateTime(dayToken, yStr, hStr, minStr, ampm ?? null);
+      return parsed ? { ...parsed, confidence: 0.72, matchedPattern: 'POWERSCRIBE_DAMAGED_DATE_TIME' } : null;
+    },
+  },
+  {
+    pattern: /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/g,
+    parse: (match) => {
+      const [, mStr, dStr, yStr] = match;
+      const studyDate = buildUsDate(mStr, dStr, yStr);
+      return studyDate
+        ? { studyDateTime: null, studyDate, studyTime: null, confidence: 0.85, matchedPattern: 'US_DATE_ONLY' }
+        : null;
+    },
+  },
+  {
+    pattern: /\b(\d{4})-(\d{2})-(\d{2})\b/g,
+    parse: (match) => {
+      const [, yStr, mStr, dStr] = match;
+      const studyDate = buildIsoDate(yStr, mStr, dStr);
+      return studyDate
+        ? { studyDateTime: null, studyDate, studyTime: null, confidence: 0.85, matchedPattern: 'ISO_DATE_ONLY' }
+        : null;
+    },
+  },
+];
 
 // ─── Core parser ──────────────────────────────────────────────────────────────
 
@@ -87,6 +170,27 @@ export function parseDateTimeFromOcr(text: string): ParsedDateTime | null {
   }
 
   // ── Date-only patterns ────────────────────────────────────────────────────
+  const compactTimeMatch = text.match(US_DATE_COMPACT_TIME);
+  if (compactTimeMatch) {
+    const [, mStr, dStr, yStr, hStr, minStr, ampm] = compactTimeMatch;
+    const parsed = buildUsDateTime(mStr, dStr, yStr, hStr, minStr, ampm ?? null);
+    if (parsed) return { ...parsed, confidence: 0.92, matchedPattern: 'US_DATE_COMPACT_TIME' };
+  }
+
+  const compactPowerScribeMatch = text.match(POWERSCRIBE_COMPACT_DATE_TIME);
+  if (compactPowerScribeMatch) {
+    const [, compactDate, hStr, minStr, ampm] = compactPowerScribeMatch;
+    const parsed = buildPowerScribeCompactDateTime(compactDate, hStr, minStr, ampm ?? null);
+    if (parsed) return { ...parsed, confidence: 0.82, matchedPattern: 'POWERSCRIBE_COMPACT_DATE_TIME' };
+  }
+
+  const damagedPowerScribeMatch = text.match(POWERSCRIBE_DAMAGED_DATE_TIME);
+  if (damagedPowerScribeMatch) {
+    const [, dayToken, yStr, hStr, minStr, ampm] = damagedPowerScribeMatch;
+    const parsed = buildPowerScribeDamagedDateTime(dayToken, yStr, hStr, minStr, ampm ?? null);
+    if (parsed) return { ...parsed, confidence: 0.72, matchedPattern: 'POWERSCRIBE_DAMAGED_DATE_TIME' };
+  }
+
   const usDateOnly = text.match(US_DATE_ONLY);
   if (usDateOnly) {
     const [, mStr, dStr, yStr] = usDateOnly;
@@ -149,6 +253,36 @@ export function parseDateTimeFromOcr(text: string): ParsedDateTime | null {
   }
 
   return null;
+}
+
+function overlapsExisting(match: ParsedDateTimeMatch, matches: ParsedDateTimeMatch[]): boolean {
+  return matches.some((existing) => match.index < existing.endIndex && match.endIndex > existing.index);
+}
+
+export function parseDateTimeMatchesFromOcr(text: string): ParsedDateTimeMatch[] {
+  if (!text || text.trim().length < 3) return [];
+
+  const matches: ParsedDateTimeMatch[] = [];
+
+  for (const { pattern, parse } of ORDERED_DATE_PATTERNS) {
+    pattern.lastIndex = 0;
+    for (const match of text.matchAll(pattern)) {
+      const index = match.index ?? 0;
+      const candidate = parse(match);
+      if (!candidate) continue;
+      const withRange = {
+        ...candidate,
+        text: match[0],
+        index,
+        endIndex: index + match[0].length,
+      };
+      if (!overlapsExisting(withRange, matches)) {
+        matches.push(withRange);
+      }
+    }
+  }
+
+  return matches.sort((a, b) => a.index - b.index);
 }
 
 /**
@@ -231,6 +365,47 @@ function buildIsoDateTime(
   if (isNaN(dt.getTime())) return null;
 
   return { studyDateTime, studyDate, studyTime, confidence: 1.0 };
+}
+
+function buildPowerScribeCompactDateTime(
+  compactDate: string,
+  hStr: string,
+  minStr: string,
+  ampm: string | null,
+): Omit<ParsedDateTime, 'matchedPattern'> | null {
+  const digits = compactDate.replace(/\D/g, '');
+  const candidates: Array<[string, string, string]> = [];
+  const currentMonth = String(new Date().getMonth() + 1);
+  if (digits.length === 8) {
+    candidates.push([digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)]);
+  } else if (digits.length === 7) {
+    if (digits.slice(0, 1) !== currentMonth) return null;
+    candidates.push([digits.slice(0, 1), digits.slice(1, 2), digits.slice(3)]);
+    candidates.push([digits.slice(0, 1), digits.slice(1, 3), digits.slice(3)]);
+  } else if (digits.length === 6) {
+    if (digits.slice(0, 1) !== currentMonth) return null;
+    candidates.push([digits.slice(0, 1), digits.slice(1, 2), digits.slice(2)]);
+  }
+
+  for (const [month, day, year] of candidates) {
+    const parsed = buildUsDateTime(month, day, year, hStr, minStr, ampm);
+    if (parsed) return { ...parsed, confidence: 0.82 };
+  }
+
+  return null;
+}
+
+function buildPowerScribeDamagedDateTime(
+  dayToken: string,
+  yStr: string,
+  hStr: string,
+  minStr: string,
+  ampm: string | null,
+): Omit<ParsedDateTime, 'matchedPattern'> | null {
+  const month = new Date().getMonth() + 1;
+  const normalizedDayToken = /^[TF]$/i.test(dayToken) ? '1' : dayToken;
+  const parsed = buildUsDateTime(String(month), normalizedDayToken, yStr, hStr, minStr, ampm);
+  return parsed ? { ...parsed, confidence: 0.72 } : null;
 }
 
 function buildUsDate(mStr: string, dStr: string, yStr: string): string | null {
