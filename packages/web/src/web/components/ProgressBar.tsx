@@ -98,7 +98,6 @@ export function StatusBadge({ status, label, size = 'md' }: StatusBadgeProps) {
     }}>
       <span style={{
         width: 6, height: 6, borderRadius: '50%', background: c.dot,
-        animation: 'pulse 2s ease-in-out infinite',
         display: 'inline-block',
       }} />
       {label ?? c.defaultLabel}

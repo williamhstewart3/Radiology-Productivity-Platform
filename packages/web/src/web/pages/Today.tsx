@@ -18,8 +18,8 @@ import {
   type DailyPaceSettings,
 } from '../utils/dailyPaceCalculations';
 import { todayDateString } from '../utils/calculations';
-import { ConfettiCanvas } from '../components/ConfettiCanvas';
 import { MiniPaceWindow } from '../components/MiniPaceWindow';
+import { Readout, type ReadoutTone } from '../components/ui/Readout';
 import { Ring, useCountUp } from '../components/ui/Ring';
 import { StatCard } from '../components/ui/StatCard';
 import { StatusPill } from '../components/ui/StatusPill';
@@ -146,18 +146,13 @@ export function Today({ onNavigate }: TodayProps) {
   };
 
   const prevAchievedRef = useRef(false);
-  const [showConfetti, setShowConfetti] = useState(false);
   const [metrics, setMetrics] = useState<DailyPaceMetrics | null>(null);
 
   const recalculate = useCallback(() => {
     if (!todayLogs) return;
     const m = computeDailyPace(todayLogs, paceSettings, prevAchievedRef.current);
     setMetrics(m);
-    if (m.goalJustAchieved) {
-      prevAchievedRef.current = true;
-      setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 4500);
-    }
+    if (m.goalJustAchieved) prevAchievedRef.current = true;
     if (m.currentRvu < m.dailyGoal) prevAchievedRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -206,32 +201,57 @@ export function Today({ onNavigate }: TodayProps) {
   // First-time empty state: never logged anything, ever.
   if (everLoggedCount === 0) {
     return (
-      <div className="mx-auto flex max-w-md flex-col items-center gap-6 py-20 text-center">
-        <Ring percent={0} size={180} label="No studies logged yet">
-          <span className="text-[40px] font-bold leading-none text-rd-label-secondary [font-variant-numeric:tabular-nums]">
-            0.0
-          </span>
-        </Ring>
-        <div>
-          <h1 className="text-[28px] font-bold text-rd-label-primary">Log your first study</h1>
+      <div className="mx-auto max-w-2xl space-y-10">
+        <div className="sticky top-0 z-20 -mx-3 border-b border-rd-separator bg-rd-bg/95 px-3 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
+          <Readout parts={[
+            { text: '0.0 wRVU' },
+            { text: 'Not started yet' },
+            { text: 'all counted', tone: 'positive' },
+          ]} />
         </div>
-        <button
-          type="button"
-          onClick={() => onNavigate('/log')}
-          className="min-h-11 rounded-[10px] px-6 py-2.5 text-[15px] font-semibold text-white"
-          style={{ background: 'var(--rd-accent)' }}
-        >
-          Log a study
-        </button>
+        <div className="flex flex-col items-center gap-6 py-16 text-center">
+          <Ring percent={0} size={180} label="No studies logged yet">
+            <span className="text-[40px] font-bold leading-none text-rd-label-secondary [font-variant-numeric:tabular-nums]">
+              0.0
+            </span>
+          </Ring>
+          <h1 className="text-[28px] font-bold text-rd-label-primary">Nothing logged yet today</h1>
+          <button
+            type="button"
+            onClick={() => onNavigate('/log')}
+            className="min-h-11 rounded-[10px] bg-rd-label-primary px-6 py-2.5 text-[15px] font-semibold text-rd-bg"
+          >
+            + Capture
+          </button>
+        </div>
       </div>
     );
   }
 
   const pace = paceLine(metrics);
+  const attentionCount = activeSession?.needsReviewCount ?? 0;
+  const paceTone: ReadoutTone = metrics.status === 'goal_achieved'
+    ? 'reached'
+    : pace.tone === 'positive'
+      ? 'positive'
+      : pace.tone === 'caution'
+        ? 'caution'
+        : 'neutral';
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <ConfettiCanvas active={showConfetti} />
+      <div className="sticky top-0 z-20 -mx-3 border-b border-rd-separator bg-rd-bg/95 px-3 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
+        <Readout parts={[
+          { text: `${metrics.currentRvu.toFixed(1)} wRVU` },
+          { text: pace.text, tone: paceTone },
+          {
+            text: attentionCount === 0
+              ? 'all counted'
+              : `${attentionCount} ${attentionCount === 1 ? 'needs' : 'need'} your eyes`,
+            tone: attentionCount > 0 ? 'caution' : 'positive',
+          },
+        ]} />
+      </div>
 
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -290,12 +310,6 @@ export function Today({ onNavigate }: TodayProps) {
           </span>
           <span className="mt-1 text-[13px] text-rd-label-secondary">of {metrics.dailyGoal} goal</span>
         </Ring>
-        <p
-          className="text-[17px] font-semibold"
-          style={{ color: pace.tone === 'positive' ? 'var(--rd-positive)' : pace.tone === 'caution' ? 'var(--rd-caution)' : 'var(--rd-label-secondary)' }}
-        >
-          {pace.text}
-        </p>
         {metrics.status !== 'before_work' && metrics.status !== 'goal_achieved' && (
           <p className="text-[13px] text-rd-label-secondary">
             {formatMinutes(metrics.elapsedWorkMinutes)} elapsed · {formatMinutes(metrics.remainingWorkMinutes)} remaining

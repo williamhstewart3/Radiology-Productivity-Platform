@@ -21,7 +21,6 @@ import {
   type DailyPaceMetrics,
 } from '../utils/dailyPaceCalculations';
 import { todayDateString } from '../utils/calculations';
-import { ConfettiCanvas } from './ConfettiCanvas';
 import { Ring, useCountUp } from './ui/Ring';
 
 const HUD_BG = '#000000';
@@ -87,17 +86,12 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
 
   const prevAchievedRef = useRef(false);
   const [metrics, setMetrics] = useState<DailyPaceMetrics | null>(null);
-  const [showConfetti, setShowConfetti] = useState(false);
 
   const recalculate = useCallback(() => {
     if (!todayLogs) return;
     const m = computeDailyPace(todayLogs, paceSettings, prevAchievedRef.current);
     setMetrics(m);
-    if (m.goalJustAchieved) {
-      prevAchievedRef.current = true;
-      setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 4500);
-    }
+    if (m.goalJustAchieved) prevAchievedRef.current = true;
     if (m.currentRvu < m.dailyGoal) prevAchievedRef.current = false;
   }, [todayLogs, paceSettings]);
 
@@ -127,7 +121,7 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
             width: 28, height: 28, borderRadius: '50%',
             border: `2px solid ${HUD_ACCENT}`,
             borderTopColor: 'transparent',
-            animation: 'rd-mini-spin 0.8s linear infinite',
+            animation: 'rd-mini-spin 0.8s linear',
           }}
         />
         <style>{`@keyframes rd-mini-spin { to { transform: rotate(360deg); } }`}</style>
@@ -147,7 +141,6 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
         fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif',
       }}
     >
-      <ConfettiCanvas active={showConfetti} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 'clamp(16px, 3vw, 28px)' }}>
         <Ring
           percent={metrics.actualPercent}
