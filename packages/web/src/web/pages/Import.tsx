@@ -624,6 +624,7 @@ function getCandidatesFromPatch(
 
 interface ImportProps {
   onImported: () => void;
+  onOpenQuickLog?: () => void;
 }
 
 type Step = 'input' | 'review' | 'done';
@@ -742,7 +743,7 @@ const ASSISTANT_QUICK_OPTIONS: AssistantQuickOption[] = [
   { label: 'Add mapping', category: 'institution_mapping_needed', prompt: 'This should have matched the institution dictionary.' },
 ];
 
-export function Import({ onImported }: ImportProps) {
+export function Import({ onImported, onOpenQuickLog }: ImportProps) {
   const { activeProfile, activePractice } = useProfile();
   const [step, setStep]           = useState<Step>('input');
   const [pasteText, setPasteText] = useState('');
@@ -2212,7 +2213,19 @@ export function Import({ onImported }: ImportProps) {
   return (
     <>
     <div className="max-w-2xl mx-auto space-y-4 animate-in fade-in duration-300">
-      <h1 className="text-2xl font-bold text-white tracking-tight">Capture</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-white tracking-tight">Capture</h1>
+        {onOpenQuickLog && (
+          <button
+            type="button"
+            onClick={onOpenQuickLog}
+            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+          >
+            Log a study manually · ⌘K
+          </button>
+        )}
+      </div>
 
       {clipboardFile && !processing && (
         <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-3">

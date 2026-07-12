@@ -8,6 +8,7 @@ import { OrgSwitcher } from './components/OrgSwitcher';
 import { useOrg } from './hooks/useOrg';
 import { DailyPaceDashboard } from './components/DailyPaceDashboard';
 import { MiniPaceWindow } from './components/MiniPaceWindow';
+import { QuickLogPalette } from './components/QuickLogPalette';
 import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
 import {
   Bell,
@@ -17,17 +18,16 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   Settings as SettingsIcon,
   Sun,
   UploadCloud,
 } from 'lucide-react';
-import { LogStudy } from './pages/LogStudy';
 import { Import } from './pages/Import';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 import { Locations } from './pages/Locations';
 import { CameraUploadPage } from './pages/CameraUploadPage';
-import { CptExplorer } from './pages/CptExplorer';
 import { Profiles } from './pages/Profiles';
 import { AdminData } from './pages/AdminData';
 import { Automation } from './pages/Automation';
@@ -39,14 +39,12 @@ type Tab =
   | 'dashboard'
   | 'analytics'
   | 'automation'
-  | 'log'
   | 'import'
   | 'history'
   | 'settings'
   | 'locations'
   | 'profiles'
   | 'camera'
-  | 'explorer'
   | 'admin';
 
 class PageErrorBoundary extends Component<
@@ -90,9 +88,9 @@ class PageErrorBoundary extends Component<
 }
 
 // Nav is 4 items by design: Home, Capture, History, Settings. Analytics
-// merged into Home; CPT Library is now a search action inside Capture/Log
-// Study rather than a destination — both pages are still reachable by tab
-// id (e.g. from Settings), just not linked from primary nav.
+// merged into Home; CPT Library and manual logging live in the QuickLogPalette
+// (⌘K, or the search icon in the topbar / Capture page) rather than as a
+// destination tab.
 const NAV_ITEMS: { id: Tab; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'import',    label: 'Capture', icon: UploadCloud },
@@ -139,10 +137,22 @@ function MainApp() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [isDark, setIsDark] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [quickLogOpen, setQuickLogOpen] = useState(false);
   const { activeProfile, activePractice } = useOrg();
 
   useEffect(() => {
     injectTheme();
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setQuickLogOpen(true);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   useEffect(() => {
@@ -247,6 +257,9 @@ function MainApp() {
               </div>
 
               <div className="flex items-center gap-2">
+                <button onClick={() => setQuickLogOpen(true)} className="desk-icon" title="Quick log (⌘K)">
+                  <Search className="size-4" />
+                </button>
                 <OrgSwitcher onManage={() => setActiveTab('locations')} onMyProfile={() => setActiveTab('profiles')} />
                 <button className="desk-icon" title="Notifications"><Bell className="size-4" /></button>
                 <button onClick={() => setIsDark(!isDark)} className="desk-icon" title="Toggle theme">
@@ -262,13 +275,11 @@ function MainApp() {
                 {activeTab === 'dashboard'     && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'analytics'     && <AnalyticsPage />}
                 {activeTab === 'automation'    && <Automation />}
-                {activeTab === 'log'           && <LogStudy onSaved={() => setActiveTab('dashboard')} />}
-                {activeTab === 'import'        && <Import onImported={() => setActiveTab('dashboard')} />}
+                {activeTab === 'import'        && <Import onImported={() => setActiveTab('dashboard')} onOpenQuickLog={() => setQuickLogOpen(true)} />}
                 {activeTab === 'history'       && <History />}
                 {activeTab === 'settings'      && <Settings onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'camera'        && <CameraUploadPage onImported={() => setActiveTab('dashboard')} />}
-                {activeTab === 'explorer'      && <CptExplorer onNavigate={(t) => setActiveTab(t as Tab)} />}
                 {activeTab === 'profiles'      && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} initialEditId={activeProfile?.id ?? null} />}
                 {activeTab === 'admin'         && <AdminData />}
               </PageErrorBoundary>
@@ -294,6 +305,7 @@ function MainApp() {
         </div>
       </div>
       )}
+      <QuickLogPalette open={quickLogOpen} onClose={() => setQuickLogOpen(false)} />
       <AnimatePresence>
         {!isReady && <AppLoadingOverlay key="app-loading-overlay" />}
       </AnimatePresence>
