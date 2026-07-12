@@ -626,7 +626,6 @@ interface ImportProps {
   onImported: () => void;
 }
 
-type Mode = 'paste' | 'ocr' | 'powerscribe';
 type Step = 'input' | 'review' | 'done';
 type ReviewMode = 'unknowns' | 'everything' | 'auto' | 'low';
 type ImportToastTone = 'info' | 'success' | 'warning' | 'danger';
@@ -693,6 +692,43 @@ function CaptureProcessingState() {
   );
 }
 
+function formatLogDateLabel(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const formatted = new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+  return dateStr === todayDateString() ? `today, ${formatted}` : formatted;
+}
+
+function LogDateLine({
+  logDate,
+  editing,
+  onEdit,
+  onChange,
+}: {
+  logDate: string;
+  editing: boolean;
+  onEdit: () => void;
+  onChange: (value: string) => void;
+}) {
+  if (editing) {
+    return (
+      <input
+        type="date"
+        value={logDate}
+        autoFocus
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={() => onChange(logDate)}
+        className="input text-xs w-auto"
+      />
+    );
+  }
+  return (
+    <p className="text-xs text-slate-500">
+      Logging to {formatLogDateLabel(logDate)} ·{' '}
+      <button onClick={onEdit} className="underline hover:text-slate-300">Change</button>
+    </p>
+  );
+}
+
 const ASSISTANT_QUICK_OPTIONS: AssistantQuickOption[] = [
   { label: 'Wrong CPT', category: 'wrong_cpt', prompt: 'The selected CPT is wrong.' },
   { label: 'Not a duplicate', category: 'wrong_duplicate', prompt: 'This is not a duplicate.' },
@@ -708,7 +744,6 @@ const ASSISTANT_QUICK_OPTIONS: AssistantQuickOption[] = [
 
 export function Import({ onImported }: ImportProps) {
   const { activeProfile, activePractice } = useProfile();
-  const [mode, setMode]           = useState<Mode>('ocr');
   const [step, setStep]           = useState<Step>('input');
   const [pasteText, setPasteText] = useState('');
   const [ocrFile, setOcrFile]     = useState<File | null>(null);
@@ -718,6 +753,7 @@ export function Import({ onImported }: ImportProps) {
   const [logDate, setLogDate]     = useState(todayDateString());
   const [importing, setImporting] = useState(false);
   const [importedCount, setImportedCount]   = useState(0);
+  const [importedWrvu, setImportedWrvu]     = useState(0);
   const [skippedCount, setSkippedCount]     = useState(0);
   const [reviewNeeded, setReviewNeeded]     = useState(0);
   const [alreadySavedCount, setAlreadySavedCount] = useState(0);
@@ -725,6 +761,14 @@ export function Import({ onImported }: ImportProps) {
   const [error, setError]         = useState<string | null>(null);
   const [showSkipped, setShowSkipped]       = useState(false);
   const [showAutoApproved, setShowAutoApproved] = useState(false);
+  const [logDateEditing, setLogDateEditing] = useState(false);
+  const [moreActionsOpen, setMoreActionsOpen] = useState(false);
+  const [hasSeenCaptureTip, setHasSeenCaptureTip] = useState(
+    () => typeof localStorage !== 'undefined' && localStorage.getItem('wrvu-capture-tip-seen') === '1',
+  );
+  const [hasSeenAutosaveNotice, setHasSeenAutosaveNotice] = useState(
+    () => typeof localStorage !== 'undefined' && localStorage.getItem('wrvu-autosave-notice-seen') === '1',
+  );
   const [searchPanelTempId, setSearchPanelTempId] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<ReviewMode>('unknowns');
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
@@ -798,22 +842,33 @@ export function Import({ onImported }: ImportProps) {
   }, [processing]);
 
   useEffect(() => {
-    if (mode !== 'ocr') return;
+    if (step !== 'input') return;
     function handlePaste(event: ClipboardEvent) {
+      // Let form fields (e.g. the log-date input) handle their own paste.
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+
       const imageItem = Array.from(event.clipboardData?.items ?? []).find((item) => item.type.startsWith('image/'));
-      if (!imageItem) return;
-      const blob = imageItem.getAsFile();
-      if (!blob) return;
-      const file = new File([blob], `powerscribe-clipboard-${Date.now()}.png`, { type: blob.type || 'image/png' });
-      event.preventDefault();
-      void queueClipboardImage(file, 'clipboard paste');
+      if (imageItem) {
+        const blob = imageItem.getAsFile();
+        if (!blob) return;
+        const file = new File([blob], `powerscribe-clipboard-${Date.now()}.png`, { type: blob.type || 'image/png' });
+        event.preventDefault();
+        void queueClipboardImage(file, 'clipboard paste');
+        return;
+      }
+
+      const text = event.clipboardData?.getData('text/plain')?.trim();
+      if (text) {
+        event.preventDefault();
+        void handlePasteProcess(text);
+      }
     }
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [mode, activeProfile?.id, activePractice?.id, sessionId, logDate, reviewRows, skippedRows]);
+  }, [step, activeProfile?.id, activePractice?.id, sessionId, logDate, reviewRows, skippedRows]);
 
   useEffect(() => {
-    if (mode !== 'ocr') return;
+    if (step !== 'input') return;
     if (!navigator.clipboard?.read) return;
 
     let cancelled = false;
@@ -845,7 +900,7 @@ export function Import({ onImported }: ImportProps) {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [mode, activeProfile?.id, activePractice?.id, sessionId, logDate, reviewRows, skippedRows]);
+  }, [step, activeProfile?.id, activePractice?.id, sessionId, logDate, reviewRows, skippedRows]);
 
   // ── Process helpers ───────────────────────────────────────────────────────
 
@@ -871,6 +926,10 @@ export function Import({ onImported }: ImportProps) {
     setSkippedRows(merged.skippedRows);
     addTimeline(label);
     setStep('review');
+    if (nextRows.length > 0 || nextSkippedRows.length > 0) {
+      localStorage.setItem('wrvu-capture-tip-seen', '1');
+      setHasSeenCaptureTip(true);
+    }
     const readyCount = nextRows.length;
     const estimatedRvu = nextRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
     const reviewCount = nextRows.filter((row) => row.needsReview).length;
@@ -981,13 +1040,14 @@ export function Import({ onImported }: ImportProps) {
     setClipboardFile(file);
   }
 
-  async function handlePasteProcess() {
-    if (!pasteText.trim()) return;
+  async function handlePasteProcess(textOverride?: string) {
+    const text = (textOverride ?? pasteText).trim();
+    if (!text) return;
     setProcessing(true);
     setError(null);
     pushToast('info', 'Matching CPT codes...', 'Parsing pasted studies and preparing the review queue.');
     try {
-      const processed = await processTextImport(pasteText, {
+      const processed = await processTextImport(text, {
         profileId: activeProfile?.id ?? null,
         siteId: activePractice?.id ?? null,
         sessionId,
@@ -1000,11 +1060,6 @@ export function Import({ onImported }: ImportProps) {
     } finally {
       setProcessing(false);
     }
-  }
-
-  async function handleOcrProcess() {
-    if (!ocrFile) return;
-    await processOcrFile(ocrFile, 'manual file');
   }
 
   async function alwaysProcessClipboard(file: File) {
@@ -1055,6 +1110,7 @@ export function Import({ onImported }: ImportProps) {
         timeline,
       });
       setImportedCount(result.importedCount);
+      setImportedWrvu(selectedRvu);
       setSkippedCount(result.skippedCount);
       setReviewNeeded(result.reviewNeededCount);
       setAlreadySavedCount(result.alreadySavedCount);
@@ -1152,25 +1208,6 @@ export function Import({ onImported }: ImportProps) {
 
   function approveHighConfidence() {
     approveRows((row) => isSafeAutoApprovalRow(row));
-  }
-
-  /** Bulk-approves rows in the review queue whose only flag is benign (no date/CPT/duplicate issue). */
-  function approveAllReady() {
-    let approved = 0;
-    let approvedWrvu = 0;
-    setReviewRows((rows) =>
-      rows.map((row) => {
-        if (!isBenignFlagRow(row)) return row;
-        const patch = buildUserApprovalPatch(row);
-        if (!patch) return row;
-        approved++;
-        approvedWrvu += getSelectedWorkRvu(row);
-        return { ...row, ...patch };
-      }),
-    );
-    if (approved > 0) {
-      pushToast('success', `Approved ${approved} ready stud${approved === 1 ? 'y' : 'ies'}`, `+${approvedWrvu.toFixed(1)} wRVUs now finalizable.`);
-    }
   }
 
   function approvePriorMappings() {
@@ -1393,21 +1430,15 @@ export function Import({ onImported }: ImportProps) {
   const selectedCodeCount = reviewRows
     .filter((r) => r.included)
     .reduce((sum, row) => sum + getSelectedCandidates(row).length, 0);
-  const possibleDupes = reviewRows.filter(
-    (r) => r.included && r.duplicateStatus === 'possible',
-  ).length;
   const safeApprovalCount = reviewRows.filter(isSafeAutoApprovalRow).length;
   const priorMappingCount = reviewRows.filter(isPriorApprovedMappingRow).length;
   const autoApprovedRows = reviewRows.filter((row) => row.included && !row.needsReview);
   const autoCodedCount = autoApprovedRows.length;
   const autoApprovedWrvu = autoApprovedRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
-  const readyToApproveCount = reviewRows.filter(isBenignFlagRow).length;
   const requiresReviewCount = reviewRows.filter((row) => row.included && row.needsReview).length;
   const approvalSummary = summarizeReviewApproval(reviewRows, skippedRows);
   const reviewableWarningCount = reviewRows.filter((row) => row.needsReview && row.duplicateStatus === 'possible' && canApproveReviewRow(row)).length;
   const reviewableCleanCount = reviewRows.filter((row) => row.needsReview && row.duplicateStatus !== 'possible' && canApproveReviewRow(row)).length;
-  const autoCodingPct = includedCount ? (autoCodedCount / includedCount) * 100 : 0;
-  const estimatedMinutesSaved = Math.round(autoCodedCount * 0.35);
   const visibleReviewRows = reviewRows.filter((row) => {
     if (reviewMode === 'everything') return true;
     if (reviewMode === 'auto') return row.autoApproved || !row.needsReview;
@@ -1417,40 +1448,21 @@ export function Import({ onImported }: ImportProps) {
 
   // ── Done screen ───────────────────────────────────────────────────────────
   if (step === 'done') {
+    const doneParts = [
+      `Saved ${importedCount} ${importedCount === 1 ? 'study' : 'studies'}`,
+      `${importedWrvu.toFixed(1)} wRVU`,
+      skippedCount > 0 ? `${skippedCount} skipped as duplicate${skippedCount === 1 ? '' : 's'}` : null,
+      reviewNeeded > 0 ? `${reviewNeeded} still need review` : null,
+      blockedNoValidCptCount > 0 ? `${blockedNoValidCptCount} blocked (no CPT)` : null,
+    ].filter(Boolean);
+
     return (
       <>
-        <div className="max-w-lg mx-auto text-center space-y-6 py-16 animate-in fade-in duration-300">
-          <div className="w-20 h-20 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto text-4xl">
+        <div className="max-w-lg mx-auto text-center space-y-5 py-16 animate-in fade-in duration-300">
+          <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto text-3xl">
             ✓
           </div>
-          <div>
-            <h2 className="text-2xl font-bold text-white">Import Complete</h2>
-            <div className="mt-3 space-y-1.5">
-              <p className="text-emerald-400 text-sm font-medium">
-                Imported: {importedCount} {importedCount === 1 ? 'study' : 'studies'}
-              </p>
-              {skippedCount > 0 && (
-                <p className="text-slate-400 text-sm">
-                  Skipped duplicates: {skippedCount}
-                </p>
-              )}
-              {reviewNeeded > 0 && (
-                <p className="text-amber-400 text-sm">
-                  Needs review: {reviewNeeded}
-                </p>
-              )}
-              {alreadySavedCount > 0 && (
-                <p className="text-slate-400 text-sm">
-                  Already saved: {alreadySavedCount}
-                </p>
-              )}
-              {blockedNoValidCptCount > 0 && (
-                <p className="text-red-400 text-sm">
-                  Blocked (no valid CPT): {blockedNoValidCptCount}
-                </p>
-              )}
-            </div>
-          </div>
+          <p className="text-white text-base">{doneParts.join(' · ')}.</p>
           <div className="flex gap-3 justify-center">
             <button
               onClick={() => {
@@ -1465,14 +1477,14 @@ export function Import({ onImported }: ImportProps) {
               }}
               className="px-6 py-2.5 rounded-xl border border-white/15 text-slate-300 text-sm hover:border-white/30 transition-colors"
             >
-              Import More
+              Capture more
             </button>
             <button
               onClick={onImported}
               className="px-6 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity"
               style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
             >
-              View Dashboard
+              Done
             </button>
           </div>
         </div>
@@ -1496,20 +1508,7 @@ export function Import({ onImported }: ImportProps) {
       <>
       <div className="space-y-5 animate-in fade-in duration-300">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Review Matches</h1>
-            <p className="text-slate-400 text-sm mt-0.5">
-              {matchedCount}/{includedCount} matched
-              {skippedRows.length > 0 && ` · ${skippedRows.length} duplicates skipped`}
-              {possibleDupes > 0 && ` · ${possibleDupes} possible dup${possibleDupes > 1 ? 's' : ''}`}
-            </p>
-          </div>
-          <button
-            onClick={() => setFeedbackQueueOpen((open) => !open)}
-            className="text-xs px-3 py-1.5 rounded-lg border border-sky-500/25 text-sky-300 hover:bg-sky-500/10 transition-colors"
-          >
-            Feedback Queue
-          </button>
+          <h1 className="text-2xl font-bold text-white">Review matches</h1>
           <button
             onClick={() => setStep('input')}
             className="text-sm text-slate-400 hover:text-white transition-colors"
@@ -1517,6 +1516,12 @@ export function Import({ onImported }: ImportProps) {
             ← Back
           </button>
         </div>
+
+        <p className="text-sm text-slate-300">
+          {includedCount} studies · {approvalSummary.finalizableRows} ready to save · {requiresReviewCount} need review · {approvalSummary.pendingWrvu.toFixed(1)} wRVU pending
+          {approvalSummary.exactDuplicateRows > 0 && ` · ${approvalSummary.exactDuplicateRows} exact dup${approvalSummary.exactDuplicateRows > 1 ? 's' : ''} skipped`}
+          {approvalSummary.excludedRows > 0 && ` · ${approvalSummary.excludedRows} excluded`}
+        </p>
 
         {ocrDebug?.reconciliationWarning && (
           <div className="flex items-start gap-3 rounded-xl px-4 py-3 border border-red-500/40 bg-red-500/10">
@@ -1528,12 +1533,100 @@ export function Import({ onImported }: ImportProps) {
           </div>
         )}
 
+        <LogDateLine
+          logDate={logDate}
+          editing={logDateEditing}
+          onEdit={() => setLogDateEditing(true)}
+          onChange={(value) => { setLogDate(value); setLogDateEditing(false); }}
+        />
+
+        {!hasSeenAutosaveNotice && (
+          <p className="text-xs text-slate-500">
+            Session saves automatically.{' '}
+            <button
+              onClick={() => { localStorage.setItem('wrvu-autosave-notice-seen', '1'); setHasSeenAutosaveNotice(true); }}
+              className="underline hover:text-slate-300"
+            >
+              Got it
+            </button>
+          </p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {reviewableCleanCount > 0 && (
+            <button
+              onClick={() => approveAllReviewable(false)}
+              className="btn-primary text-xs"
+            >
+              Approve all ready ({reviewableCleanCount})
+            </button>
+          )}
+          <div className="relative">
+            <button
+              onClick={() => setMoreActionsOpen((v) => !v)}
+              className="text-xs px-3 py-1.5 rounded-lg border border-white/10 text-slate-400 hover:text-white hover:border-white/25 transition-colors"
+            >
+              More ⌄
+            </button>
+            {moreActionsOpen && (
+              <div className="absolute z-10 mt-1 w-64 rounded-xl border border-white/10 bg-slate-900 shadow-xl p-1">
+                {reviewableWarningCount > 0 && (
+                  <button
+                    onClick={() => { approveAllReviewable(true); setMoreActionsOpen(false); }}
+                    className="w-full text-left px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5"
+                  >
+                    Approve all warning rows as new ({reviewableWarningCount})
+                  </button>
+                )}
+                {safeApprovalCount > 0 && (
+                  <button
+                    onClick={() => { approveHighConfidence(); setMoreActionsOpen(false); }}
+                    className="w-full text-left px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5"
+                  >
+                    Approve all high-confidence matches ({safeApprovalCount})
+                  </button>
+                )}
+                {priorMappingCount > 0 && (
+                  <button
+                    onClick={() => { approvePriorMappings(); setMoreActionsOpen(false); }}
+                    className="w-full text-left px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5"
+                  >
+                    Approve all prior mappings ({priorMappingCount})
+                  </button>
+                )}
+                <button
+                  onClick={() => { setFeedbackQueueOpen((v) => !v); setMoreActionsOpen(false); }}
+                  className="w-full text-left px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5"
+                >
+                  Feedback log
+                </button>
+                <button
+                  onClick={() => { discardSession(); setMoreActionsOpen(false); }}
+                  className="w-full text-left px-3 py-2 rounded-lg text-xs text-red-400 hover:bg-red-500/10"
+                >
+                  Discard session
+                </button>
+              </div>
+            )}
+          </div>
+          <select
+            value={reviewMode}
+            onChange={(e) => setReviewMode(e.target.value as ReviewMode)}
+            className="ml-auto text-xs rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-slate-300"
+          >
+            <option value="unknowns">Exceptions only</option>
+            <option value="everything">Everything</option>
+            <option value="auto">Auto-approved</option>
+            <option value="low">Low-confidence only</option>
+          </select>
+        </div>
+
         {feedbackQueueOpen && (
           <div className="card space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-white">Feedback Queue</p>
-                <p className="text-xs text-slate-500">Structured OCR review feedback saved locally for later mapping, issue, or Codex prompt generation.</p>
+                <p className="text-sm font-semibold text-white">Feedback log</p>
+                <p className="text-xs text-slate-500">Review feedback saved locally for later mapping, issue, or Codex prompt generation.</p>
               </div>
               <button
                 onClick={showFeedbackSummary}
@@ -1574,177 +1667,6 @@ export function Import({ onImported }: ImportProps) {
             )}
           </div>
         )}
-
-        {/* Date picker */}
-        <div className="card">
-          <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
-            Log Date (all studies)
-          </label>
-          <input
-            type="date"
-            value={logDate}
-            onChange={(e) => setLogDate(e.target.value)}
-            className="input"
-          />
-        </div>
-
-        <div className="card space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-white">Active Review Session</p>
-              <p className="text-xs text-slate-500">Temporary worklist. Nothing is saved to productivity history until Finalize Day.</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setStep('input')}
-                className="px-3 py-1.5 rounded-lg border border-white/12 text-xs text-slate-300 hover:text-white hover:border-white/25"
-              >
-                Continue Later / Add Screenshots
-              </button>
-              <button
-                onClick={discardSession}
-                className="px-3 py-1.5 rounded-lg border border-red-500/25 text-xs text-red-400 hover:bg-red-500/10"
-              >
-                Discard Session
-              </button>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-            <div className="rounded-lg border border-white/8 bg-white/3 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">Total exams</p>
-              <p className="text-lg font-bold text-white">{includedCount}</p>
-            </div>
-            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-emerald-500/80">Approved RVUs</p>
-              <p className="text-lg font-bold text-emerald-300">
-                {approvalSummary.approvedWrvu.toFixed(1)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-amber-500/80">Pending RVUs</p>
-              <p className="text-lg font-bold text-amber-300">
-                {approvalSummary.pendingWrvu.toFixed(1)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-sky-500/80">Finalizable</p>
-              <p className="text-lg font-bold text-sky-300">
-                {approvalSummary.finalizableWrvu.toFixed(1)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-red-400/80">Needs review</p>
-              <p className="text-lg font-bold text-red-300">{requiresReviewCount}</p>
-            </div>
-            <div className="rounded-lg border border-orange-500/20 bg-orange-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-orange-400/80">Duplicates</p>
-              <p className="text-lg font-bold text-orange-300">{skippedRows.length + possibleDupes}</p>
-            </div>
-          </div>
-          <div className="grid gap-2 md:grid-cols-5">
-            {[
-              ['Possible dup RVUs pending', approvalSummary.possibleDuplicateWrvu.toFixed(1)],
-              ['Exact dup RVUs skipped', approvalSummary.exactDuplicateWrvu.toFixed(1)],
-              ['Excluded RVUs', approvalSummary.excludedWrvu.toFixed(1)],
-              ['Rows missing CPT/RVU', approvalSummary.noValidCptRows.toLocaleString()],
-              ['Will save now', `${approvalSummary.finalizableRows} rows`],
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
-                <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
-                <p className="text-sm font-bold text-slate-200">{value}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="card flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => approveAllReviewable(false)}
-            disabled={reviewableCleanCount === 0}
-            className="btn-primary text-xs disabled:opacity-40"
-          >
-            Approve all reviewable studies ({reviewableCleanCount})
-          </button>
-          <button
-            onClick={() => approveAllReviewable(true)}
-            disabled={reviewableWarningCount === 0}
-            className="btn-ghost text-xs disabled:opacity-40"
-          >
-            Approve all warning rows as new ({reviewableWarningCount})
-          </button>
-          <button
-            onClick={approveHighConfidence}
-            disabled={safeApprovalCount === 0}
-            className="btn-ghost text-xs disabled:opacity-40"
-          >
-            Approve all high-confidence matches ({safeApprovalCount})
-          </button>
-          <button
-            onClick={approvePriorMappings}
-            disabled={priorMappingCount === 0}
-            className="btn-ghost text-xs disabled:opacity-40"
-          >
-            Approve all prior mappings ({priorMappingCount})
-          </button>
-          <span className="text-xs text-slate-500 ml-auto">
-            Pending rows are not saved until approved.
-          </span>
-        </div>
-
-        {timeline.length > 0 && (
-          <div className="card space-y-2">
-            <p className="text-sm font-semibold text-white">Daily Timeline</p>
-            <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
-              {timeline.slice(-8).map((event) => (
-                <div key={event.id} className="flex items-center gap-2 text-xs">
-                  <span className="font-mono text-slate-500 w-12">
-                    {new Date(event.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                  </span>
-                  <span className="text-slate-300">{event.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-          {[
-            ['Uploaded', includedCount.toLocaleString()],
-            ['Auto-coded', autoCodedCount.toLocaleString()],
-            ['Requires review', requiresReviewCount.toLocaleString()],
-            ['Auto-coding', `${autoCodingPct.toFixed(0)}%`],
-            ['Time saved', `${estimatedMinutesSaved} min`],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-xl border border-white/8 bg-white/3 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
-              <p className="text-lg font-bold text-white">{value}</p>
-            </div>
-          ))}
-        </div>
-
-        <div className="card flex flex-wrap items-center gap-2">
-          {[
-            ['unknowns', 'Unknowns Only'],
-            ['everything', 'Review Everything'],
-            ['auto', 'Review Auto-approved'],
-            ['low', 'Low-confidence Only'],
-          ].map(([modeId, label]) => (
-            <button
-              key={modeId}
-              onClick={() => setReviewMode(modeId as ReviewMode)}
-              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
-                reviewMode === modeId
-                  ? 'border-sky-500/40 bg-sky-500/15 text-sky-300'
-                  : 'border-white/10 text-slate-400 hover:border-white/25 hover:text-white'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-          <span className="text-xs text-slate-500 ml-auto">
-            Showing {visibleReviewRows.length} of {reviewRows.length} rows.
-          </span>
-        </div>
 
         {/* ── Skipped duplicates panel ──────────────────────────────────── */}
         {skippedRows.length > 0 && (
@@ -1835,19 +1757,6 @@ export function Import({ onImported }: ImportProps) {
           </div>
         )}
 
-        {readyToApproveCount > 0 && (
-          <div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/3 px-4 py-2.5">
-            <span className="text-xs text-slate-400">
-              {readyToApproveCount} row{readyToApproveCount > 1 ? 's' : ''} ready to approve — no date, CPT, or duplicate issue
-            </span>
-            <button
-              onClick={approveAllReady}
-              className="text-xs px-3 py-1.5 rounded-lg border border-emerald-500/35 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/18 transition-colors font-medium"
-            >
-              Approve all ready
-            </button>
-          </div>
-        )}
 
         {/* ── Review rows ───────────────────────────────────────────────── */}
         <div className="space-y-3">
@@ -2291,207 +2200,94 @@ export function Import({ onImported }: ImportProps) {
     );
   }
 
-  // ── Input screen ──────────────────────────────────────────────────────────
+  // ── Input screen — the page IS the drop zone ────────────────────────────
+  function handleDrop(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const file = event.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      void processPowerScribeCapture(file, 'drag and drop');
+    }
+  }
+
   return (
     <>
-    <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
-      <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">PowerScribe Capture</h1>
-        <p className="text-slate-400 text-sm mt-0.5">Paste or upload a PowerScribe window grab to extract exam rows</p>
-      </div>
+    <div className="max-w-2xl mx-auto space-y-4 animate-in fade-in duration-300">
+      <h1 className="text-2xl font-bold text-white tracking-tight">Capture</h1>
 
-      {/* Mode toggle */}
-      <div className="flex gap-2 p-1 bg-white/5 rounded-xl">
-        <button
-          onClick={() => { setMode('paste'); setError(null); }}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-            mode === 'paste' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-300'
-          }`}
-        >
-          Paste / CSV
-        </button>
-        <button
-          onClick={() => { setMode('ocr'); setError(null); }}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-            mode === 'ocr' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-300'
-          }`}
-        >
-          Screen Capture Intake
-        </button>
-        {/* PowerScribe — architecture ready, live sync coming */}
-        <button
-          disabled
-          title="PowerScribe live sync — architecture implemented, activation coming soon"
-          className="flex-1 py-2 rounded-lg text-sm font-medium text-slate-600 cursor-not-allowed relative group"
-        >
-          <span>⚡ PowerScribe</span>
-          <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-            Soon
-          </span>
-          {/* Tooltip on hover */}
-          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-left shadow-xl z-10">
-            Live PowerScribe sync is architecturally supported — the provider interface and pipeline are ready. Authentication and site configuration coming soon.
-          </span>
-        </button>
-      </div>
-
-      {mode === 'paste' && (
-        <div className="card space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
-              Paste exam names, CPT codes, or CSV
-            </label>
-            <textarea
-              value={pasteText}
-              onChange={(e) => setPasteText(e.target.value)}
-              placeholder={`CT Abdomen Pelvis with contrast\nMRI Brain without contrast\n74177, 70553, 71046\n...one per line, comma-separated, or CSV with headers`}
-              rows={10}
-              className="input w-full resize-none font-mono text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
-              Log Date
-            </label>
-            <input
-              type="date"
-              value={logDate}
-              onChange={(e) => setLogDate(e.target.value)}
-              className="input"
-            />
-          </div>
-          <p className="text-xs text-slate-500">
-            Supports: one per line, comma-separated CPT codes, or CSV with headers
-            (examTitle, cpt, studyDate, accessionNumber, modality…).
-            Duplicates detected automatically.
+      {clipboardFile && !processing && (
+        <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-3">
+          <p className="text-sm font-semibold text-sky-300">{CAPTURE_PROMPT_TITLE}</p>
+          <p className="text-xs text-slate-400">
+            This looks like a PowerScribe worklist screenshot. {CAPTURE_PRIVACY_COPY}
           </p>
-          {error && <p className="text-red-400 text-sm">{error}</p>}
-          <button
-            onClick={handlePasteProcess}
-            disabled={!pasteText.trim() || processing}
-            className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
-          >
-            {processing ? CAPTURE_PROCESSING_LABEL : 'Match & Review'}
-          </button>
-        </div>
-      )}
-
-      {mode === 'ocr' && (
-        <div className="card space-y-4">
-          {clipboardFile && !processing && (
-            <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-3">
-              <p className="text-sm font-semibold text-sky-300">{CAPTURE_PROMPT_TITLE}</p>
-              <p className="text-xs text-slate-400">
-                This looks like a PowerScribe worklist screenshot. {CAPTURE_PRIVACY_COPY}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => processPowerScribeCapture(clipboardFile, 'confirmed clipboard')}
-                  disabled={processing}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                  style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
-                >
-                  Process this capture
-                </button>
-                <button
-                  onClick={() => setClipboardFile(null)}
-                  disabled={processing}
-                  className="px-3 py-1.5 rounded-lg border border-white/12 text-xs text-slate-400 hover:text-white disabled:opacity-40"
-                >
-                  Ignore this capture
-                </button>
-                <button
-                  onClick={() => alwaysProcessClipboard(clipboardFile)}
-                  disabled={processing}
-                  className="px-3 py-1.5 rounded-lg border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/10 disabled:opacity-40"
-                >
-                  Always process PowerScribe captures
-                </button>
-              </div>
-            </div>
-          )}
-          {processing && <CaptureProcessingState />}
-          <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
-              Paste or upload PowerScribe window grab
-            </label>
-            <div
-              onClick={() => fileRef.current?.click()}
-              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${
-                ocrFile ? '' : 'border-white/15 hover:border-white/30 hover:bg-white/3'
-              }`}
-              style={ocrFile ? {
-                borderColor: 'rgba(37,99,168,0.4)',
-                background: 'rgba(37,99,168,0.06)',
-              } : {}}
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => processPowerScribeCapture(clipboardFile, 'confirmed clipboard')}
+              disabled={processing}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+              style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
             >
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => setOcrFile(e.target.files?.[0] ?? null)}
-              />
-              {ocrFile ? (
-                <div>
-                  <p className="font-medium" style={{ color: theme.colors.accent }}>{ocrFile.name}</p>
-                  <p className="text-slate-400 text-xs mt-1">
-                    {(ocrFile.size / 1024).toFixed(0)} KB · Click to change
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-4xl mb-3">📸</p>
-                  <p className="text-slate-300 text-sm font-medium">Paste, drop, or click to upload</p>
-                  <p className="text-slate-500 text-xs mt-1">Copy the PowerScribe window, then paste here. Images are not stored.</p>
-                </div>
-              )}
-            </div>
+              Process this capture
+            </button>
+            <button
+              onClick={() => setClipboardFile(null)}
+              disabled={processing}
+              className="px-3 py-1.5 rounded-lg border border-white/12 text-xs text-slate-400 hover:text-white disabled:opacity-40"
+            >
+              Ignore this capture
+            </button>
+            <button
+              onClick={() => alwaysProcessClipboard(clipboardFile)}
+              disabled={processing}
+              className="px-3 py-1.5 rounded-lg border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/10 disabled:opacity-40"
+            >
+              Always process PowerScribe captures
+            </button>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
-              Log Date
-            </label>
-            <input
-              type="date"
-              value={logDate}
-              onChange={(e) => setLogDate(e.target.value)}
-              className="input"
-            />
-          </div>
-          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-            <p className="text-amber-300 text-xs font-medium">Capture tips</p>
-            <p className="text-amber-300/70 text-xs mt-1">
-              Capture the PowerScribe study list with Procedure, Exam Date, and Modified columns visible.
-              The screenshot is cropped, parsed, matched, and checked locally. Already-imported studies are auto-skipped.
-            </p>
-          </div>
-          <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
-          {error && <p className="text-red-400 text-sm">{error}</p>}
-          <button
-            onClick={handleOcrProcess}
-            disabled={!ocrFile || processing}
-            className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
-          >
-            {processing ? CAPTURE_PROCESSING_LABEL : 'Extract & Match'}
-          </button>
         </div>
       )}
 
-      {mode === 'powerscribe' && (
-        /* This branch is unreachable while the button is disabled.
-           It will be wired up when PowerScribeImportProvider goes live. */
-        <div className="card text-center py-10 space-y-3">
-          <p className="text-2xl">⚡</p>
-          <p className="text-white font-semibold">PowerScribe Live Sync</p>
-          <p className="text-slate-400 text-sm max-w-sm mx-auto">
-            The import pipeline is architected to accept PowerScribe as a native
-            source. Authentication and site configuration coming soon.
-          </p>
+      {processing ? (
+        <CaptureProcessingState />
+      ) : (
+        <div
+          onClick={() => fileRef.current?.click()}
+          onDrop={handleDrop}
+          onDragOver={(event) => event.preventDefault()}
+          className="border-2 border-dashed border-white/15 rounded-2xl p-10 text-center cursor-pointer transition-all duration-200 hover:border-white/30 hover:bg-white/3"
+        >
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void processPowerScribeCapture(file, 'file picker');
+              e.target.value = '';
+            }}
+          />
+          <p className="text-4xl mb-3">📋</p>
+          <p className="text-slate-300 text-sm font-medium">Paste, drop, or click — screenshot or text</p>
+          {!hasSeenCaptureTip && (
+            <p className="text-slate-500 text-xs mt-2 max-w-sm mx-auto">
+              Capture the study list with Procedure, Exam Date, and Modified columns visible.
+            </p>
+          )}
         </div>
       )}
+
+      <LogDateLine
+        logDate={logDate}
+        editing={logDateEditing}
+        onEdit={() => setLogDateEditing(true)}
+        onChange={(value) => { setLogDate(value); setLogDateEditing(false); }}
+      />
+
+      <p className="text-[11px] text-slate-600">PowerScribe API — soon</p>
+
+      {error && <p className="text-red-400 text-sm">{error}</p>}
+      <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
     </div>
     <ImportToastStack toasts={toasts} />
     </>
