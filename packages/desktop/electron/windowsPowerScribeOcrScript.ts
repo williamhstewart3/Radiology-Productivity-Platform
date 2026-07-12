@@ -571,10 +571,37 @@ function Parse-DateTimeText([string] $Text) {
 
 function Clean-Procedure([string] $Text) {
   $cleaned = ($Text -replace '\s+', ' ').Trim()
+  $cleaned = $cleaned -replace '(?i)\bABCOMEN\b', 'ABDOMEN'
+  # Gutter/row-number bleed: status char(s) + row index, with or without a
+  # fused letter+digit token or a stray conjunction from the previous row
+  # ("B12 XR WRIST...", "AND 14 XR CHEST PORTABLE", "sb 15 XR CHEST PORTABLE").
+  $cleaned = $cleaned -replace '(?i)^(?:(?:AND|OR|W|WO)\s+)?(?:[A-Za-z]{1,3}\d{1,4}\s+|[A-Za-z]{1,3}\s+\d{1,4}\s+|\d{1,4}\s+)(?=(?:CT|CTA|MRI|MRA|US|XR|X\s*RAY|ULTRASOUND|MAMMO|PET|NM)\b)', ''
   $cleaned = $cleaned -replace '^(?:(?:[+@#*|/\\_\-.:;()[\]{}<>!?~]+|v\d{1,3}|\d{1,4}|vb|vi|vo|vx|v|l|i|o|x|signed|final|complete(?:d)?|normal|abnormal|new|old|read|unread|warning|warn|alert|check)\s+)+', ''
   $cleaned = $cleaned -replace '\b(?:reset\s+filters?|browse|search|filters?|refresh|apply|clear|cancel|save|export|print)\b', ' '
   $cleaned = $cleaned -replace '\s+', ' '
   $cleaned = $cleaned.Trim()
+
+  # Bled date/time fragments trailing the procedure text — colon misread as
+  # a period, AM/PM misread as FM, letter(s)+year misread from a month/day
+  # fragment ("Fi2026", "H2026 8.28 FM", "22026 7.35"). Iterate to stability
+  # since one strip can expose another (e.g. the year behind a decimal time).
+  $previous = $null
+  while ($cleaned -ne $previous) {
+    $previous = $cleaned
+    $cleaned = $cleaned -replace '(?i)\s+\b\d{1,2}\s*:?\s*\d{2}\s*(?:AM|PM)\b$', ''
+    $cleaned = $cleaned -replace '(?i)\s+\b(?:AT\s+)?(?:AM|PM)\b$', ''
+    $cleaned = $cleaned -replace '(?i)\s+\bAT\b$', ''
+    $cleaned = $cleaned -replace '(?i)\s+\b[A-Z]?/\d{4,8}\b$', ''
+    $cleaned = $cleaned -replace '(?i)\s+\b[A-Z]?\d{0,2}20\d{2}\b$', ''
+    $cleaned = $cleaned -replace '(?i)\s+\b[A-Za-z]{1,2}\d{4}\b$', ''
+    $cleaned = $cleaned -replace '(?i)\s+\b[TF]\d{4,8}\b$', ''
+    $cleaned = $cleaned -replace '(?i)\s+\b\d{5,8}\b$', ''
+    $cleaned = $cleaned -replace '(?i)\s+\b\d{3,4}\s*(?:AM|PM)\b$', ''
+    $cleaned = $cleaned -replace '(?i)\s+\b\d{1,2}\d{4}\b$', ''
+    $cleaned = $cleaned -replace '(?i)\s+\b\d{1,2}\.\d{2}\s*(?:[APF]M)?\b$', ''
+    $cleaned = $cleaned.Trim()
+  }
+
   if ($cleaned.Length -lt 2) { return 'UNCLEAR POWERSCRIBE ROW' }
   return $cleaned
 }

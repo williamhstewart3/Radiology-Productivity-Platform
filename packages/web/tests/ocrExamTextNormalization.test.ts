@@ -28,6 +28,12 @@ describe('OCR exam text normalization', () => {
     ['CT HEAD WO CONTRAST T212026', 'CT HEAD WO CONTRAST'],
     ['XR ABDOMEN AP 1112026', 'XR ABDOMEN AP'],
     ['XR CHEST PORTABLE 819AM', 'XR CHEST PORTABLE'],
+    // Real-world contamination observed in production captures.
+    ['B12 XR WRIST RIGHT PA LATERAL', 'XR WRIST RIGHT PA LATERAL'],
+    ['AND 14 XR CHEST PORTABLE Fi2026', 'XR CHEST PORTABLE'],
+    ['sb 15 XR CHEST PORTABLE', 'XR CHEST PORTABLE'],
+    ['XR ABCOMEN AP H2026 8.28 FM', 'XR ABDOMEN AP'],
+    ['CT LDCT LUNG CANCER SCREENING 22026 7.35', 'CT LDCT LUNG CANCER SCREENING'],
   ])('%s', (raw, expected) => {
     expect(normalizeOcrExamTextForMatching(raw)).toBe(expected);
   });

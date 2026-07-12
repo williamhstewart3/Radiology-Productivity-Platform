@@ -20,6 +20,7 @@ const RADIOLOGY_OCR_CORRECTIONS: Array<[RegExp, string]> = [
   [/\bCT\s*CHEST\s*ABDU?OMEN\b/gi, 'CT CHEST ABDOMEN'],
   [/\bABDCOMEN\b/gi, 'ABDOMEN'],
   [/\bABDUOMEN\b/gi, 'ABDOMEN'],
+  [/\bABCOMEN\b/gi, 'ABDOMEN'],
   [/\bCHEST\s*ABDU?OMEN\b/gi, 'CHEST ABDOMEN'],
   [/\bABDOMN\b/gi, 'ABDOMEN'],
   [/\bPELVS\b/gi, 'PELVIS'],
@@ -41,11 +42,18 @@ function stripTrailingOcrDateTimeGarbage(raw: string): string {
       .replace(/\s+\bAT\b$/i, '')
       .replace(/\s+\b[A-Z]?\/\d{4,8}\b$/i, '')
       .replace(/\s+\b[A-Z]?\d{0,2}20\d{2}\b$/i, '')
+      // Bled date fragment misread as a 1-2 letter month prefix + 4-digit
+      // year, e.g. "Fi2026" (7/11 -> Fi) or "H2026" (7/11 -> H).
+      .replace(/\s+\b[A-Za-z]{1,2}\d{4}\b$/i, '')
       .replace(/\s+\b[TF]\d{4,8}\b$/i, '')
       .replace(/\s+\b\d{5,8}\b$/i, '')
       .replace(/\s+\b\d{1,2}\b$/i, '')
       .replace(/\s+\b\d{3,4}\s*(?:AM|PM)\b$/i, '')
       .replace(/\s+\b\d{1,2}\d{4}\b$/i, '')
+      // Bled time fragment where a colon was OCR'd as a period, with an
+      // optional AM/PM suffix that may itself be damaged (P misread as F),
+      // e.g. "8.28 FM" or a bare "7.35".
+      .replace(/\s+\b\d{1,2}\.\d{2}\s*(?:[APF]M)?\b$/i, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
   }
@@ -71,6 +79,10 @@ export function normalizeOcrExamTextForMatching(raw: string): string {
 
   text = text
     .replace(/^\s*(?:[#>*|/_\\-]+\s*)+/, '')
+    // Gutter/row-number bleed: status char(s) + row index, with or without a
+    // fused letter+digit token or a stray conjunction from the previous row
+    // ("B12 XR WRIST...", "AND 14 XR CHEST PORTABLE", "sb 15 XR CHEST PORTABLE").
+    .replace(/^\s*(?:(?:AND|OR|W|WO)\s+)?(?:[A-Za-z]{1,3}\d{1,4}\s+|[A-Za-z]{1,3}\s+\d{1,4}\s+|\d{1,4}\s+)(?=(?:CT|CTA|MRI|MRA|US|XR|X\s*RAY|ULTRASOUND|MAMMO|PET|NM)\b)/i, '')
     .replace(/^\s*(?:(?:v|x|o|i|l|\d{1,4})\s+){1,6}(?=(?:CT|CTA|MRI|MRA|US|XR|X\s*RAY|ULTRASOUND|MAMMO|PET|NM)\b)/i, '')
     .replace(/\bABD\s+AND\s+PELVIS\b/gi, 'ABDOMEN PELVIS')
     .replace(/\bABDOMEN\s+AND\s+PELVIS\b/gi, 'ABDOMEN PELVIS')
