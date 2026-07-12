@@ -11,14 +11,12 @@ import { MiniPaceWindow } from './components/MiniPaceWindow';
 import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
 import {
   Bell,
-  BarChart3,
   ChevronRight,
   History as HistoryIcon,
   LayoutDashboard,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  Search,
   Settings as SettingsIcon,
   Sun,
   UploadCloud,
@@ -91,12 +89,14 @@ class PageErrorBoundary extends Component<
   }
 }
 
+// Nav is 4 items by design: Home, Capture, History, Settings. Analytics
+// merged into Home; CPT Library is now a search action inside Capture/Log
+// Study rather than a destination — both pages are still reachable by tab
+// id (e.g. from Settings), just not linked from primary nav.
 const NAV_ITEMS: { id: Tab; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'import',    label: 'Capture', icon: UploadCloud },
-  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   { id: 'history',   label: 'History',    icon: HistoryIcon },
-  { id: 'explorer',  label: 'CPT Library', icon: Search },
   { id: 'settings',  label: 'Settings',   icon: SettingsIcon },
 ];
 
@@ -275,7 +275,7 @@ function MainApp() {
             </div>
           </main>
 
-          <nav className="desktop-topbar sticky bottom-0 z-40 grid grid-cols-6 gap-1 px-2 py-2 lg:hidden">
+          <nav className="desktop-topbar sticky bottom-0 z-40 grid grid-cols-4 gap-1 px-2 py-2 lg:hidden">
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;
