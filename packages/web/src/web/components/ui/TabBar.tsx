@@ -6,10 +6,12 @@ export interface TabItem {
   path: string;
   label: string;
   icon: ComponentType<{ className?: string }>;
+  badge?: number;
 }
 
 interface TabBarProps {
   items: TabItem[];
+  onCapture?: () => void;
 }
 
 function isActive(location: string, path: string): boolean {
@@ -40,6 +42,7 @@ export function SidebarNav({ items }: TabBarProps) {
           >
             <Icon className="size-5 shrink-0" />
             <span className="truncate">{item.label}</span>
+            {Boolean(item.badge) && <span className="ml-auto rounded-full bg-rd-caution px-1.5 text-[11px] font-bold text-rd-bg">{item.badge}</span>}
           </Link>
         );
       })}
@@ -47,18 +50,18 @@ export function SidebarNav({ items }: TabBarProps) {
   );
 }
 
-export function BottomTabBar({ items }: TabBarProps) {
+export function BottomTabBar({ items, onCapture }: TabBarProps) {
   const [location] = useLocation();
   return (
     <nav
       className="fixed inset-x-0 bottom-0 z-40 grid border-t border-rd-separator bg-rd-surface pb-[env(safe-area-inset-bottom)] md:hidden"
-      style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+      style={{ gridTemplateColumns: '1fr 72px 1fr' }}
       aria-label="Primary"
     >
-      {items.map((item) => {
+      {items.filter((item) => item.path !== '/history').flatMap((item, index) => {
         const Icon = item.icon;
         const active = isActive(location, item.path);
-        return (
+        const link = (
           <Link
             key={item.path}
             href={item.path}
@@ -69,8 +72,13 @@ export function BottomTabBar({ items }: TabBarProps) {
           >
             <Icon className="size-5" />
             <span className="max-w-full truncate">{item.label}</span>
+            {Boolean(item.badge) && <span className="absolute ml-9 -mt-7 rounded-full bg-rd-caution px-1.5 text-[10px] font-bold text-rd-bg">{item.badge}</span>}
           </Link>
         );
+        if (index === 0 && onCapture) return [link, (
+          <button key="capture" type="button" onClick={onCapture} aria-label="Capture" className="mx-auto -mt-4 flex size-14 items-center justify-center rounded-full bg-rd-label-primary text-[28px] text-rd-bg shadow-lg">+</button>
+        )];
+        return [link];
       })}
     </nav>
   );
