@@ -9,6 +9,7 @@ import { buildSeedCptRows } from '../data/seedCptData';
 import { normalizeExamText } from '../utils/textMatching';
 import { recordAuditEvent } from '../utils/audit';
 import { todayDateString } from '../utils/calculations';
+import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import {
   importInstitutionProcedureMappings,
   type InstitutionProcedureMappingSummary,
@@ -17,7 +18,7 @@ import type { UserSettings, ExamAlias, ExamDictionaryEntry, MemorySuggestion, Au
 import type { ImportResult } from '../utils/rvuFileImporter';
 
 interface SettingsProps {
-  onNavigate?: (tab: 'automation' | 'profiles' | 'locations' | 'admin') => void;
+  onNavigate?: (tab: 'profiles' | 'locations' | 'admin') => void;
 }
 
 function SectionHeading({ children }: { children: ReactNode }) {
@@ -25,7 +26,7 @@ function SectionHeading({ children }: { children: ReactNode }) {
 }
 
 export function Settings({ onNavigate }: SettingsProps) {
-  const { activeProfile } = useProfile();
+  const { activeProfile, activePractice } = useProfile();
   const profileId = activeProfile?.id ?? null;
 
   const settings = useLiveQuery<UserSettings | undefined>(
@@ -158,6 +159,48 @@ export function Settings({ onNavigate }: SettingsProps) {
       summary: `${status === 'approved' ? 'Approved' : 'Rejected'} suggestion: ${suggestion.prompt}`,
       detailsJson: JSON.stringify({ suggestionId: suggestion.id, status }),
     });
+  }
+
+  const [scanning, setScanning] = useState(false);
+
+  async function scanTodayForSuggestions() {
+    setScanning(true);
+    try {
+      const today = todayDateString();
+      const todayLogs = (await db.studyLogs.where('logDate').equals(today).toArray()).filter(
+        (log) => !log.deletedAt && (log.profileId === profileId || log.profileId == null),
+      );
+      const byNormalized = new Map<string, typeof todayLogs>();
+      for (const log of todayLogs) {
+        const key = normalizeRadiologyDescription(log.examTitleDisplay?.trim() || log.examNameRaw);
+        byNormalized.set(key, [...(byNormalized.get(key) ?? []), log]);
+      }
+      for (const [key, grouped] of byNormalized) {
+        if (grouped.length < 2) continue;
+        const cptCodes = Array.from(
+          new Set(grouped.filter((log) => log.cptCode && log.modifier === '26').map((log) => `${log.cptCode}-26`)),
+        );
+        if (cptCodes.length === 0) continue;
+        const existing = pendingSuggestions.find((suggestion) => suggestion.normalizedKey === key);
+        if (existing) continue;
+        await db.memorySuggestions.add({
+          id: crypto.randomUUID(),
+          profileId,
+          siteId: activePractice?.id ?? null,
+          suggestionType: cptCodes.length > 1 ? 'combo' : 'site_alias',
+          prompt: `Remember ${grouped[0].examNameRaw} as ${cptCodes.join(' + ')}?`,
+          normalizedKey: key,
+          cptCodes,
+          occurrences: grouped.length,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      setShowSuggestions(true);
+    } finally {
+      setScanning(false);
+    }
   }
 
   // ── Audit history ──────────────────────────────────────────────────────────
@@ -472,6 +515,13 @@ export function Settings({ onNavigate }: SettingsProps) {
                   {pendingSuggestions.length} pending
                 </button>
               )}
+              <button
+                onClick={scanTodayForSuggestions}
+                disabled={scanning}
+                className="text-[11px] px-2 py-0.5 rounded-full border border-white/10 text-slate-400 hover:text-white disabled:opacity-50"
+              >
+                {scanning ? 'Scanning…' : 'Scan today'}
+              </button>
               <span className="text-xs text-slate-500">{learnedAliases?.length ?? 0} saved</span>
             </div>
           </div>

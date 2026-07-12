@@ -6,6 +6,7 @@ import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import { rememberExamMapping } from '../services/memoryLearningService';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import { recordAuditEvent } from '../utils/audit';
 import { parseHospitalReport, compareHospitalRows, saveHospitalComparisonReport, type HospitalRow, type HospitalDiscrepancy } from '../utils/hospitalComparison';
 import type { StudyLog, Modality } from '../types';
 import { MODALITY_LABELS } from '../types';
@@ -20,6 +21,54 @@ function displayTitle(log: StudyLog): string {
 
 function formatDayLabel(date: string): string {
   return new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function csvEscape(value: unknown): string {
+  const text = String(value ?? '');
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadText(filename: string, text: string, type = 'text/csv;charset=utf-8') {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportDayCsv(date: string, dayLogs: StudyLog[], profileId: string | null, siteId: string | null) {
+  const confirmedRvu = dayLogs.filter((log) => !log.needsReview).reduce((sum, log) => sum + (log.workRvu ?? 0), 0);
+  const rows = [
+    ['Date', 'Exam', 'CPT', 'Modifier', 'wRVU', 'Modality', 'Status', 'Match method', 'Confidence'],
+    ...dayLogs.map((log) => [
+      log.logDate,
+      displayTitle(log),
+      log.cptCode ?? '',
+      log.modifier ?? '',
+      log.workRvu ?? '',
+      log.modality ?? '',
+      log.needsReview ? 'Pending review' : 'Confirmed',
+      log.matchMethod,
+      `${Math.round((log.matchConfidence ?? 0) * 100)}%`,
+    ]),
+    [],
+    ['Total wRVU', confirmedRvu],
+    ['Exported at', new Date().toISOString()],
+  ];
+  downloadText(`wrvu-${date}.csv`, rows.map((row) => row.map(csvEscape).join(',')).join('\n'));
+  void recordAuditEvent({
+    profileId,
+    siteId,
+    sessionId: null,
+    logDate: date,
+    action: 'exported',
+    summary: `Exported ${date} CSV`,
+    detailsJson: JSON.stringify({ count: dayLogs.length, confirmedRvu }),
+  });
 }
 
 function HospitalComparePanel({ dayLogs, reportDate, profileId, siteId }: {
@@ -250,12 +299,20 @@ export function History() {
 
                 {expanded && (
                   <div className="border-t border-white/8 p-3 space-y-2">
-                    <button
-                      onClick={() => setCompareOpenDate(compareOpenDate === date ? null : date)}
-                      className="text-[11px] px-2.5 py-1 rounded-lg border border-white/12 text-slate-400 hover:border-white/25 hover:text-white transition-colors"
-                    >
-                      Compare with hospital report
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => setCompareOpenDate(compareOpenDate === date ? null : date)}
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-white/12 text-slate-400 hover:border-white/25 hover:text-white transition-colors"
+                      >
+                        Compare with hospital report
+                      </button>
+                      <button
+                        onClick={() => exportDayCsv(date, dayLogs, profileId, siteId)}
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-white/12 text-slate-400 hover:border-white/25 hover:text-white transition-colors"
+                      >
+                        Export CSV
+                      </button>
+                    </div>
                     {compareOpenDate === date && (
                       <HospitalComparePanel dayLogs={dayLogs} reportDate={date} profileId={profileId} siteId={siteId} />
                     )}

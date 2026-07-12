@@ -30,15 +30,11 @@ import { Locations } from './pages/Locations';
 import { CameraUploadPage } from './pages/CameraUploadPage';
 import { Profiles } from './pages/Profiles';
 import { AdminData } from './pages/AdminData';
-import { Automation } from './pages/Automation';
-import { AnalyticsPage } from './pages/ProductDashboards';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
 type Tab =
   | 'dashboard'
-  | 'analytics'
-  | 'automation'
   | 'import'
   | 'history'
   | 'settings'
@@ -273,8 +269,6 @@ function MainApp() {
             <div className="mx-auto w-full max-w-[1720px] px-4 py-5 lg:px-6 lg:py-6">
               <PageErrorBoundary tab={activeTab}>
                 {activeTab === 'dashboard'     && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
-                {activeTab === 'analytics'     && <AnalyticsPage />}
-                {activeTab === 'automation'    && <Automation />}
                 {activeTab === 'import'        && <Import onImported={() => setActiveTab('dashboard')} onOpenQuickLog={() => setQuickLogOpen(true)} />}
                 {activeTab === 'history'       && <History />}
                 {activeTab === 'settings'      && <Settings onNavigate={(t) => setActiveTab(t as Tab)} />}
