@@ -23,14 +23,16 @@ import { LogStudy } from './LogStudy';
 import { CameraUploadPage } from './CameraUploadPage';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { StatusPill } from '../components/ui/StatusPill';
+import { Sheet } from '../components/ui/Sheet';
 
 type Segment = 'capture' | 'manual' | 'camera';
 
 interface LogProps {
   onImported: () => void;
+  onClose: () => void;
 }
 
-export function Log({ onImported }: LogProps) {
+export function Log({ onImported, onClose }: LogProps) {
   const { activeProfile } = useOrg();
   const profileId = activeProfile?.id ?? null;
   const [segment, setSegment] = useState<Segment>('capture');
@@ -45,8 +47,12 @@ export function Log({ onImported }: LogProps) {
   );
 
   return (
+    <Sheet open onClose={onClose} title="Capture" className="max-h-[92vh] max-w-4xl overflow-y-auto">
     <div className="mx-auto max-w-2xl space-y-4">
-      <h1 className="text-[34px] font-bold leading-tight text-rd-label-primary">Log</h1>
+      <div>
+        <p className="text-[22px] font-semibold leading-tight text-rd-label-primary">Paste, drop, or type an exam…</p>
+        <p className="mt-1 text-[13px] text-rd-label-secondary">⌘V paste · browse files · camera</p>
+      </div>
 
       {pendingSession && pendingSession.totalExams > 0 && segment !== 'capture' && (
         <StatusPill tone="caution" onClick={() => setSegment('capture')}>
@@ -88,6 +94,8 @@ export function Log({ onImported }: LogProps) {
           <CameraUploadPage onImported={onImported} />
         </div>
       )}
+      <p className="text-[12px] text-rd-label-secondary">Screenshots are processed on this device and minimized after import.</p>
     </div>
+    </Sheet>
   );
 }
