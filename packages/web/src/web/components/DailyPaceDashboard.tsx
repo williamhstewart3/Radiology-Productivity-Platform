@@ -22,10 +22,36 @@ import {
   type DailyPaceSettings,
   type DailyPaceMetrics,
 } from '../utils/dailyPaceCalculations';
-import { todayDateString } from '../utils/calculations';
+import { computeYtdStats, todayDateString } from '../utils/calculations';
+import type { ActiveReviewSession, StudyLog, UserSettings } from '../types';
 import { ConfettiCanvas } from './ConfettiCanvas';
 import { MiniPaceWindow } from './MiniPaceWindow';
 import { theme } from '../lib/theme';
+
+// ─── Sparkline ───────────────────────────────────────────────────────────────
+
+function Sparkline({ data, width = 120, height = 32 }: { data: number[]; width?: number; height?: number }) {
+  const max = Math.max(1, ...data);
+  const points = data
+    .map((value, i) => {
+      const x = (i / Math.max(1, data.length - 1)) * width;
+      const y = height - (value / max) * height;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+  return (
+    <svg width={width} height={height} className="shrink-0">
+      <polyline
+        points={points}
+        fill="none"
+        stroke={theme.colors.accent}
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 // ─── Status → color token ────────────────────────────────────────────────────
 
@@ -216,50 +242,6 @@ function DualProgressBars({ expectedPct, actualPct, progressStatus }: DualBarsPr
   );
 }
 
-// ─── Stat Card ───────────────────────────────────────────────────────────────
-
-interface StatCardProps {
-  label: string;
-  value: string;
-  sub?: string;
-  valueColor?: string;
-  highlight?: boolean;
-}
-
-function StatCard({ label, value, sub, valueColor, highlight }: StatCardProps) {
-  return (
-    <div
-      className="rounded-xl flex flex-col gap-1 transition-all duration-200"
-      style={{
-        background: highlight
-          ? `linear-gradient(145deg, rgba(37,99,168,0.18), rgba(91,184,212,0.06))`
-          : `linear-gradient(145deg, rgba(22,32,50,0.9), rgba(15,24,36,0.7))`,
-        border: highlight
-          ? '1px solid rgba(91,184,212,0.22)'
-          : '1px solid rgba(91,184,212,0.09)',
-        padding: '14px 16px',
-        boxShadow: highlight ? '0 4px 16px rgba(37,99,168,0.12)' : '0 2px 8px rgba(0,0,0,0.2)',
-      }}
-    >
-      <span
-        style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--theme-text-disabled)' }}
-      >
-        {label}
-      </span>
-      <span
-        style={{ fontSize: '1.375rem', fontWeight: 800, lineHeight: 1.1, letterSpacing: '-0.02em', color: valueColor ?? 'var(--theme-text-primary)', fontVariantNumeric: 'tabular-nums' }}
-      >
-        {value}
-      </span>
-      {sub && (
-        <span style={{ fontSize: '10px', color: 'var(--theme-text-disabled)', lineHeight: 1.3 }}>
-          {sub}
-        </span>
-      )}
-    </div>
-  );
-}
-
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 interface DailyPaceDashboardProps {
@@ -280,6 +262,59 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
     [today, profileId],
     [],
   );
+
+  const recentLogs = useLiveQuery<StudyLog[]>(
+    async () => {
+      if (!profileId) return [];
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 13);
+      const cutoffDate = cutoff.toISOString().slice(0, 10);
+      const all = await db.studyLogs.where('logDate').aboveOrEqual(cutoffDate).toArray();
+      return all.filter((l) => !l.needsReview && !(l as any).deletedAt && (l.profileId === profileId || l.profileId == null));
+    },
+    [profileId],
+    [],
+  ) ?? [];
+
+  const yearLogs = useLiveQuery<StudyLog[]>(
+    async () => {
+      if (!profileId) return [];
+      const yearStart = `${new Date().getFullYear()}-01-01`;
+      const all = await db.studyLogs.where('logDate').aboveOrEqual(yearStart).toArray();
+      return all.filter((l) => !(l as any).deletedAt && (l.profileId === profileId || l.profileId == null));
+    },
+    [profileId],
+    [],
+  ) ?? [];
+
+  const userSettings = useLiveQuery<UserSettings | undefined>(() => db.userSettings.get('default'), []);
+
+  const activeSessions = useLiveQuery<ActiveReviewSession[]>(
+    async () => {
+      if (!profileId) return [];
+      const all = await db.activeReviewSessions.toArray();
+      return all.filter((s) => s.status === 'active' && (s.profileId === profileId || s.profileId == null));
+    },
+    [profileId],
+    [],
+  ) ?? [];
+  const pendingReviewCount = activeSessions.reduce((sum, s) => sum + s.needsReviewCount, 0);
+
+  const sparklineSeries = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (13 - i));
+    const date = d.toISOString().slice(0, 10);
+    return recentLogs.filter((l) => l.logDate === date).reduce((sum, l) => sum + (l.workRvu ?? 0), 0);
+  });
+  const last14Total = sparklineSeries.reduce((sum, v) => sum + v, 0);
+
+  const ytd = userSettings
+    ? computeYtdStats(yearLogs, {
+        ...userSettings,
+        annualRvuGoal: activeProfile?.annualRvuGoal ?? userSettings.annualRvuGoal,
+      })
+    : null;
+  const ytdPct = ytd && ytd.annualGoal > 0 ? Math.min(100, (ytd.ytdWorkRvu / ytd.annualGoal) * 100) : 0;
 
   const paceSettings: DailyPaceSettings = {
     dailyRvuGoal: activeProfile?.dailyRvuGoal ?? DEFAULT_DAILY_PACE_SETTINGS.dailyRvuGoal,
@@ -352,14 +387,6 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
   const sd = getStatusDisplay(metrics.status);
   const color = statusColor(metrics.status);
 
-  const paceDiffAbs = Math.abs(metrics.paceDifference);
-  const paceDiffLabel =
-    metrics.paceDifference >= 0 ? `+${paceDiffAbs.toFixed(1)}` : `−${paceDiffAbs.toFixed(1)}`;
-  const paceDiffColor =
-    metrics.paceDifference >= 0.5 ? theme.colors.ahead :
-    metrics.paceDifference <= -0.5 ? theme.colors.behind :
-    theme.colors.onTrack;
-
   function fmt12(hhmm: string) {
     const [h, m] = hhmm.split(':').map(Number);
     const ampm = h >= 12 ? 'PM' : 'AM';
@@ -406,71 +433,42 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
 
       {/* ── Header ───────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1
-            className="text-2xl font-bold tracking-tight"
-            style={{ color: 'var(--theme-text-primary)' }}
-          >
-            Home
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--theme-text-muted)' }}>
-            Daily pace · {' '}
-            {fmt12(paceSettings.workdayStart)} – {fmt12(paceSettings.workdayEnd)}
-            {paceSettings.breakMinutes > 0 && ` · ${paceSettings.breakMinutes}m break`}
-          </p>
-        </div>
+        <h1
+          className="text-2xl font-bold tracking-tight"
+          style={{ color: 'var(--theme-text-primary)' }}
+        >
+          Home
+        </h1>
         <div className="flex items-center gap-2">
           <button
             onClick={openMiniWindow}
             title="Open compact productivity HUD on second monitor"
-            className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5"
+            className="p-2 rounded-xl text-sm transition-all"
             style={{
               background: 'var(--theme-bg-card)',
               border: '1px solid var(--theme-border)',
               color: 'var(--theme-text-muted)',
             }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-primary)';
-              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--theme-border-active)';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = 'var(--theme-text-muted)';
-              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--theme-border)';
-            }}
           >
-            <span>📌</span>
-            <span className="hidden sm:inline">Mini Window</span>
+            📌
           </button>
-          <button
-            onClick={() => onNavigate('import')}
-            className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5"
-            style={{
-              background: 'rgba(91,184,212,0.08)',
-              border: '1px solid rgba(91,184,212,0.20)',
-              color: 'var(--theme-text-secondary)',
-            }}
-          >
-            <span>Import Studies</span>
-          </button>
-          <button
-            onClick={() => onNavigate('log')}
-            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
-            style={{
-              background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.primaryLight})`,
-              color: '#fff',
-              boxShadow: `0 2px 12px rgba(37,99,168,0.35)`,
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 4px 20px rgba(37,99,168,0.5)`;
-              (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 2px 12px rgba(37,99,168,0.35)`;
-              (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
-            }}
-          >
-            + Log Study
-          </button>
+          {pendingReviewCount > 0 ? (
+            <button
+              onClick={() => onNavigate('import')}
+              className="px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all"
+              style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.primaryLight})` }}
+            >
+              Review {pendingReviewCount} {pendingReviewCount === 1 ? 'study' : 'studies'}
+            </button>
+          ) : todayLogs.length === 0 ? (
+            <button
+              onClick={() => onNavigate('import')}
+              className="px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all"
+              style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.primaryLight})` }}
+            >
+              Add today's first capture
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -523,62 +521,34 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
         )}
       </div>
 
-      {/* ── Stat Cards ───────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <StatCard
-          label="Current"
-          value={`${metrics.currentRvu.toFixed(1)}`}
-          sub={`of ${metrics.dailyGoal} goal`}
-          highlight
-        />
-        <StatCard
-          label="Expected by Now"
-          value={`${metrics.expectedRvu.toFixed(1)}`}
-          sub="wRVU at current time"
-          valueColor="var(--theme-text-secondary)"
-        />
-        <StatCard
-          label="Ahead / Behind"
-          value={metrics.status === 'before_work' ? '—' : `${paceDiffLabel} wRVU`}
-          sub={metrics.status === 'before_work' ? 'not started' : 'vs linear pace'}
-          valueColor={paceDiffColor}
-        />
-        <StatCard
-          label="Projected Finish"
-          value={
-            metrics.status === 'before_work' ? '—' :
-            metrics.status === 'after_work' || metrics.status === 'goal_achieved'
-              ? `${metrics.currentRvu.toFixed(1)}`
-              : `${metrics.projectedEndOfDay.toFixed(1)}`
-          }
-          sub="wRVU by end of shift"
-          valueColor={
-            metrics.projectedEndOfDay >= metrics.dailyGoal || metrics.status === 'goal_achieved'
-              ? theme.colors.ahead
-              : theme.colors.caution
-          }
-        />
-        <StatCard
-          label="Remaining"
-          value={metrics.remainingToGoal > 0 ? `${metrics.remainingToGoal.toFixed(1)}` : '0.0'}
-          sub="wRVU to goal"
-          valueColor={
-            metrics.remainingToGoal === 0 ? theme.colors.ahead : undefined
-          }
-        />
-        <StatCard
-          label="Required Rate"
-          value={
-            metrics.remainingWorkMinutes <= 0 || metrics.remainingToGoal <= 0 ? '—' :
-            `${metrics.requiredRvuPerHour.toFixed(1)}/hr`
-          }
-          sub="to finish at goal"
-          valueColor={
-            metrics.requiredRvuPerHour > 25 ? theme.colors.behind :
-            metrics.requiredRvuPerHour > 15 ? theme.colors.caution :
-            'var(--theme-text-secondary)'
-          }
-        />
+      {/* One line: projection + pending review, replacing the six-tile stat grid. */}
+      {metrics.status !== 'before_work' && (
+        <p className="text-sm px-1" style={{ color: 'var(--theme-text-muted)' }}>
+          Projected {(metrics.status === 'after_work' || metrics.status === 'goal_achieved' ? metrics.currentRvu : metrics.projectedEndOfDay).toFixed(1)} by {fmt12(paceSettings.workdayEnd)}
+          {pendingReviewCount > 0 && ` · ${pendingReviewCount} pending review`}
+        </p>
+      )}
+
+      {/* ── Trends: 14-day sparkline + annual progress, one compact row ── */}
+      <div
+        className="flex items-center justify-between gap-6 rounded-2xl px-5 py-3.5 flex-wrap"
+        style={{ background: 'var(--theme-bg-card)', border: '1px solid var(--theme-border)' }}
+      >
+        <div className="flex items-center gap-3">
+          <Sparkline data={sparklineSeries} />
+          <div>
+            <p className="text-[11px]" style={{ color: 'var(--theme-text-disabled)' }}>Last 14 days</p>
+            <p className="text-sm font-semibold" style={{ color: 'var(--theme-text-primary)' }}>{last14Total.toFixed(1)} wRVU</p>
+          </div>
+        </div>
+        {ytd && (
+          <div className="text-right">
+            <p className="text-[11px]" style={{ color: 'var(--theme-text-disabled)' }}>Annual progress</p>
+            <p className="text-sm font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
+              {ytdPct.toFixed(0)}% · {ytd.ytdWorkRvu.toFixed(0)} of {ytd.annualGoal.toFixed(0)}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Study count */}
