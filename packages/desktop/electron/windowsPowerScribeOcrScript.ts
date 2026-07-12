@@ -817,6 +817,82 @@ function Get-InkProjectionRowEstimate([System.Drawing.Bitmap] $Bitmap) {
   return $runs
 }
 
+function Get-AdaptiveThresholdBytes([byte[]] $Gray, [int] $Width, [int] $Height, [int] $Radius = 14, [double] $C = 7.0) {
+  $integral = New-Object double[] (($Width + 1) * ($Height + 1))
+  for ($y = 0; $y -lt $Height; $y++) {
+    $rowSum = 0.0
+    for ($x = 0; $x -lt $Width; $x++) {
+      $rowSum += $Gray[$y * $Width + $x]
+      $integral[($y + 1) * ($Width + 1) + $x + 1] = $integral[$y * ($Width + 1) + $x + 1] + $rowSum
+    }
+  }
+  $output = New-Object byte[] ($Width * $Height)
+  for ($y = 0; $y -lt $Height; $y++) {
+    $y0 = [Math]::Max(0, $y - $Radius)
+    $y1 = [Math]::Min($Height - 1, $y + $Radius)
+    for ($x = 0; $x -lt $Width; $x++) {
+      $x0 = [Math]::Max(0, $x - $Radius)
+      $x1 = [Math]::Min($Width - 1, $x + $Radius)
+      $area = ($x1 - $x0 + 1) * ($y1 - $y0 + 1)
+      $sum = $integral[($y1 + 1) * ($Width + 1) + $x1 + 1] - $integral[$y0 * ($Width + 1) + $x1 + 1] - $integral[($y1 + 1) * ($Width + 1) + $x0] + $integral[$y0 * ($Width + 1) + $x0]
+      $threshold = $sum / $area - $C
+      $value = if ($Gray[$y * $Width + $x] -lt $threshold) { 0 } else { 255 }
+      $output[$y * $Width + $x] = $value
+    }
+  }
+  return $output
+}
+
+function Preprocess-ColumnBitmapForOcr([System.Drawing.Bitmap] $Bitmap) {
+  $scale = 3
+  $width = [Math]::Max(1, $Bitmap.Width * $scale)
+  $height = [Math]::Max(1, $Bitmap.Height * $scale)
+  $scaled = New-Object System.Drawing.Bitmap $width, $height
+  $graphics = [System.Drawing.Graphics]::FromImage($scaled)
+  $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $graphics.DrawImage($Bitmap, 0, 0, $width, $height)
+  $graphics.Dispose()
+  try {
+    $locked = Lock-BitmapBytes $scaled
+    $bytes = $locked.bytes
+    $stride = $locked.stride
+    $gray = New-Object byte[] ($width * $height)
+    for ($y = 0; $y -lt $height; $y++) {
+      for ($x = 0; $x -lt $width; $x++) {
+        $offset = $y * $stride + $x * 4
+        $raw = $bytes[$offset + 2] * 0.299 + $bytes[$offset + 1] * 0.587 + $bytes[$offset] * 0.114
+        $contrasted = [Math]::Max(0.0, [Math]::Min(255.0, ($raw - 128.0) * 1.55 + 128.0))
+        $gray[$y * $width + $x] = [byte][Math]::Round($contrasted)
+      }
+    }
+    $thresholded = Get-AdaptiveThresholdBytes $gray $width $height
+
+    $result = New-Object System.Drawing.Bitmap $width, $height
+    $resultRect = New-Object System.Drawing.Rectangle 0, 0, $width, $height
+    $resultData = $result.LockBits($resultRect, [System.Drawing.Imaging.ImageLockMode]::WriteOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    try {
+      $resultStride = $resultData.Stride
+      $outBytes = New-Object byte[] ($resultStride * $height)
+      for ($y = 0; $y -lt $height; $y++) {
+        for ($x = 0; $x -lt $width; $x++) {
+          $value = $thresholded[$y * $width + $x]
+          $outOffset = $y * $resultStride + $x * 4
+          $outBytes[$outOffset] = $value
+          $outBytes[$outOffset + 1] = $value
+          $outBytes[$outOffset + 2] = $value
+          $outBytes[$outOffset + 3] = 255
+        }
+      }
+      [System.Runtime.InteropServices.Marshal]::Copy($outBytes, 0, $resultData.Scan0, $outBytes.Length)
+    } finally {
+      $result.UnlockBits($resultData)
+    }
+    return $result
+  } finally {
+    $scaled.Dispose()
+  }
+}
+
 if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) {
   throw 'Clipboard does not contain an image.'
 }
@@ -883,27 +959,36 @@ try {
   $examBitmap = Crop-Bitmap $bitmap $examRect
   $modifiedBitmap = Crop-Bitmap $bitmap $modifiedRect
   try {
-    $procedureOcr = Invoke-Ocr $procedureBitmap
-    $examOcr = Invoke-Ocr $examBitmap
-    $modifiedOcr = Invoke-Ocr $modifiedBitmap
-    $rows = Band-Rows $procedureOcr $examOcr $modifiedOcr
+    $procedurePreprocessed = Preprocess-ColumnBitmapForOcr $procedureBitmap
+    $examPreprocessed = Preprocess-ColumnBitmapForOcr $examBitmap
+    $modifiedPreprocessed = Preprocess-ColumnBitmapForOcr $modifiedBitmap
+    try {
+      $procedureOcr = Invoke-Ocr $procedurePreprocessed
+      $examOcr = Invoke-Ocr $examPreprocessed
+      $modifiedOcr = Invoke-Ocr $modifiedPreprocessed
+      $rows = Band-Rows $procedureOcr $examOcr $modifiedOcr
 
-    $anchorCount = @($modifiedOcr.lines | Where-Object { Parse-DateTimeText $_.text }).Count
-    $suspectedMissedRows = @($rows | Where-Object { $_.reviewReason -and $_.reviewReason -like '*Possible undetected row above this one*' }).Count
-    $inkProjectionRowEstimate = Get-InkProjectionRowEstimate $procedureBitmap
+      $anchorCount = @($modifiedOcr.lines | Where-Object { Parse-DateTimeText $_.text }).Count
+      $suspectedMissedRows = @($rows | Where-Object { $_.reviewReason -and $_.reviewReason -like '*Possible undetected row above this one*' }).Count
+      $inkProjectionRowEstimate = Get-InkProjectionRowEstimate $procedureBitmap
 
-    $accounting = [pscustomobject]@{
-      cropMethod = $cropMethod
-      anchorCount = $anchorCount
-      procedureLineCount = $procedureOcr.lines.Count
-      examLineCount = $examOcr.lines.Count
-      modifiedLineCount = $modifiedOcr.lines.Count
-      bandCount = $rows.Count
-      suspectedMissedRows = $suspectedMissedRows
-      inkProjectionRowEstimate = $inkProjectionRowEstimate
+      $accounting = [pscustomobject]@{
+        cropMethod = $cropMethod
+        anchorCount = $anchorCount
+        procedureLineCount = $procedureOcr.lines.Count
+        examLineCount = $examOcr.lines.Count
+        modifiedLineCount = $modifiedOcr.lines.Count
+        bandCount = $rows.Count
+        suspectedMissedRows = $suspectedMissedRows
+        inkProjectionRowEstimate = $inkProjectionRowEstimate
+      }
+
+      [pscustomobject]@{ rows = $rows; accounting = $accounting } | ConvertTo-Json -Depth 8 -Compress
+    } finally {
+      $procedurePreprocessed.Dispose()
+      $examPreprocessed.Dispose()
+      $modifiedPreprocessed.Dispose()
     }
-
-    [pscustomobject]@{ rows = $rows; accounting = $accounting } | ConvertTo-Json -Depth 8 -Compress
   } finally {
     $procedureBitmap.Dispose()
     $examBitmap.Dispose()
