@@ -1,6 +1,6 @@
 import { useState, useEffect, Component } from 'react';
 import type { ReactNode } from 'react';
-import { Route, Switch, Redirect, useLocation, Link } from 'wouter';
+import { Route, Switch, Redirect, useLocation } from 'wouter';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAppInitialization } from './hooks/useAppInitialization';
 import { OrgProvider } from './contexts/OrgContext';
@@ -27,10 +27,11 @@ import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 import { Locations } from './pages/Locations';
 import { CptExplorer } from './pages/CptExplorer';
+import { Codes } from './pages/Codes';
 import { Profiles } from './pages/Profiles';
 import { AdminData } from './pages/AdminData';
 import { Automation } from './pages/Automation';
-import { AnalyticsPage } from './pages/ProductDashboards';
+import { Trends } from './pages/Trends';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
@@ -247,12 +248,7 @@ function MainApp() {
                     <Today onNavigate={navigate} />
                   </Route>
                   <Route path="/trends">
-                    <div className="space-y-3">
-                      <AnalyticsPage />
-                      <Link href="/trends/history" className="inline-block text-[15px] font-medium text-rd-accent">
-                        View full history →
-                      </Link>
-                    </div>
+                    <Trends onNavigate={navigate} />
                   </Route>
                   <Route path="/trends/history">
                     <History />
@@ -261,6 +257,9 @@ function MainApp() {
                     <Log onImported={() => navigate('/today')} />
                   </Route>
                   <Route path="/codes">
+                    <Codes onNavigate={navigate} />
+                  </Route>
+                  <Route path="/codes/browse">
                     <CptExplorer onNavigate={legacyNavigate} />
                   </Route>
                   <Route path="/settings">

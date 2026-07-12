@@ -149,7 +149,7 @@ function expandedSearchTerms(query: string): string[] {
   return [...terms].filter(Boolean);
 }
 
-function tokenScore(row: CptRvuRow, query: string): number {
+export function tokenScore(row: CptRvuRow, query: string): number {
   const terms = expandedSearchTerms(query);
   if (terms.length === 0) return 0;
 
@@ -172,7 +172,7 @@ function tokenScore(row: CptRvuRow, query: string): number {
   return best;
 }
 
-function pickProfessionalRow(rows: CptRvuRow[]): CptRvuRow | null {
+export function pickProfessionalRow(rows: CptRvuRow[]): CptRvuRow | null {
   const billableRows = rows.filter(
     (row) => row.pcTcIndicator !== 'technical' && (row.workRvu ?? 0) > 0,
   );

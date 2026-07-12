@@ -16,13 +16,11 @@ import { findMatchCandidates } from '../utils/matching';
 import { checkOneDuplicate } from '../utils/duplicateDetection';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
-import { commitPipelineResults } from '../pipeline/importPipeline';
-import type { PipelineReviewRow } from '../pipeline/importPipeline';
+import { logConfirmedStudy } from '../utils/manualLog';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import type { MatchCandidate } from '../types';
 import { MODALITY_LABELS } from '../types';
 import type { DuplicateMatch, StudyCandidate } from '../utils/duplicateDetection';
-import type { ImportedStudy } from '../types/importProvider';
 
 interface LogStudyProps {
   onSaved: () => void;
@@ -93,43 +91,13 @@ export function LogStudy({ onSaved }: LogStudyProps) {
       // ── Route through the shared import pipeline's commit path ───────────
       // Same commit function OCR/CSV/PowerScribe use: centralized fingerprinting,
       // alias learning, and Supabase sync — not a bespoke direct DB write.
-      const study: ImportedStudy = {
+      await logConfirmedStudy({
         examTitle: examInput.trim(),
-        canonicalExam: null,
-        cpt: selected.cptCode,
-        workRvu: selected.workRvu,
-        studyDate: logDate,
-        studyTime: null,
-        modality: selected.modality,
-        accessionNumber: null,
-        patientMRN: null,
-        source: 'manual',
-        importedAt: new Date().toISOString(),
-        dateTimeConfidence: 0,
-        dateTimeSource: 'manual',
-      };
-
-      const row: PipelineReviewRow = {
-        tempId: crypto.randomUUID(),
-        source: study,
-        candidates: [selected],
-        selectedCandidateIndex: 0,
-        selectedCandidateIndices: [0],
-        displayTitle: examInput.trim(),
-        needsReview: false,
-        duplicateStatus: null,
-        duplicateExistingLogId: null,
-        duplicateReason: null,
-        included: true,
-        autoSkipped: false,
-        autoApproved: true,
-        autoApprovalLevel: null,
-        approvalStatus: 'manual_approved',
-        reviewReason: null,
-        notes: notes.trim() || null,
-      };
-
-      await commitPipelineResults([row], logDate, 0, activeProfile?.id ?? null);
+        candidate: selected,
+        logDate,
+        notes,
+        profileId: activeProfile?.id ?? null,
+      });
 
       setDupeWarning(null);
       setForceSave(false);
