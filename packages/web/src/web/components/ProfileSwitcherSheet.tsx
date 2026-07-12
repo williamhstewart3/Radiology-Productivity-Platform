@@ -6,10 +6,11 @@ import { Row } from './ui/GroupedList';
 
 interface ProfileSwitcherSheetProps {
   onManageLocations: () => void;
+  onSettings: () => void;
 }
 
 /** Apple-ID-style avatar button, top-right on every screen. */
-export function ProfileSwitcherButton({ onManageLocations }: ProfileSwitcherSheetProps) {
+export function ProfileSwitcherButton({ onManageLocations, onSettings }: ProfileSwitcherSheetProps) {
   const [open, setOpen] = useState(false);
   const { activeProfile, allRadiologists, locations, switchRadiologist } = useOrg();
 
@@ -27,6 +28,9 @@ export function ProfileSwitcherButton({ onManageLocations }: ProfileSwitcherShee
 
       <Sheet open={open} onClose={() => setOpen(false)} title="Switch profile">
         <div className="space-y-4">
+          <button type="button" onClick={() => { setOpen(false); onSettings(); }} className="min-h-11 w-full rounded-[10px] bg-rd-surface-2 px-3 text-left text-[15px] font-medium text-rd-label-primary">
+            Settings
+          </button>
           <div>
             <p className="mb-1.5 px-1 text-[13px] text-rd-label-secondary">Radiologists</p>
             <div className="overflow-hidden rounded-[16px] bg-rd-bg [&>*+*]:border-t [&>*+*]:border-rd-separator">

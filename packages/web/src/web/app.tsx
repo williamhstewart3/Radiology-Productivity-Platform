@@ -10,19 +10,19 @@ import { db, ensureUserSettings } from './db/database';
 import { Today } from './pages/Today';
 import { MiniPaceWindow } from './components/MiniPaceWindow';
 import { ProfileSwitcherButton } from './components/ProfileSwitcherSheet';
+import { CommandPalette } from './components/CommandPalette';
 import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
 import { SidebarNav, BottomTabBar, type TabItem } from './components/ui/TabBar';
 import {
   Bell,
-  ClipboardList,
   Gauge,
+  History as HistoryIcon,
+  Inbox as InboxIcon,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  Search,
-  Settings as SettingsIcon,
+  Plus,
   Sun,
-  TrendingUp,
 } from 'lucide-react';
 import { Log } from './pages/Log';
 import { History } from './pages/History';
@@ -33,7 +33,7 @@ import { Codes } from './pages/Codes';
 import { Profiles } from './pages/Profiles';
 import { AdminData } from './pages/AdminData';
 import { Automation } from './pages/Automation';
-import { Trends } from './pages/Trends';
+import { Inbox } from './pages/Inbox';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
@@ -42,12 +42,10 @@ import { injectTheme } from './lib/theme';
 // Camera, manual Log entry, Profiles, Locations, Admin Data, and Automation
 // aren't primary destinations but stay reachable via secondary routes linked
 // from within Trends/Log/Settings — nothing from the pre-redesign nav is lost.
-const TAB_ITEMS: TabItem[] = [
+const PRIMARY_ITEMS: TabItem[] = [
   { path: '/today', label: 'Today', icon: Gauge },
-  { path: '/trends', label: 'Trends', icon: TrendingUp },
-  { path: '/log', label: 'Log', icon: ClipboardList },
-  { path: '/codes', label: 'Codes', icon: Search },
-  { path: '/settings', label: 'Settings', icon: SettingsIcon },
+  { path: '/inbox', label: 'Inbox', icon: InboxIcon },
+  { path: '/history', label: 'History', icon: HistoryIcon },
 ];
 
 class PageErrorBoundary extends Component<
@@ -128,8 +126,16 @@ function useSystemPrefersDark(): boolean {
 function MainApp() {
   const { isReady, error } = useAppInitialization();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const { activeProfile, activePractice } = useOrg();
   const [location, navigate] = useLocation();
+  const pendingCount = useLiveQuery(async () => {
+    const sessions = await db.activeReviewSessions.where('status').equals('active').toArray();
+    return sessions
+      .filter((session) => session.profileId === (activeProfile?.id ?? null) || session.profileId == null)
+      .reduce((sum, session) => sum + session.needsReviewCount, 0);
+  }, [activeProfile?.id], 0);
+  const tabItems = PRIMARY_ITEMS.map((item) => item.path === '/inbox' ? { ...item, badge: pendingCount } : item);
 
   // Settings > Appearance (auto/light/dark) drives both the legacy Baptist
   // theme (`.dark`) and the new token system (`.rd-dark`/`.rd-light`) so
@@ -147,6 +153,26 @@ function MainApp() {
     document.documentElement.classList.toggle('rd-dark', isDark);
     document.documentElement.classList.toggle('rd-light', !isDark);
   }, [isDark]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen((value) => !value);
+      } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        navigate('/log');
+      } else if (!typing && !event.metaKey && !event.ctrlKey && ['1', '2', '3'].includes(event.key)) {
+        navigate(['/today', '/inbox', '/history'][Number(event.key) - 1]);
+      } else if (event.key === 'Escape') {
+        setPaletteOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navigate]);
 
   async function toggleTheme() {
     const current = await ensureUserSettings();
@@ -222,7 +248,15 @@ function MainApp() {
             </button>
           </div>
 
-          <SidebarNav items={TAB_ITEMS} />
+          <SidebarNav items={tabItems} />
+          <div className="space-y-1 border-t border-rd-separator pt-3">
+            <button type="button" onClick={() => navigate('/log')} className="flex min-h-11 w-full items-center gap-3 rounded-[10px] px-3 text-[15px] font-medium text-rd-label-primary hover:bg-rd-surface">
+              <Plus className="size-5" /><span>Capture</span><kbd className="ml-auto text-[11px] text-rd-label-secondary">⌘N</kbd>
+            </button>
+            <button type="button" onClick={() => setPaletteOpen(true)} className="flex min-h-11 w-full items-center gap-3 rounded-[10px] px-3 text-[15px] text-rd-label-secondary hover:bg-rd-surface">
+              <span className="text-[16px]">⌘</span><span>Commands</span><kbd className="ml-auto text-[11px]">⌘K</kbd>
+            </button>
+          </div>
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -254,7 +288,7 @@ function MainApp() {
                 >
                   {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
                 </button>
-                <ProfileSwitcherButton onManageLocations={() => navigate('/settings/locations')} />
+                <ProfileSwitcherButton onManageLocations={() => navigate('/settings/locations')} onSettings={() => navigate('/settings')} />
               </div>
             </div>
           </header>
@@ -270,11 +304,13 @@ function MainApp() {
                     <Today onNavigate={navigate} />
                   </Route>
                   <Route path="/trends">
-                    <Trends onNavigate={navigate} />
+                    <Redirect to="/history?lens=month" />
                   </Route>
                   <Route path="/trends/history">
-                    <History />
+                    <Redirect to="/history" />
                   </Route>
+                  <Route path="/history"><History /></Route>
+                  <Route path="/inbox"><Inbox onOpenLegacyReview={() => navigate('/log')} /></Route>
                   <Route path="/log">
                     <Log onImported={() => navigate('/today')} />
                   </Route>
@@ -305,7 +341,8 @@ function MainApp() {
           </main>
         </div>
 
-        <BottomTabBar items={TAB_ITEMS} />
+        <BottomTabBar items={tabItems} onCapture={() => navigate('/log')} />
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate} />
       </div>
       )}
       <AnimatePresence>
