@@ -19,7 +19,7 @@ function parseRows(rowsJson: string | undefined): PipelineReviewRow[] {
   }
 }
 
-export function Inbox({ onOpenLegacyReview }: { onOpenLegacyReview: () => void }) {
+export function Inbox() {
   const { activeProfile } = useOrg();
   const profileId = activeProfile?.id ?? null;
   const [activeIndex, setActiveIndex] = useState(0);
@@ -92,7 +92,7 @@ export function Inbox({ onOpenLegacyReview }: { onOpenLegacyReview: () => void }
         {pending.length > 1 && <span className="text-[13px] text-rd-label-secondary">{activeIndex + 1} of {pending.length}</span>}
       </div>
 
-      {receipt && <output className="block rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 text-[13px] text-rd-label-primary">{receipt} {undoSnapshot && <button type="button" onClick={() => void undo()} className="ml-2 font-semibold underline">Undo <KeyHint>Z</KeyHint></button>}</output>}
+      {receipt && <output aria-live="polite" className="block rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 text-[13px] text-rd-label-primary">{receipt} {undoSnapshot && <button type="button" onClick={() => void undo()} className="ml-2 font-semibold underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rd-label-primary">Undo <KeyHint>Z</KeyHint></button>}</output>}
 
       {pending.length === 0 ? (
         <Card className="py-14 text-center"><p className="text-[22px] font-semibold text-rd-label-primary">All caught up. Everything counted.</p></Card>
@@ -114,7 +114,6 @@ export function Inbox({ onOpenLegacyReview }: { onOpenLegacyReview: () => void }
         </div>
       )}
 
-      {session && <button type="button" onClick={onOpenLegacyReview} className="min-h-11 text-[13px] text-rd-label-secondary underline underline-offset-4">Open legacy review for parity fallback</button>}
     </div>
   );
 }

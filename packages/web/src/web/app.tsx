@@ -105,7 +105,7 @@ function AppLoadingOverlay() {
         animate={{
           opacity: [0.72, 1, 0.72],
           scale: [0.985, 1, 0.985],
-          transition: { duration: 2, repeat: Infinity, ease: 'easeInOut' },
+          transition: { duration: 0.3, ease: 'easeOut' },
         }}
         exit={{ opacity: 0, scale: 1.08, transition: { duration: 0.45, ease: easeOut } }}
       />
@@ -347,9 +347,9 @@ function MainApp() {
                   </Route>
                   <Route path="/history"><TimelineHistory onOpenLegacy={() => navigate('/history/legacy')} /></Route>
                   <Route path="/history/legacy"><LegacyHistory /></Route>
-                  <Route path="/inbox"><Inbox onOpenLegacyReview={() => navigate('/log')} /></Route>
+                  <Route path="/inbox"><Inbox /></Route>
                   <Route path="/log">
-                    <Log onImported={() => navigate('/today')} onClose={() => navigate('/today')} />
+                    <Log onImported={() => navigate('/today')} onReviewReady={() => navigate('/inbox')} onClose={() => navigate('/today')} />
                   </Route>
                   <Route path="/codes">
                     <Codes onNavigate={navigate} />

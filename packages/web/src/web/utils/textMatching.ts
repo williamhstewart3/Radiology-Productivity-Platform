@@ -140,7 +140,7 @@ export function normalizeExamText(raw: string): string {
 
   // Strip underscores, punctuation (except slashes — handled below)
   text = text.replace(/[_]+/g, ' ');
-  text = text.replace(/[.,;:()\[\]{}]/g, ' ');
+  text = text.replace(/[.,;:()[\]{}]/g, ' ');
 
   // Expand whole-phrase slash abbreviations FIRST, while the slash is still
   // attached, before any blanket slash-splitting can break them apart.
