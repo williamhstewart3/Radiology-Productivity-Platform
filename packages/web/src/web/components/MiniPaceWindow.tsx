@@ -228,11 +228,6 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
 
   const beforeWork = metrics.status === 'before_work';
   const completedLogs = todayLogs.filter((log) => !log.needsReview);
-  const lastSuccessfulLog = [...completedLogs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  const lastImportLabel = lastSuccessfulLog
-    ? new Date(lastSuccessfulLog.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-    : 'No imports yet';
-  const paceLabel = beforeWork ? 'Ready' : diffLabel;
 
   const handlePasteScreenshot = () => {
     const desktop = getDesktopAPI();
@@ -380,107 +375,23 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
           </div>
         </div>
 
-        {/* ── Metrics row ── */}
+        {/* ── One projected line ── */}
         <div style={{
           display: 'flex',
+          alignItems: 'center',
           justifyContent: 'space-between',
-          alignItems: 'flex-start',
           gap: 'clamp(12px, 3vw, 28px)',
         }}>
-          {/* Left: Expected + Difference */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'clamp(2px, 0.5vw, 5px)' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'clamp(4px, 0.8vw, 8px)' }}>
-              <span style={{
-                fontSize: 'clamp(10px, 1.4vw, 13px)', color: 'rgba(148,163,184,0.5)',
-                fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase',
-              }}>Expected</span>
-              <span style={{
-                fontSize: 'clamp(13px, 2vw, 18px)', fontWeight: 700,
-                color: 'rgba(224,234,244,0.9)', fontVariantNumeric: 'tabular-nums',
-                letterSpacing: '-0.02em',
-              }}>
-                {beforeWork ? '—' : `${metrics.expectedRvu.toFixed(1)} wRVU`}
-              </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'clamp(4px, 0.8vw, 8px)' }}>
-              <span style={{
-                fontSize: 'clamp(10px, 1.4vw, 13px)', color: 'rgba(148,163,184,0.5)',
-                fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase',
-              }}>Difference</span>
-              <span style={{
-                fontSize: 'clamp(13px, 2vw, 18px)', fontWeight: 700,
-                color: tokens.text, fontVariantNumeric: 'tabular-nums',
-                letterSpacing: '-0.02em', transition: 'color 0.6s ease',
-              }}>
-                {beforeWork ? '—' : diffLabel}
-              </span>
-            </div>
-          </div>
-
-          {/* Right: Projected Finish */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 'clamp(2px, 0.5vw, 5px)' }}>
-            <span style={{
-              fontSize: 'clamp(10px, 1.4vw, 13px)', color: 'rgba(148,163,184,0.5)',
-              fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase',
-            }}>Projected Finish</span>
-            <span style={{
-              fontSize: 'clamp(16px, 2.8vw, 26px)', fontWeight: 800,
-              color: metrics.projectedEndOfDay >= metrics.dailyGoal || metrics.status === 'goal_achieved'
-                ? t.colors.ahead : 'rgba(224,234,244,0.9)',
-              fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.03em',
-              transition: 'color 0.6s ease',
-            }}>
-              {projLabel}
-            </span>
-          </div>
-        </div>
-
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, minmax(0, 1fr)) auto',
-          gap: 10,
-          alignItems: 'stretch',
-        }}>
-          {[
-            ['Exams', String(completedLogs.length)],
-            ['Pace', paceLabel],
-            ['Last import', lastImportLabel],
-          ].map(([label, value]) => (
-            <div
-              key={label}
-              style={{
-                border: '1px solid rgba(148,163,184,0.12)',
-                background: 'rgba(15,24,36,0.42)',
-                borderRadius: 10,
-                padding: '10px 12px',
-                minWidth: 0,
-              }}
-            >
-              <div style={{
-                color: 'rgba(148,163,184,0.58)',
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-              }}>
-                {label}
-              </div>
-              <div style={{
-                marginTop: 4,
-                color: 'rgba(224,234,244,0.95)',
-                fontSize: 14,
-                fontWeight: 800,
-                fontVariantNumeric: 'tabular-nums',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}>
-                {value}
-              </div>
-            </div>
-          ))}
+          <span style={{
+            fontSize: 'clamp(13px, 2vw, 16px)', fontWeight: 600,
+            color: 'rgba(224,234,244,0.85)', letterSpacing: '-0.01em',
+          }}>
+            {beforeWork
+              ? 'Ready'
+              : `Projected ${projLabel} · ${diffLabel} vs pace · ${completedLogs.length} exam${completedLogs.length === 1 ? '' : 's'}`}
+          </span>
           <button type="button" className="mini-action" onClick={handlePasteScreenshot}>
-            Paste Screenshot
+            Paste screenshot
           </button>
         </div>
 

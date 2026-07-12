@@ -695,19 +695,10 @@ export function Settings({ onNavigate }: SettingsProps) {
 
           {institutionImportSummary && (
             <div className="rounded-xl border border-white/8 bg-black/20 p-3 space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {[
-                  ['Total rows', institutionImportSummary.totalRows],
-                  ['Mapped rows', institutionImportSummary.mappedRows],
-                  ['Blank CPT', institutionImportSummary.skippedBlankCptRows],
-                  ['Multi-CPT', institutionImportSummary.multiCptRows],
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-lg bg-white/5 p-2">
-                    <p className="text-[10px] text-slate-500">{label}</p>
-                    <p className="mt-1 text-sm font-semibold text-white">{value}</p>
-                  </div>
-                ))}
-              </div>
+              <p className="text-xs text-slate-300">
+                {institutionImportSummary.totalRows} rows · {institutionImportSummary.mappedRows} mapped ·{' '}
+                {institutionImportSummary.skippedBlankCptRows} blank CPT · {institutionImportSummary.multiCptRows} multi-CPT
+              </p>
               <p className="text-xs text-slate-400">
                 Modality counts:{' '}
                 {Object.entries(institutionImportSummary.modalityCounts)

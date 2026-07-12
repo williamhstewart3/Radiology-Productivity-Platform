@@ -77,7 +77,7 @@ function ExamSearchPanel({ initialQuery, onSelect, onClose }: ExamSearchPanelPro
     <div className="mt-2 rounded-xl border border-sky-500/30 bg-slate-900/95 shadow-2xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/8">
-        <span className="text-sky-400 text-xs font-semibold uppercase tracking-wider">Search Exam Library</span>
+        <span className="text-sky-400 text-xs font-semibold">Search exam library</span>
         <button
           onClick={onClose}
           className="ml-auto text-slate-500 hover:text-slate-300 text-xs px-1.5 py-0.5 rounded transition-colors"
@@ -1637,14 +1637,11 @@ export function Import({ onImported, onOpenQuickLog }: ImportProps) {
                 Generate developer summary
               </button>
             </div>
-            <div className="grid gap-2 md:grid-cols-4">
-              {(['wrong_duplicate', 'missing_datetime', 'merged_ocr_rows', 'wrong_cpt'] as FeedbackEventCategory[]).map((category) => (
-                <div key={category} className="rounded-lg border border-white/8 bg-white/3 px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-wider text-slate-500">{category.replace(/_/g, ' ')}</p>
-                  <p className="text-lg font-bold text-white">{feedbackEvents.filter((event) => event.category === category).length}</p>
-                </div>
-              ))}
-            </div>
+            <p className="text-xs text-slate-400">
+              {(['wrong_duplicate', 'missing_datetime', 'merged_ocr_rows', 'wrong_cpt'] as FeedbackEventCategory[])
+                .map((category) => `${category.replace(/_/g, ' ')}: ${feedbackEvents.filter((event) => event.category === category).length}`)
+                .join(' · ')}
+            </p>
             <div className="max-h-48 overflow-y-auto space-y-2">
               {feedbackEvents.length === 0 ? (
                 <p className="text-xs text-slate-500">No feedback captured yet.</p>
@@ -1864,12 +1861,12 @@ export function Import({ onImported, onOpenQuickLog }: ImportProps) {
                 {/* Everything else lives behind one disclosure. */}
                 {row.included && (
                   <details className="mt-2">
-                    <summary className="cursor-pointer select-none text-[11px] font-semibold uppercase tracking-wide text-slate-500 transition-colors hover:text-slate-300">
+                    <summary className="cursor-pointer select-none text-[11px] font-semibold text-slate-500 transition-colors hover:text-slate-300">
                       Details
                     </summary>
                     <div className="mt-2 space-y-2">
                       {isPossibleDupe && (
-                        <div className="px-3 py-2 rounded-lg bg-orange-500/8 border border-orange-500/20 text-xs text-orange-300/80">
+                        <div className="px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs text-amber-300/80">
                           {row.duplicateReason} — verify before saving or exclude this row.
                         </div>
                       )}

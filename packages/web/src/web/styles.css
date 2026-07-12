@@ -638,8 +638,7 @@
   .section-label {
     font-size: 0.6875rem;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.02em;
     color: var(--theme-text-disabled);
   }
 

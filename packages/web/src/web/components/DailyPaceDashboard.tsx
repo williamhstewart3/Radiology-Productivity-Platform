@@ -157,7 +157,7 @@ function CircularGauge({ current, goal, status }: GaugeProps) {
             wRVU
           </span>
         </div>
-        <span style={{ fontSize: '0.625rem', color: 'var(--theme-text-disabled)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600 }}>
+        <span style={{ fontSize: '0.625rem', color: 'var(--theme-text-disabled)', fontWeight: 600 }}>
           today
         </span>
       </div>
@@ -188,7 +188,7 @@ function DualProgressBars({ expectedPct, actualPct, progressStatus }: DualBarsPr
       {/* Stacked overlay bars for intuitive comparison */}
       <div className="space-y-1.5">
         <div className="flex justify-between items-baseline">
-          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--theme-text-disabled)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--theme-text-disabled)' }}>
             Expected
           </span>
           <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--theme-text-muted)' }}>
@@ -209,7 +209,7 @@ function DualProgressBars({ expectedPct, actualPct, progressStatus }: DualBarsPr
 
       <div className="space-y-1.5">
         <div className="flex justify-between items-baseline">
-          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--theme-text-disabled)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--theme-text-disabled)' }}>
             Actual
           </span>
           <div className="flex items-baseline gap-2">
@@ -415,8 +415,8 @@ export function DailyPaceDashboard({ onNavigate }: DailyPaceDashboardProps) {
             style={{ boxShadow: '0 24px 80px rgba(0,0,0,0.55)' }}
           >
             <div className="mb-2 flex items-center justify-between px-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Mini Pace
+              <span className="text-xs font-semibold text-slate-400">
+                Mini pace
               </span>
               <button
                 type="button"

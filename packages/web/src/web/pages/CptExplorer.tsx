@@ -248,7 +248,7 @@ function FilterRail({
       }}
     >
       <div className="flex items-center justify-between">
-        <p className="text-xs font-bold uppercase" style={{ color: 'rgba(155,232,255,0.82)', letterSpacing: 0 }}>
+        <p className="text-xs font-bold" style={{ color: 'rgba(155,232,255,0.82)', letterSpacing: 0 }}>
           Filters
         </p>
         <button
@@ -450,8 +450,8 @@ function LogPanel({ selectedRows, onRemove, onLog, logging }: LogPanelProps) {
     >
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs font-bold uppercase" style={{ color: 'rgba(155,232,255,0.82)', letterSpacing: 0 }}>
-            Log Queue
+          <p className="text-xs font-bold" style={{ color: 'rgba(155,232,255,0.82)', letterSpacing: 0 }}>
+            Log queue
           </p>
           <p className="text-[11px]" style={{ color: 'var(--theme-text-disabled)' }}>
             {selectedRows.length} selected
