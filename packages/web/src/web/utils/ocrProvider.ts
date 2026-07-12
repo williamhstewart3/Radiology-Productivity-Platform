@@ -1,4 +1,4 @@
-import { createWorker, type Worker } from 'tesseract.js';
+import { createWorker, PSM, type Worker } from 'tesseract.js';
 
 /**
  * OCR provider abstraction. Phase 1 uses Tesseract.js (fully client-side,
@@ -20,19 +20,52 @@ import { createWorker, type Worker } from 'tesseract.js';
 export interface OcrResult {
   rawText: string;
   lines: string[];
+  positionedLines: OcrPositionedLine[];
   confidence: number; // 0-1, overall OCR confidence
 }
 
+export interface OcrPositionedLine {
+  text: string;
+  confidence: number;
+  bbox: {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null;
+}
+
+export interface OcrProviderParams {
+  pageSegMode?: PSM;
+  charWhitelist?: string;
+}
+
 export interface OcrProvider {
-  extractText(image: File | Blob): Promise<OcrResult>;
+  extractText(image: File | Blob, params?: OcrProviderParams): Promise<OcrResult>;
 }
 
 let tesseractWorker: Worker | null = null;
+let lastAppliedParams: Required<OcrProviderParams> | null = null;
 
 export class TesseractProvider implements OcrProvider {
-  async extractText(image: File | Blob): Promise<OcrResult> {
+  async extractText(image: File | Blob, params: OcrProviderParams = {}): Promise<OcrResult> {
     if (!tesseractWorker) {
       tesseractWorker = await createWorker('eng');
+    }
+
+    const nextParams: Required<OcrProviderParams> = {
+      pageSegMode: params.pageSegMode ?? PSM.AUTO,
+      charWhitelist: params.charWhitelist ?? '',
+    };
+    if (
+      lastAppliedParams?.pageSegMode !== nextParams.pageSegMode ||
+      lastAppliedParams?.charWhitelist !== nextParams.charWhitelist
+    ) {
+      await tesseractWorker.setParameters({
+        tessedit_pageseg_mode: nextParams.pageSegMode,
+        tessedit_char_whitelist: nextParams.charWhitelist,
+      });
+      lastAppliedParams = nextParams;
     }
 
     const { data } = await tesseractWorker.recognize(image);
@@ -41,10 +74,22 @@ export class TesseractProvider implements OcrProvider {
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
+    const positionedLines = (data.blocks ?? [])
+      .flatMap((block) => block.paragraphs ?? [])
+      .flatMap((paragraph) => paragraph.lines ?? [])
+      .map((line) => ({
+        text: line.text.trim(),
+        confidence: (line.confidence ?? 0) / 100,
+        bbox: line.bbox ?? null,
+      }))
+      .filter((line) => line.text.length > 0);
 
     return {
       rawText: data.text,
       lines,
+      positionedLines: positionedLines.length
+        ? positionedLines
+        : lines.map((line) => ({ text: line, confidence: (data.confidence ?? 0) / 100, bbox: null })),
       confidence: (data.confidence ?? 0) / 100,
     };
   }
@@ -54,6 +99,7 @@ export async function terminateOcrWorker() {
   if (tesseractWorker) {
     await tesseractWorker.terminate();
     tesseractWorker = null;
+    lastAppliedParams = null;
   }
 }
 
@@ -63,7 +109,7 @@ export async function terminateOcrWorker() {
  * instantiated -- no changes to matching, review UI, or DB writes.
  */
 export class VisionApiProvider implements OcrProvider {
-  async extractText(_image: File | Blob): Promise<OcrResult> {
+  async extractText(_image: File | Blob, _params?: OcrProviderParams): Promise<OcrResult> {
     throw new Error('VisionApiProvider is not implemented in this build.');
   }
 }

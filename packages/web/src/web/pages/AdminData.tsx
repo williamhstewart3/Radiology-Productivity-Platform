@@ -46,6 +46,7 @@ export function AdminData() {
   }
 
   const supabaseReady = supabasePersistence.isConfigured();
+  const supabaseCredentialsPresent = supabasePersistence.hasCredentials();
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 animate-in fade-in duration-300">
@@ -65,16 +66,16 @@ export function AdminData() {
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Active RVU Dataset</h2>
             <p className="text-xs text-slate-400 mt-1">
-              CPT/RVU lookup reads from Supabase on app load when Vercel env vars are configured.
+              Remote persistence is privacy-gated and off by default. With it off, RVU data stays on this device.
             </p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-            <p className="text-xs text-slate-500">Supabase</p>
+            <p className="text-xs text-slate-500">Remote persistence</p>
             <p className={`text-sm font-semibold mt-1 ${supabaseReady ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {supabaseReady ? 'Configured' : 'Not configured'}
+              {supabaseReady ? 'Enabled' : supabaseCredentialsPresent ? 'Disabled' : 'Not configured'}
             </p>
           </div>
           <div className="rounded-xl border border-white/10 bg-white/5 p-3">
@@ -95,7 +96,9 @@ export function AdminData() {
           </div>
         ) : (
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
-            No active Supabase RVU dataset found. Import the CMS/PPRRVU ZIP after configuring Supabase.
+            {supabaseReady
+              ? 'No active Supabase RVU dataset found. Import the CMS/PPRRVU ZIP to create one.'
+              : 'Using the local RVU dataset. Remote requests are disabled.'}
           </div>
         )}
 

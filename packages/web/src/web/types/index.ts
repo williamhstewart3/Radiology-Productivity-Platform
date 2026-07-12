@@ -113,6 +113,8 @@ export interface CptRvuRow {
   modality: Modality;
   rvuFileVersion: string;
   effectiveDate: string;
+  includeInAutoMatch?: boolean;
+  autoMatchSource?: string | null;
   isUserVerified: boolean;
   createdAt: string;
   updatedAt: string;
@@ -123,6 +125,8 @@ export interface ExamAlias {
   id: string;
   /** Profile this alias belongs to. null = legacy row (treated as default profile). */
   profileId: string | null;
+  /** Practice/site this alias belongs to. null = generic mapping. */
+  siteId?: string | null;
   aliasText: string;
   aliasTextRaw: string;
   /**
@@ -132,7 +136,7 @@ export interface ExamAlias {
   canonicalExamName: string | null;
   /**
    * Primary CPT code for this alias (used for single-CPT fast-path lookups).
-   * For multi-CPT exams (e.g. CTA Head+Neck → 70496-26 + 70498-26), this
+   * For multi-CPT exams (e.g. CTA Head+Neck -> 70496-26 + 70498-26), this
    * holds the first / highest-RVU code; the full list is in cptCodes.
    */
   cptCode: string;
@@ -145,10 +149,193 @@ export interface ExamAlias {
   /** Sum of work RVUs for all professional-component CPTs in cptCodes. */
   totalWorkRvu: number | null;
   matchConfidence: number;
+  confirmations: number;
+  corrections: number;
+  rejections: number;
+  autoApprovedCount: number;
+  lastAdjustedAt: string | null;
   source: 'manual' | 'manual_name_match' | 'ocr_confirmed' | 'seed' | 'user';
   timesUsed: number;
   lastUsedAt: string | null;
   createdAt: string;
+}
+
+export interface ExamDictionaryEntry {
+  id: string;
+  canonicalDisplayName: string;
+  normalizedKey: string;
+  commonSynonyms: string[];
+  hospitalAliases: string[];
+  powerScribeNames: string[];
+  cmsDescription: string | null;
+  cptCodes: string[];
+  modifier26Wrvu: number | null;
+  modality: Modality;
+  bodyRegion: string | null;
+  typicalCombinations: string[];
+  timesUsed: number;
+  source?: 'curated' | 'institution' | 'user';
+  institutionSheet?: string | null;
+  institutionProcedureName?: string | null;
+  sourceFileName?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ActiveReviewSession {
+  id: string;
+  profileId: string | null;
+  readingDate: string;
+  status: 'active' | 'finalized' | 'discarded';
+  rowsJson: string;
+  skippedRowsJson: string;
+  timelineJson: string;
+  totalExams: number;
+  confirmedWrvu: number;
+  estimatedPendingWrvu: number;
+  projectedWrvu: number;
+  needsReviewCount: number;
+  duplicateCount: number;
+  createdAt: string;
+  updatedAt: string;
+  finalizedAt: string | null;
+}
+
+export type FeedbackEventCategory =
+  | 'wrong_cpt'
+  | 'wrong_duplicate'
+  | 'missing_datetime'
+  | 'bad_ocr'
+  | 'bad_exam_cleanup'
+  | 'merged_ocr_rows'
+  | 'bad_auto_approval'
+  | 'should_auto_approve'
+  | 'institution_mapping_needed'
+  | 'ui_issue'
+  | 'other';
+
+export type FeedbackEventSeverity = 'low' | 'medium' | 'high' | 'blocking';
+export type FeedbackEventStatus = 'new' | 'reviewed' | 'converted_to_mapping' | 'converted_to_issue' | 'ignored' | 'resolved';
+
+export interface FeedbackEvent {
+  id: string;
+  createdAt: string;
+  profileId: string | null;
+  sessionId: string | null;
+  importId: string | null;
+  rowTempId: string | null;
+  studyLogId: string | null;
+  category: FeedbackEventCategory;
+  severity: FeedbackEventSeverity;
+  userComment: string;
+  rawOcrText: string | null;
+  rawProcedureText: string | null;
+  rawExamDateText: string | null;
+  rawModifiedDateText: string | null;
+  cleanedExamTitle: string | null;
+  normalizedExamTitle: string | null;
+  selectedCptCodes: string[];
+  candidateCpts: string[];
+  examDateTime: string | null;
+  modifiedDateTime: string | null;
+  duplicateStatus: DuplicateStatus;
+  duplicateReason: string | null;
+  duplicateFingerprint: string | null;
+  ocrProvider: string | null;
+  ocrConfidence: number | null;
+  llmCleanupUsed: boolean;
+  llmCleanupOutput: string | null;
+  expectedCorrectionJson: string | null;
+  assistantContextJson?: string | null;
+  assistantResponseJson?: string | null;
+  status: FeedbackEventStatus;
+}
+
+export type CorrectionActionType =
+  | 'correct_exam_title'
+  | 'correct_cpt'
+  | 'split_merged_row'
+  | 'correct_datetime'
+  | 'mark_not_duplicate'
+  | 'mark_duplicate'
+  | 'add_learned_alias'
+  | 'add_institution_mapping'
+  | 'ignore';
+
+export interface CorrectionAction {
+  id: string;
+  feedbackEventId: string;
+  createdAt: string;
+  actionType: CorrectionActionType;
+  targetRowId: string | null;
+  originalRowJson: string | null;
+  proposedRowJson: string | null;
+  proposedNewRowsJson: string | null;
+  explanation: string;
+  confidence: number;
+  requiresUserApproval: boolean;
+  approvedByUser: boolean;
+  appliedAt: string | null;
+  revertedAt: string | null;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  profileId: string | null;
+  siteId?: string | null;
+  sessionId: string | null;
+  logDate: string;
+  action: 'screenshot_imported' | 'ocr_completed' | 'auto_approved' | 'cpt_changed' | 'exam_deleted' | 'duplicate_skipped' | 'alias_learned' | 'day_finalized' | 'day_reopened' | 'manual_entry' | 'exported' | 'hospital_report_imported';
+  summary: string;
+  detailsJson: string;
+  createdAt: string;
+}
+
+export interface HospitalComparisonReport {
+  id: string;
+  profileId: string | null;
+  siteId?: string | null;
+  reportDate: string;
+  filename: string;
+  hospitalTotalWrvu: number;
+  localTotalWrvu: number;
+  hospitalExamCount: number;
+  localExamCount: number;
+  discrepanciesJson: string;
+  createdAt: string;
+}
+
+export interface MemorySuggestion {
+  id: string;
+  profileId: string | null;
+  siteId: string | null;
+  suggestionType: 'alias' | 'site_alias' | 'combo' | 'default_mapping';
+  prompt: string;
+  normalizedKey: string;
+  cptCodes: string[];
+  occurrences: number;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OcrLearningEntry {
+  id: string;
+  profileId: string | null;
+  siteId?: string | null;
+  rawOcrText: string;
+  normalizedOcrText: string;
+  matchedCpt: string;
+  modifier: string | null;
+  workRvu: number | null;
+  confidence: number;
+  source: 'ocr_confirmed' | 'user' | 'manual_name_match';
+  correctionHistoryJson: string;
+  confirmations: number;
+  corrections: number;
+  lastUsedAt: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type MatchMethod =
@@ -160,15 +347,17 @@ export type MatchMethod =
   | 'unmatched';
 
 /** Source of the study date/time — used to show confidence indicators in UI. */
-export type DateTimeSource = 'ocr' | 'import_default' | 'manual' | 'api_future';
+export type DateTimeSource = 'ocr' | 'llm_ocr_cleanup' | 'import_default' | 'manual' | 'api_future';
 
 /** One completed study log — the core transactional record. */
 export interface StudyLog {
   id: string;
   /** Profile this log belongs to. null = legacy row (treated as default profile). */
   profileId: string | null;
-  logDate: string; // YYYY-MM-DD, local calendar day (= studyDate when OCR-confirmed)
-  studyDateTime: string | null; // Full ISO 8601 datetime if known, else null
+  logDate: string; // YYYY-MM-DD productivity day, based on Modified/read date when known
+  studyDateTime: string | null; // Modified/read ISO 8601 datetime if known, else null
+  /** Performed/exam ISO 8601 datetime if known, distinct from modified/read time. */
+  examDateTime?: string | null;
   /**
    * YYYY-MM-DD extracted from OCR or source data — distinct from logDate so
    * we can show it was OCR-confirmed vs just the import day.
@@ -176,7 +365,7 @@ export interface StudyLog {
    */
   studyDate: string | null;
   /**
-   * Confidence score for the date/time extraction. 0.0–1.0.
+   * Confidence score for the date/time extraction. 0.0-1.0.
    * 1.0 = exact OCR match (date + time), 0.85 = date only, 0.5 = relative,
    * 0.0 = fallback (import date used).
    * null = legacy row (pre-v7).
@@ -187,7 +376,14 @@ export interface StudyLog {
    * null = legacy row (pre-v7).
    */
   dateTimeSource: DateTimeSource | null;
+  /** Raw OCR/import exam title exactly as received. */
   examNameRaw: string;
+  /** Stable normalized title used for grouping and alias matching. */
+  examTitleNormalized?: string | null;
+  /** User-facing title approved/renamed locally; this is the primary display name. */
+  examTitleDisplay?: string | null;
+  /** Official CMS description for the linked CPT row, kept as reference text. */
+  cmsDescription?: string | null;
   cptCode: string | null;
   modifier: string | null;
   workRvu: number | null; // SNAPSHOT — immutable even if RVU table updates later
@@ -196,6 +392,12 @@ export interface StudyLog {
   matchConfidence: number;
   needsReview: boolean;
   accessionNumber: string | null;
+  rowIndex?: string | null;
+  /**
+   * OCR engine confidence for the source image/text. For current screenshot OCR,
+   * this is the Tesseract image-level confidence copied onto each parsed study.
+   */
+  ocrConfidence?: number | null;
   sessionId: string | null;
   sourceImportId: string | null;
   notes: string | null;
@@ -235,10 +437,11 @@ export interface UserSettings {
   updatedAt: string;
   // Daily Pace settings
   dailyRvuGoal: number;
+  estimatedCompPerWrvu?: number | null;
   workdayStart: string;  // "HH:MM" 24-hr
   workdayEnd: string;    // "HH:MM" 24-hr
   breakMinutes: number;
-  // PowerScribe Watcher settings
+  // Legacy folder watcher settings retained for existing IndexedDB records.
   watchFolderPath: string | null;
   autoDeleteProcessed: boolean;
   // Camera capture / PHI protection
@@ -247,6 +450,13 @@ export interface UserSettings {
    * camera-captured images. Disabling this triggers a PHI warning modal.
    */
   requireCropBeforeOcr: boolean;
+  unknownsOnlyReview: boolean;
+  reviewAutoApprovedExams: boolean;
+  reviewOnlyLowConfidence: boolean;
+  autoImportClipboardScreenshots: boolean;
+  alwaysProcessPowerScribeClipboard: boolean;
+  clearClipboardAfterImport: boolean;
+  savedPowerScribeCropRegions: Record<string, { x: number; y: number; width: number; height: number }>;
 }
 
 /** Color accent for a radiologist profile, practice, or org. */
@@ -267,7 +477,7 @@ export type ProfileColor =
 export interface Organization {
   id: string;
   name: string;
-  /** Short initials (≤3 chars) for avatar. */
+  /** Short initials (<=3 chars) for avatar. */
   initials: string;
   color: ProfileColor;
   createdAt: string;
@@ -285,10 +495,10 @@ export interface Practice {
   id: string;
   /** Always points to the hidden default organization. */
   organizationId: string;
-  /** Full location name shown in UI, e.g. "Baptist Memorial Hospital–Memphis" */
+  /** Full location name shown in UI, e.g. "Baptist Memorial Hospital-Memphis" */
   name: string;
   /**
-   * Optional short code (≤4 chars) shown where screen space is limited.
+   * Optional short code (<=4 chars) shown where screen space is limited.
    * e.g. "MEM", "NIGHTS", "REMOTE". Stored in the `city` column.
    */
   city: string | null;
@@ -307,7 +517,7 @@ export interface RadiologistProfile {
   practiceId: string | null;
   /** Display name shown in the UI. */
   name: string;
-  /** Short initials (≤3 chars) shown in the avatar bubble. */
+  /** Short initials (<=3 chars) shown in the avatar bubble. */
   initials: string;
   /** Accent color for this profile. */
   color: ProfileColor;
@@ -341,6 +551,12 @@ export interface MatchCandidate {
   modality: Modality;
   confidence: number;
   method: MatchMethod;
+  explanation?: {
+    rawText: string;
+    normalizedText: string;
+    source: string;
+    detail: string;
+  };
 }
 
 export type DuplicateStatus = 'exact' | 'very_likely' | 'possible' | null;

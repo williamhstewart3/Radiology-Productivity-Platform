@@ -2,7 +2,9 @@ import Papa from 'papaparse';
 import { unzipSync } from 'fflate';
 import { db } from '../db/database';
 import { supabasePersistence } from '../services/supabasePersistence';
+import { normalizeCptModifier } from './cptRowDeduplication';
 import type { CptRvuRow, StatusCategory, PcTcIndicator } from '../types';
+import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from '../data/acrRadiologyActiveCptSet';
 import { classifyModality } from '../data/modalityClassifier';
 
 export interface ImportResult {
@@ -215,7 +217,7 @@ export async function parseRvuFile(
     const statusCode = (headerMap.statusCode !== undefined ? cells[headerMap.statusCode] : 'A')?.trim() || 'A';
     rows.push({
       cptCode: hcpcs.toUpperCase(),
-      modifier: headerMap.modifier !== undefined ? cells[headerMap.modifier]?.trim() || null : null,
+      modifier: headerMap.modifier !== undefined ? normalizeCptModifier(cells[headerMap.modifier]) : '',
       description: headerMap.description !== undefined ? cells[headerMap.description]?.trim() || '' : '',
       statusCode: statusCode.toUpperCase(),
       workRvu: parseNumericCell(cells[headerMap.workRvu]),
@@ -234,10 +236,11 @@ export async function parseRvuFile(
 }
 
 function toCptRow(row: ParsedRvuRow, fileVersion: string, existingRow: CptRvuRow | undefined, nowIso: string): CptRvuRow {
+  const includeInAutoMatch = isRadiologyActiveCpt(row.cptCode);
   return {
     id: existingRow?.id ?? crypto.randomUUID(),
     cptCode: row.cptCode,
-    modifier: row.modifier,
+    modifier: normalizeCptModifier(row.modifier),
     description: row.description,
     workRvu: row.workRvu,
     nonFacilityPeRvu: row.nonFacilityPeRvu,
@@ -252,6 +255,8 @@ function toCptRow(row: ParsedRvuRow, fileVersion: string, existingRow: CptRvuRow
     modality: existingRow?.modality ?? classifyModality(row.cptCode),
     rvuFileVersion: fileVersion,
     effectiveDate: nowIso.slice(0, 10),
+    includeInAutoMatch,
+    autoMatchSource: includeInAutoMatch ? ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE : existingRow?.autoMatchSource ?? null,
     isUserVerified: false,
     createdAt: existingRow?.createdAt ?? nowIso,
     updatedAt: nowIso,
@@ -286,7 +291,7 @@ export async function importRvuRows(
       const existingRow = await db.cptRvuTable
         .where('cptCode')
         .equals(row.cptCode)
-        .filter((r) => (r.modifier ?? null) === (row.modifier ?? null))
+        .filter((r) => normalizeCptModifier(r.modifier) === normalizeCptModifier(row.modifier))
         .first();
 
       const newRow = toCptRow(row, fileVersion, existingRow, nowIso);

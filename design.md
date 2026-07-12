@@ -1,7 +1,17 @@
-# wRVU Pace Tracker — Design System
+# wRVU Pace Tracker - Design System
 
 ## Vibe
-Peloton / Apple Fitness meets clinical dashboard. Performance-focused, clean, data-forward. High information density without clutter. Feels like a premium productivity tool, not a medical spreadsheet.
+Quiet productivity companion. Linear/Raycast clarity with Apple Health confidence, but calmer and less attention-seeking. The app should feel like it is working on the radiologist's behalf, not like another system to operate.
+
+The HUD is the primary workday surface. The full app is an explanatory and configuration space. Prefer subtle, glanceable confirmation over dense widgets, dashboards, or persistent demands for attention.
+
+Design priorities:
+
+- Automation over interaction.
+- Passive awareness over active management.
+- Subtle feedback over interruption.
+- Workflow consolidation over more top-level pages.
+- Refinement over additional widgets.
 
 ## Color System
 
@@ -42,33 +52,38 @@ Peloton / Apple Fitness meets clinical dashboard. Performance-focused, clean, da
 - Big stats: `48px`–`64px`, bold, tabular
 
 ## Layout
-- Desktop: single-page dashboard, max-width `1400px`, centered
-- Grid: 3-col top stats, 2-col mid (progress + entries), full-width bottom
-- Cards: `border-radius: 16px`, `backdrop-filter: blur(8px)`, subtle border
-- Spacing: `24px` gaps, `20px` card padding
+- Workday HUD: compact, always-glanceable, optimized for current wRVUs, exams, pace, sync status, and review status.
+- Full app: workflow-based navigation, not feature-based navigation.
+- Home: daily pace, latest sync, timeline, goals, and review state.
+- Analytics: study mix, accuracy, and historical trend questions.
+- Settings: profiles, locations, automation, preferences, and data management.
+- Cards: `border-radius: 10px` to `14px`, subtle border, minimal shadow.
+- Spacing: 8-point grid, generous whitespace, avoid nested card stacks.
 - Mobile: stacks to single column, stats grid → 2-col
 
 ## Animations
 - Progress bars: `transition: width 800ms cubic-bezier(0.4, 0, 0.2, 1)`
-- Status glow: `box-shadow` pulse keyframe, 2s infinite
+- Status glow: brief, purposeful highlight after updates; avoid constant pulsing unless attention is needed
 - Numbers: smooth count-up on change (CSS transition on width, JS for number)
-- Confetti: canvas-based particle burst on Goal Hit
-- Upward arrow: translateY keyframe bounce for Ahead
-- Amber pulse: opacity keyframe for Falling Behind
-- Red pulse: box-shadow + scale keyframe for Danger Zone
+- Toasts: bottom-right, temporary, fade/slide, color-coded by outcome
+- Loading: quiet skeletons or small progress indicators
+- Avoid celebratory or distracting motion during routine work
 
 ## Components
 - `StatCard`: label + big number + trend indicator
 - `ProgressBar`: animated fill, gradient, glowing tip
 - `StatusBadge`: pill with icon + status text + message
-- `QuickAddButton`: compact pill/chip, shows estimated wRVU
+- `SyncToast`: brief capture/import/sync result
+- `ReviewExceptionCard`: compact row requiring attention only when confidence is low
 - `EntryRow`: exam name + wRVU + timestamp + delete/edit actions
 - `SettingsPanel`: slide-in drawer or modal
-- `ConfettiCanvas`: full-screen overlay, auto-dismisses
+- `HudSummary`: primary workday surface for wRVUs, exams, pace, last sync, and review state
 
 ## UX Patterns
-- All values update every 60 seconds automatically
-- Settings persist in localStorage
-- Day resets with confirmation modal
+- Values should update automatically whenever capture/import completes and, in the future, on short-interval PowerScribe monitoring.
+- Successful sync uses a brief toast and HUD update, not a modal.
+- Review appears only for exceptions.
+- Routine high-confidence imports should require no approval.
+- Settings and profile/location configuration live under Settings, not top-level workflow navigation.
 - Disclaimer banner at bottom (non-intrusive, muted)
 - Dark/light toggle in top-right corner

@@ -17,6 +17,7 @@
  */
 
 import type { Modality } from '../types';
+import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -108,6 +109,7 @@ export const RADIOLOGY_EXPANSION_MAP: Record<string, string> = {
   // ── Contrast
   'w/o':          'without Contrast',
   'w/':           'with Contrast',
+  'w':            'with Contrast',
   'wo':           'without Contrast',
   'wcon':         'with Contrast',
   'wwocon':       'with and without Contrast',
@@ -271,7 +273,7 @@ const MODALITY_KEYWORDS: { pattern: RegExp; modality: Modality }[] = [
  */
 export function normalizeForRadiology(raw: string): NormalizationResult {
   // ── Step 1: Raw cleanup ──────────────────────────────────────────────────
-  let text = raw
+  let text = normalizeOcrExamTextForMatching(raw)
     .toLowerCase()
     .trim()
     .replace(/[_\-]+/g, ' ')

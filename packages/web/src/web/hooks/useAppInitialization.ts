@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { db } from '../db/database';
 import { buildSeedCptRows } from '../data/seedCptData';
+import { ensureCuratedRadiologyDictionarySeed } from '../data/radiologyExamDictionarySeed';
 import { persistence } from '../services/persistence';
 import { supabasePersistence } from '../services/supabasePersistence';
+import { dedupeCptRvuRowsForBulkPut } from '../utils/cptRowDeduplication';
 
 /**
  * Runs once on app startup:
  *  1. Ensures user_settings row exists.
  *  2. Ensures the full org -> practice -> radiologist hierarchy exists.
- *  3. Hydrates the active CMS/PPRRVU dataset from Supabase when configured.
+ *  3. Hydrates the active CMS/PPRRVU dataset only when remote persistence is explicitly enabled.
  *  4. Falls back to built-in seed CPT rows only when no remote dataset exists.
  */
 export function useAppInitialization() {
@@ -30,9 +32,11 @@ export function useAppInitialization() {
 
         const existingCount = await db.cptRvuTable.count();
         if (!loadedRemoteDataset && existingCount === 0) {
-          const seedRows = buildSeedCptRows();
+          const seedRows = dedupeCptRvuRowsForBulkPut(buildSeedCptRows(), 'startup CPT seed');
           await db.cptRvuTable.bulkPut(seedRows);
         }
+
+        await ensureCuratedRadiologyDictionarySeed();
 
         if (mounted) setIsReady(true);
       } catch (err) {
