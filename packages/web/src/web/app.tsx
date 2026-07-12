@@ -36,6 +36,7 @@ import { Automation } from './pages/Automation';
 import { Inbox } from './pages/Inbox';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
+import { enqueueGlobalCapture } from './services/globalCaptureQueue';
 
 // ─── Nav: 5 destinations on real Wouter routes ──────────────────────────────
 // Today/Trends/Log/Codes/Settings per the UI modernization spec. History,
@@ -172,6 +173,35 @@ function MainApp() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navigate]);
+
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
+      const file = Array.from(event.clipboardData?.files ?? []).find((item) => item.type.startsWith('image/'));
+      const text = event.clipboardData?.getData('text/plain').trim();
+      if (!file && !text) return;
+      event.preventDefault();
+      enqueueGlobalCapture(file ? { kind: 'file', file, source: 'paste' } : { kind: 'text', text: text!, source: 'paste' });
+      navigate('/log');
+    };
+    const onDragOver = (event: DragEvent) => { if (event.dataTransfer?.files.length) event.preventDefault(); };
+    const onDrop = (event: DragEvent) => {
+      const file = event.dataTransfer?.files[0];
+      if (!file) return;
+      event.preventDefault();
+      enqueueGlobalCapture({ kind: 'file', file, source: 'drop' });
+      navigate('/log');
+    };
+    window.addEventListener('paste', onPaste);
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('paste', onPaste);
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop);
+    };
   }, [navigate]);
 
   async function toggleTheme() {
@@ -312,7 +342,7 @@ function MainApp() {
                   <Route path="/history"><History /></Route>
                   <Route path="/inbox"><Inbox onOpenLegacyReview={() => navigate('/log')} /></Route>
                   <Route path="/log">
-                    <Log onImported={() => navigate('/today')} />
+                    <Log onImported={() => navigate('/today')} onClose={() => navigate('/today')} />
                   </Route>
                   <Route path="/codes">
                     <Codes onNavigate={navigate} />

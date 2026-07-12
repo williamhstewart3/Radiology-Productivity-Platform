@@ -9,7 +9,6 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { BaptistLogoMark } from '../components/BaptistLogo';
 import { theme } from '../lib/theme';
 import { searchExamLibrary } from '../utils/matching';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
@@ -40,6 +39,8 @@ import {
   type AssistantResponse,
 } from '../services/aiReviewAssistantService';
 import { processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { restoreCaptureState, snapshotCaptureState, type CaptureUndoSnapshot } from '../services/captureUndoService';
+import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { CorrectionAction, FeedbackEvent, FeedbackEventCategory, DuplicateStatus, MatchCandidate, UserSettings } from '../types';
 
@@ -667,14 +668,17 @@ function ImportToastStack({ toasts }: { toasts: ImportToast[] }) {
 
 function CaptureProcessingState() {
   return (
-    <div className="rounded-xl border border-sky-500/25 bg-sky-500/8 px-4 py-5 text-center">
-      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-sky-500/25 bg-slate-950/40">
-        <div className="animate-pulse">
-          <BaptistLogoMark size={42} />
-        </div>
+    <div className="rounded-xl border border-rd-separator bg-rd-surface-2 px-4 py-4">
+      <p className="text-sm font-semibold text-rd-label-primary">Reading capture…</p>
+      <p className="mt-1 text-xs text-rd-label-secondary">Studies appear as each row resolves.</p>
+      <div className="mt-4 space-y-2" aria-label={CAPTURE_PROCESSING_LABEL}>
+        {[0, 1, 2].map((row) => (
+          <div key={row} className="flex min-h-11 items-center gap-3 rounded-[10px] border border-rd-separator bg-rd-surface px-3">
+            <span className="size-4 rounded-full border border-rd-separator" />
+            <span className="h-2.5 rounded-full bg-rd-separator" style={{ width: `${68 - row * 12}%` }} />
+          </div>
+        ))}
       </div>
-      <p className="mt-3 text-sm font-semibold text-white">{CAPTURE_PROCESSING_LABEL}</p>
-      <p className="mt-1 text-xs text-slate-400">Preparing extracted studies for review.</p>
     </div>
   );
 }
@@ -706,6 +710,8 @@ export function Import({ onImported }: ImportProps) {
   const [importedCount, setImportedCount]   = useState(0);
   const [skippedCount, setSkippedCount]     = useState(0);
   const [reviewNeeded, setReviewNeeded]     = useState(0);
+  const [committedWrvu, setCommittedWrvu] = useState(0);
+  const [undoAvailable, setUndoAvailable] = useState(false);
   const [error, setError]         = useState<string | null>(null);
   const [showSkipped, setShowSkipped]       = useState(false);
   const [searchPanelTempId, setSearchPanelTempId] = useState<string | null>(null);
@@ -726,6 +732,30 @@ export function Import({ onImported }: ImportProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const processingRef = useRef(false);
   const lastClipboardImageHashRef = useRef<string | null>(null);
+  const undoSnapshotRef = useRef<CaptureUndoSnapshot | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+  }, []);
+
+  useEffect(() => subscribeGlobalCapture((payload) => {
+    clearGlobalCapture(payload);
+    if (payload.kind === 'text') {
+      setMode('paste');
+      setPasteText(payload.text);
+      return;
+    }
+    if (payload.file.type.startsWith('image/')) {
+      setMode('ocr');
+      void queueClipboardImage(payload.file, `global ${payload.source}`);
+      return;
+    }
+    void payload.file.text().then((text) => {
+      setMode('paste');
+      setPasteText(text);
+    });
+  }), []);
 
   useEffect(() => {
     loadActiveReviewSession(activeProfile?.id ?? null).then((session) => {
@@ -1032,6 +1062,7 @@ export function Import({ onImported }: ImportProps) {
     setImporting(true);
     setError(null);
     try {
+      undoSnapshotRef.current = await snapshotCaptureState();
       const selectedRvu = reviewRows
         .filter(isRowFinalizableAfterApproval)
         .reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
@@ -1047,6 +1078,13 @@ export function Import({ onImported }: ImportProps) {
       setImportedCount(result.importedCount);
       setSkippedCount(result.skippedCount);
       setReviewNeeded(result.reviewNeededCount);
+      setCommittedWrvu(selectedRvu);
+      setUndoAvailable(true);
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = setTimeout(() => {
+        setUndoAvailable(false);
+        undoSnapshotRef.current = null;
+      }, 10_000);
       setStep('done');
       pushToast(
         result.reviewNeededCount > 0 ? 'warning' : 'success',
@@ -1054,11 +1092,27 @@ export function Import({ onImported }: ImportProps) {
         `+${selectedRvu.toFixed(1)} wRVUs - ${result.skippedCount} duplicate${result.skippedCount === 1 ? '' : 's'} skipped - ${result.reviewNeededCount} require review`,
       );
     } catch (e) {
+      undoSnapshotRef.current = null;
       setError(e instanceof Error ? e.message : 'Import failed');
       pushToast('danger', 'Import failed', e instanceof Error ? e.message : 'The review session was not saved.');
     } finally {
       setImporting(false);
     }
+  }
+
+  async function undoLastCapture() {
+    const snapshot = undoSnapshotRef.current;
+    if (!snapshot || !undoAvailable) return;
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    await restoreCaptureState(snapshot);
+    undoSnapshotRef.current = null;
+    setUndoAvailable(false);
+    setImportedCount(0);
+    setSkippedCount(0);
+    setReviewNeeded(0);
+    setCommittedWrvu(0);
+    setStep('review');
+    pushToast('info', 'Capture undone', 'The local data is back exactly where it was before this batch was counted.');
   }
 
   async function discardSession() {
@@ -1388,7 +1442,7 @@ export function Import({ onImported }: ImportProps) {
             ✓
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-white">Import Complete</h2>
+            <h2 className="text-2xl font-bold text-white">✓ {importedCount} {importedCount === 1 ? 'study' : 'studies'} · +{committedWrvu.toFixed(1)} wRVU</h2>
             <div className="mt-3 space-y-1.5">
               <p className="text-emerald-400 text-sm font-medium">
                 Imported: {importedCount} {importedCount === 1 ? 'study' : 'studies'}
@@ -1406,6 +1460,11 @@ export function Import({ onImported }: ImportProps) {
             </div>
           </div>
           <div className="flex gap-3 justify-center">
+            {undoAvailable && (
+              <button onClick={() => void undoLastCapture()} className="px-6 py-2.5 rounded-xl border border-amber-500/40 text-amber-300 text-sm font-semibold">
+                Undo · 10s
+              </button>
+            )}
             <button
               onClick={() => {
                 setStep('input');
