@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useAppInitialization } from './hooks/useAppInitialization';
 import { OrgProvider } from './contexts/OrgContext';
 import { useOrg } from './hooks/useOrg';
-import { DailyPaceDashboard } from './components/DailyPaceDashboard';
+import { Today } from './pages/Today';
 import { MiniPaceWindow } from './components/MiniPaceWindow';
 import { ProfileSwitcherButton } from './components/ProfileSwitcherSheet';
 import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
@@ -246,7 +246,7 @@ function MainApp() {
                     <Redirect to="/today" />
                   </Route>
                   <Route path="/today">
-                    <DailyPaceDashboard onNavigate={legacyNavigate} />
+                    <Today onNavigate={navigate} />
                   </Route>
                   <Route path="/trends">
                     <div className="space-y-3">

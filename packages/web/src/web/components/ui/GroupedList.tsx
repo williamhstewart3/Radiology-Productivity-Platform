@@ -31,7 +31,8 @@ export function GroupedList({ children, header, footer, className }: GroupedList
 interface RowProps {
   children: ReactNode;
   trailing?: ReactNode;
-  footnote?: string;
+  /** Plain text renders with the default footnote style; pass a node (e.g. MatchSourceFootnote) for richer content. */
+  footnote?: ReactNode;
   onClick?: () => void;
   className?: string;
 }
@@ -43,7 +44,11 @@ export function Row({ children, trailing, footnote, onClick, className }: RowPro
     <>
       <div className="min-w-0 flex-1">
         <div className="text-[17px] font-normal leading-tight text-rd-label-primary">{children}</div>
-        {footnote && <p className="mt-0.5 truncate text-[13px] text-rd-label-secondary">{footnote}</p>}
+        {footnote && (
+          typeof footnote === 'string'
+            ? <p className="mt-0.5 truncate text-[13px] text-rd-label-secondary">{footnote}</p>
+            : <div className="mt-0.5">{footnote}</div>
+        )}
       </div>
       {trailing && <div className="flex shrink-0 items-center gap-2">{trailing}</div>}
     </>
