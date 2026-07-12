@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars, no-unreachable -- capture-only shell retains pipeline helpers while Inbox owns review */
 /**
  * Import.tsx
  *
@@ -11,136 +10,25 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { theme } from '../lib/theme';
-import { searchExamLibrary } from '../utils/matching';
-import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
 import { useProfile } from '../hooks/useProfile';
 import { getDesktopAPI } from '../lib/desktop';
 import { todayDateString } from '../utils/calculations';
-import { getImportReviewState } from '../utils/importReviewState';
 import { db, ensureUserSettings } from '../db/database';
 import {
   createTimelineEvent,
-  discardActiveReviewSession,
-  finalizeReviewSession,
   getSelectedCandidateIndices,
   getSelectedCandidates,
   getSelectedWorkRvu,
   loadActiveReviewSession,
   mergeReviewSessionRows,
-  normalizedExamKey,
   persistActiveReviewSession,
   type TimelineEvent,
 } from '../services/reviewSessionService';
-import { rememberCorrectedExam } from '../services/memoryLearningService';
-import {
-  buildCorrectedTitleRow,
-  buildSplitRows,
-  createAssistantArtifacts,
-  generateFeedbackSummary,
-  type AssistantResponse,
-} from '../services/aiReviewAssistantService';
 import { processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
-import { restoreCaptureState, snapshotCaptureState, type CaptureUndoSnapshot } from '../services/captureUndoService';
 import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
 import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
-import type { CorrectionAction, FeedbackEvent, FeedbackEventCategory, DuplicateStatus, MatchCandidate, UserSettings } from '../types';
-
-// ─── ExamSearchPanel ─────────────────────────────────────────────────────────
-
-interface ExamSearchPanelProps {
-  /** Raw OCR / paste text to pre-populate the search */
-  initialQuery: string;
-  onSelect: (candidate: MatchCandidate) => void;
-  onClose: () => void;
-}
-
-function ExamSearchPanel({ initialQuery, onSelect, onClose }: ExamSearchPanelProps) {
-  const [query, setQuery] = useState(initialQuery);
-  const [results, setResults] = useState<MatchCandidate[]>([]);
-  const [searching, setSearching] = useState(false);
-
-  // Auto-search on mount and whenever query changes (debounced)
-  useEffect(() => {
-    if (!query.trim()) { setResults([]); return; }
-    const timer = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const hits = await searchExamLibrary(query, 8);
-        setResults(hits);
-      } finally {
-        setSearching(false);
-      }
-    }, 280);
-    return () => clearTimeout(timer);
-  }, [query]);
-
-  return (
-    <div className="mt-2 rounded-xl border border-sky-500/30 bg-slate-900/95 shadow-2xl overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/8">
-        <span className="text-sky-400 text-xs font-semibold uppercase tracking-wider">Search Exam Library</span>
-        <button
-          onClick={onClose}
-          className="ml-auto text-slate-500 hover:text-slate-300 text-xs px-1.5 py-0.5 rounded transition-colors"
-        >
-          ✕ Close
-        </button>
-      </div>
-
-      {/* Search input */}
-      <div className="px-3 py-2 border-b border-white/6">
-        <input
-          autoFocus
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name, CPT code, modality…"
-          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500/50"
-        />
-      </div>
-
-      {/* Results */}
-      <div className="max-h-64 overflow-y-auto divide-y divide-white/5">
-        {searching && (
-          <div className="px-4 py-3 text-xs text-slate-400 italic">Searching…</div>
-        )}
-        {!searching && results.length === 0 && query.trim() && (
-          <div className="px-4 py-3 text-xs text-slate-400 italic">No results — try different terms or CPT code</div>
-        )}
-        {results.map((c, ci) => (
-          <button
-            key={`${c.cptCode}-${c.modifier ?? ''}-${ci}`}
-            onClick={() => onSelect(c)}
-            className="w-full text-left px-3 py-2.5 text-xs hover:bg-white/5 transition-colors"
-          >
-            <div className="flex items-baseline gap-2">
-              <span className="font-mono font-bold text-white">{c.cptCode}</span>
-              {c.modifier && (
-                <span className="text-slate-500">mod {c.modifier}</span>
-              )}
-              <span
-                className={`ml-auto shrink-0 font-medium ${
-                  c.confidence >= 0.70 ? 'text-emerald-400' :
-                  c.confidence >= 0.50 ? 'text-amber-400' : 'text-slate-400'
-                }`}
-              >
-                {Math.round(c.confidence * 100)}%
-              </span>
-            </div>
-            <div className="text-slate-300 mt-0.5 leading-snug">
-              {c.description.slice(0, 90)}{c.description.length > 90 ? '…' : ''}
-            </div>
-            {c.workRvu != null && (
-              <div className="text-slate-500 mt-0.5">{c.workRvu.toFixed(2)} wRVU</div>
-            )}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-// ─── ImportProps ──────────────────────────────────────────────────────────────
+import type { MatchCandidate, UserSettings } from '../types';
 
 function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocrDebug']; imageFile?: File | Blob | null }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -289,13 +177,6 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
   );
 }
 
-function candidateKey(candidate: MatchCandidate): string {
-  return `${candidate.cptCode}-${candidate.modifier ?? ''}`;
-}
-function procedureNameForSource(source: { procedureName?: string | null; cleanedExamName?: string | null; cleanedText?: string | null; examTitle: string }): string {
-  return (source.procedureName ?? source.cleanedExamName ?? source.cleanedText ?? source.examTitle).trim();
-}
-
 export function shouldShowAccession(accessionNumber?: string | null): boolean {
   return Boolean(accessionNumber?.trim());
 }
@@ -333,149 +214,8 @@ export function formatOcrDateTime(date?: string | null, time?: string | null, fa
   });
 }
 
-function structuredSourceValue(source: PipelineReviewRow['source'], keys: string[]): string | null {
-  const raw = source as unknown as Record<string, unknown>;
-  for (const key of keys) {
-    const value = raw[key];
-    if (Array.isArray(value) && value.length > 0) return value.join(', ');
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return null;
-}
-
-function StructuredDetails({
-  row,
-  selected,
-  reviewReason,
-}: {
-  row: PipelineReviewRow;
-  selected: MatchCandidate[];
-  reviewReason: string | null;
-}) {
-  const procedureName = procedureNameForSource(row.source);
-  const topCandidate = selected[0] ?? row.candidates[0];
-  const normalized = topCandidate?.explanation?.normalizedText ?? normalizeRadiologyDescription(procedureName);
-  const rawOcr = row.source.parserRawLine ?? row.source.examTitle;
-  const detailRows = [
-    ['Modality', row.source.modality ?? topCandidate?.modality ?? 'Unavailable'],
-    ['Anatomy/body regions', structuredSourceValue(row.source, ['bodyRegions', 'bodyRegion', 'anatomy']) ?? 'Unavailable'],
-    ['Contrast', structuredSourceValue(row.source, ['contrast', 'contrastStatus']) ?? 'Unavailable'],
-    ['CPT(s)', selected.length > 0 ? selected.map((candidate) => candidate.cptCode).join(' + ') : 'Unselected'],
-    ['Exam date', row.source.examDate ?? row.source.studyDate ?? 'Unavailable'],
-    ['Exam time', row.source.examTime ?? 'Unavailable'],
-    ['Modified date', row.source.modifiedDate ?? row.source.modifiedDateTime?.slice(0, 10) ?? 'Unavailable'],
-    ['Modified time', row.source.modifiedTime ?? row.source.modifiedDateTime?.slice(11, 16) ?? 'Unavailable'],
-    ['Review reasons', [row.reviewReason, row.source.parserReviewReason, reviewReason].filter(Boolean).join(' | ') || 'None'],
-  ];
-
-  return (
-    <details className="mb-2 rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2 text-xs">
-      <summary className="cursor-pointer select-none text-[11px] font-semibold uppercase tracking-wide text-slate-400 transition-colors hover:text-slate-200">
-        Structured details
-      </summary>
-      <div className="mt-3 grid gap-3">
-        <div className="grid gap-2 md:grid-cols-3">
-          {detailRows.map(([label, value]) => (
-            <div key={label} className="rounded-lg border border-white/8 bg-black/15 px-2.5 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-              <p className="mt-1 break-words font-mono text-[11px] leading-snug text-slate-300">{value}</p>
-            </div>
-          ))}
-        </div>
-        <div className="grid gap-2 lg:grid-cols-2">
-          <div className="rounded-lg border border-white/8 bg-black/15 p-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Raw OCR text</p>
-            <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">{rawOcr}</pre>
-          </div>
-          <div className="rounded-lg border border-white/8 bg-black/15 p-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Normalized text</p>
-            <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">{normalized}</pre>
-          </div>
-        </div>
-      </div>
-    </details>
-  );
-}
-
-function candidateExplanationText(candidate: MatchCandidate, rawText: string): string {
-  const normalized = candidate.explanation?.normalizedText ?? normalizeRadiologyDescription(rawText);
-  const source = candidate.explanation?.source ?? candidate.method.replace(/_/g, ' ');
-  return `Raw: ${rawText} | Normalized: ${normalized} | Source: ${source} | Method: ${candidate.method} | CMS: ${candidate.description}`;
-}
-
-function isRadiologyCpt(candidate: MatchCandidate): boolean {
-  return /^7\d{4}$/.test(candidate.cptCode);
-}
-
 function isProductivityCandidate(candidate: MatchCandidate): boolean {
   return candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0;
-}
-
-function hasProcedureSignal(row: PipelineReviewRow): boolean {
-  const text = `${procedureNameForSource(row.source)} ${row.candidates.map((c) => c.description).join(' ')}`.toLowerCase();
-  return /\b(?:biopsy|lesion|drain|drainage|aspirat|injection|catheter|tube|port|line|needle|arthrogram|myelogram|guided|guidance|stereo|procedure)\b/.test(text) ||
-    row.candidates.some((candidate) => candidate.modality === 'PROCEDURE');
-}
-
-function hasMultiplePossibleCptMatches(row: PipelineReviewRow): boolean {
-  const plausible = row.candidates.filter(
-    (candidate) => isProductivityCandidate(candidate) && candidate.confidence >= 0.65,
-  );
-  return plausible.length > 1 || getSelectedCandidates(row).length > 1;
-}
-
-function safeAutoApprovalCandidate(row: PipelineReviewRow): MatchCandidate | null {
-  const selected = getSelectedCandidates(row).filter(isProductivityCandidate);
-  const candidate = selected.length === 1 ? selected[0] : row.candidates.find(isProductivityCandidate);
-  if (!candidate) return null;
-  if (!isRadiologyCpt(candidate)) return null;
-  if ((candidate.workRvu ?? 0) <= 0) return null;
-  if (candidate.confidence < 0.85) return null;
-  if (hasMultiplePossibleCptMatches(row)) return null;
-  if (hasProcedureSignal(row)) return null;
-  return candidate;
-}
-
-function isSafeAutoApprovalRow(row: PipelineReviewRow): boolean {
-  return Boolean(row.included && row.duplicateStatus !== 'possible' && safeAutoApprovalCandidate(row));
-}
-
-function isPriorApprovedMappingRow(row: PipelineReviewRow): boolean {
-  const candidate = safeAutoApprovalCandidate(row);
-  return Boolean(candidate && candidate.method === 'alias_match' && candidate.confidence >= 0.95);
-}
-
-function confidenceLabel(row: PipelineReviewRow, candidate?: MatchCandidate): { label: string; tone: 'green' | 'sky' | 'amber' | 'red' } {
-  const current = candidate ?? getSelectedCandidates(row)[0] ?? row.candidates[0];
-  if (!current) return { label: 'No match', tone: 'red' };
-  if (current.method === 'alias_match' && current.confidence >= 0.95) {
-    return { label: 'Exact alias match', tone: 'green' };
-  }
-  if (current.confidence >= 0.85 && current.method === 'radiology_match') {
-    return { label: 'High-confidence normalized match', tone: 'sky' };
-  }
-  return { label: 'Fuzzy match needs review', tone: 'amber' };
-}
-
-function labelClass(tone: 'green' | 'sky' | 'amber' | 'red'): string {
-  if (tone === 'green') return 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400';
-  if (tone === 'sky') return 'bg-sky-500/15 border-sky-500/30 text-sky-300';
-  if (tone === 'amber') return 'bg-amber-500/15 border-amber-500/30 text-amber-300';
-  return 'bg-red-500/15 border-red-500/30 text-red-300';
-}
-
-function manualReviewReason(row: PipelineReviewRow): string | null {
-  const selected = getSelectedCandidates(row);
-  const candidate = selected[0] ?? row.candidates[0];
-  if (!candidate) return 'No match';
-  if (selected.length > 1) return 'Multiple CPTs selected';
-  if ((candidate.workRvu ?? 0) <= 0 || candidate.modifier !== '26') return 'Not modifier 26 productivity RVU';
-  if (!isRadiologyCpt(candidate)) return 'Non-7xxxx CPT requires explicit selection';
-  if (candidate.confidence < 0.85) return 'Low confidence';
-  if (hasMultiplePossibleCptMatches(row)) return 'Multiple possible CPT matches';
-  if (hasProcedureSignal(row)) return 'Possible multi-CPT/procedure exam';
-  if (row.duplicateStatus === 'possible') return 'Possible duplicate';
-  return null;
 }
 
 export function hasValidSelectedProductivityRvu(row: PipelineReviewRow): boolean {
@@ -557,71 +297,13 @@ export function summarizeReviewApproval(rows: PipelineReviewRow[], skippedRows: 
   };
 }
 
-function dateAttributionWarning(row: PipelineReviewRow): string | null {
-  if (row.source.modifiedDate || row.source.modifiedDateTime) return null;
-  if (row.source.examDate || row.source.examDateTime) {
-    return 'Missing Modified time/date - productivity date will use selected log date unless corrected.';
-  }
-  return 'Missing Exam and Modified dates - productivity date will use selected log date after approval.';
-}
-
-function buildManualSelectionPatch(
-  row: PipelineReviewRow,
-  candidatesToSelect: MatchCandidate[],
-  forceReviewed = false,
-): Pick<PipelineReviewRow, 'candidates' | 'selectedCandidateIndex' | 'selectedCandidateIndices' | 'needsReview' | 'approvalStatus'> {
-  const updatedCandidates = [...row.candidates];
-  const existingKeys = new Set(updatedCandidates.map(candidateKey));
-  for (const candidate of candidatesToSelect) {
-    if (!existingKeys.has(candidateKey(candidate))) {
-      updatedCandidates.push(candidate);
-      existingKeys.add(candidateKey(candidate));
-    }
-  }
-
-  const selectedKeys = new Set(getSelectedCandidates(row).map(candidateKey));
-  candidatesToSelect.forEach((candidate) => selectedKeys.add(candidateKey(candidate)));
-  const selectedCandidateIndices = updatedCandidates
-    .map((candidate, index) => (selectedKeys.has(candidateKey(candidate)) ? index : -1))
-    .filter((index) => index >= 0);
-  const nextRow = { ...row, candidates: updatedCandidates, selectedCandidateIndices, selectedCandidateIndex: selectedCandidateIndices[0] ?? null };
-
-  return {
-    candidates: updatedCandidates,
-    selectedCandidateIndex: selectedCandidateIndices[0] ?? null,
-    selectedCandidateIndices,
-    needsReview: forceReviewed ? false : Boolean(manualReviewReason(nextRow)),
-    approvalStatus: forceReviewed ? 'manual_approved' : 'pending',
-  };
-}
-
-function buildApprovalPatch(row: PipelineReviewRow): Pick<PipelineReviewRow, 'selectedCandidateIndex' | 'selectedCandidateIndices' | 'needsReview' | 'approvalStatus'> | null {
-  const candidate = safeAutoApprovalCandidate(row);
-  if (!candidate) return null;
-  const index = row.candidates.findIndex((existing) => candidateKey(existing) === candidateKey(candidate));
-  if (index < 0) return null;
-  return { selectedCandidateIndex: index, selectedCandidateIndices: [index], needsReview: false, approvalStatus: 'manual_approved' };
-}
-
-function getCandidatesFromPatch(
-  patch: Pick<PipelineReviewRow, 'candidates' | 'selectedCandidateIndices'>,
-): MatchCandidate[] {
-  return (patch.selectedCandidateIndices ?? [])
-    .map((index) => patch.candidates[index])
-    .filter(Boolean);
-}
-
 interface ImportProps {
-  onImported: () => void;
   onReviewReady: () => void;
 }
 
 type Mode = 'paste' | 'ocr' | 'powerscribe';
-type Step = 'input' | 'review' | 'done';
-type ReviewMode = 'unknowns' | 'everything' | 'auto' | 'low';
+type Step = 'input' | 'review';
 type ImportToastTone = 'info' | 'success' | 'warning' | 'danger';
-
-type AssistantQuickOption = { label: string; category: FeedbackEventCategory; prompt: string };
 
 export const CAPTURE_PROCESSING_LABEL = 'Processing...';
 export const CAPTURE_PROMPT_TITLE = 'PowerScribe capture detected';
@@ -629,13 +311,6 @@ export const CAPTURE_PRIVACY_COPY = 'The screenshot is processed in memory and d
 
 export function shouldAutoProcessPowerScribeCaptures(settings: Pick<UserSettings, 'alwaysProcessPowerScribeClipboard'> | null | undefined): boolean {
   return Boolean(settings?.alwaysProcessPowerScribeClipboard);
-}
-
-interface AssistantPanelState {
-  rowId: string;
-  response: AssistantResponse;
-  feedbackEvent: FeedbackEvent;
-  actions: CorrectionAction[];
 }
 
 interface ImportToast {
@@ -686,20 +361,7 @@ function CaptureProcessingState() {
   );
 }
 
-const ASSISTANT_QUICK_OPTIONS: AssistantQuickOption[] = [
-  { label: 'Wrong CPT', category: 'wrong_cpt', prompt: 'The selected CPT is wrong.' },
-  { label: 'Not a duplicate', category: 'wrong_duplicate', prompt: 'This is not a duplicate.' },
-  { label: 'Should be duplicate', category: 'wrong_duplicate', prompt: 'This should be marked as a duplicate.' },
-  { label: 'Missing time', category: 'missing_datetime', prompt: 'The exam or read time is missing or wrong.' },
-  { label: 'Bad OCR text', category: 'bad_ocr', prompt: 'The OCR text is wrong.' },
-  { label: 'Bad cleanup', category: 'bad_exam_cleanup', prompt: 'The normalized exam name is wrong.' },
-  { label: 'Two exams merged', category: 'merged_ocr_rows', prompt: 'This is two exams recognized as one. The second modality starts a new row.' },
-  { label: 'Should auto-approve', category: 'should_auto_approve', prompt: 'This should auto-approve.' },
-  { label: 'Should require review', category: 'bad_auto_approval', prompt: 'This should require review.' },
-  { label: 'Add mapping', category: 'institution_mapping_needed', prompt: 'This should have matched the institution dictionary.' },
-];
-
-export function Import({ onImported, onReviewReady }: ImportProps) {
+export function Import({ onReviewReady }: ImportProps) {
   const { activeProfile, activePractice } = useProfile();
   const [mode, setMode]           = useState<Mode>('ocr');
   const [step, setStep]           = useState<Step>('input');
@@ -709,39 +371,15 @@ export function Import({ onImported, onReviewReady }: ImportProps) {
   const [reviewRows, setReviewRows]   = useState<PipelineReviewRow[]>([]);
   const [skippedRows, setSkippedRows] = useState<PipelineReviewRow[]>([]);
   const [logDate, setLogDate]     = useState(todayDateString());
-  const [importing, setImporting] = useState(false);
-  const [importedCount, setImportedCount]   = useState(0);
-  const [skippedCount, setSkippedCount]     = useState(0);
-  const [reviewNeeded, setReviewNeeded]     = useState(0);
-  const [committedWrvu, setCommittedWrvu] = useState(0);
-  const [undoAvailable, setUndoAvailable] = useState(false);
   const [error, setError]         = useState<string | null>(null);
-  const [showSkipped, setShowSkipped]       = useState(false);
-  const [searchPanelTempId, setSearchPanelTempId] = useState<string | null>(null);
-  const [reviewMode, setReviewMode] = useState<ReviewMode>('unknowns');
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
-  const [lastExtractedCount, setLastExtractedCount] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [toasts, setToasts] = useState<ImportToast[]>([]);
-  const [assistantTempId, setAssistantTempId] = useState<string | null>(null);
-  const [assistantPrompt, setAssistantPrompt] = useState('');
-  const [assistantPanel, setAssistantPanel] = useState<AssistantPanelState | null>(null);
-  const [assistantBusy, setAssistantBusy] = useState(false);
-  const [feedbackQueueOpen, setFeedbackQueueOpen] = useState(false);
-  const [feedbackEvents, setFeedbackEvents] = useState<FeedbackEvent[]>([]);
-  const [feedbackSummary, setFeedbackSummary] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const processingRef = useRef(false);
   const lastClipboardImageHashRef = useRef<string | null>(null);
-  const undoSnapshotRef = useRef<CaptureUndoSnapshot | null>(null);
-  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => {
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-  }, []);
-
   useEffect(() => subscribeGlobalCapture((payload) => {
     clearGlobalCapture(payload);
     if (payload.kind === 'text') {
@@ -785,29 +423,6 @@ export function Import({ onImported, onReviewReady }: ImportProps) {
       timeline,
     }).then(onReviewReady);
   }, [step, reviewRows, skippedRows, timeline, logDate, activeProfile?.id, sessionId, onReviewReady]);
-
-  useEffect(() => {
-    db.userSettings.get('default').then((settings) => {
-      if (!settings) return;
-      if (settings.reviewOnlyLowConfidence) setReviewMode('low');
-      else if (settings.reviewAutoApprovedExams) setReviewMode('auto');
-      else if (settings.unknownsOnlyReview === false) setReviewMode('everything');
-      else setReviewMode('unknowns');
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!feedbackQueueOpen) return;
-    db.feedbackEvents
-      .orderBy('createdAt')
-      .reverse()
-      .limit(100)
-      .toArray()
-      .then((events) => {
-        setFeedbackEvents(events);
-        setFeedbackSummary(null);
-      });
-  }, [feedbackQueueOpen]);
 
   useEffect(() => {
     processingRef.current = processing;
@@ -880,8 +495,7 @@ export function Import({ onImported, onReviewReady }: ImportProps) {
     }, tone === 'danger' ? 7000 : 4800);
   }
 
-  function appendPipelineRows(nextRows: PipelineReviewRow[], nextSkippedRows: PipelineReviewRow[], label: string, extractedCount?: number) {
-    if (extractedCount != null) setLastExtractedCount(extractedCount);
+  function appendPipelineRows(nextRows: PipelineReviewRow[], nextSkippedRows: PipelineReviewRow[], label: string) {
     const merged = mergeReviewSessionRows(reviewRows, skippedRows, nextRows, nextSkippedRows);
     setReviewRows(merged.reviewRows);
     setSkippedRows(merged.skippedRows);
@@ -926,7 +540,7 @@ export function Import({ onImported, onReviewReady }: ImportProps) {
       }, { filename: file.name, size: file.size });
       pushToast('info', 'Matching CPT codes...', 'Running aliases, active CPT filters, and review checks.');
       setOcrDebug(processed.ocrDebug ?? null);
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
       setClipboardFile(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'OCR failed - try paste mode instead');
@@ -953,7 +567,7 @@ export function Import({ onImported, onReviewReady }: ImportProps) {
       });
       setOcrFile(file);
       setOcrDebug(null);
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`, processed.extractedCount);
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
       setClipboardFile(null);
       return true;
     } catch (error) {
@@ -1004,7 +618,7 @@ export function Import({ onImported, onReviewReady }: ImportProps) {
         sessionId,
         logDate,
       });
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel, processed.extractedCount);
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Processing failed');
       pushToast('danger', 'Processing failed', e instanceof Error ? e.message : 'Could not parse the pasted study list.');
@@ -1016,22 +630,6 @@ export function Import({ onImported, onReviewReady }: ImportProps) {
   async function handleOcrProcess() {
     if (!ocrFile) return;
     await processOcrFile(ocrFile, 'manual file');
-    return;
-    setProcessing(true);
-    setError(null);
-    try {
-      const processed = await processOcrImport(ocrFile, {
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-      }, { filename: ocrFile.name, size: ocrFile.size });
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel, processed.extractedCount);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'OCR failed — try paste mode instead');
-    } finally {
-      setProcessing(false);
-    }
   }
 
   async function alwaysProcessClipboard(file: File) {
@@ -1044,461 +642,6 @@ export function Import({ onImported, onReviewReady }: ImportProps) {
     });
     pushToast('success', 'PowerScribe captures will be processed automatically.');
     await processPowerScribeCapture(file, 'trusted clipboard');
-  }
-
-  // Restore a skipped row back into the review list
-  function forceIncludeSkipped(tempId: string) {
-    const skipped = skippedRows.find((s) => s.tempId === tempId);
-    if (!skipped) return;
-    setSkippedRows((s) => s.filter((x) => x.tempId !== tempId));
-    setReviewRows((rows) => [
-      ...rows,
-      {
-        ...skipped,
-        duplicateStatus: null as DuplicateStatus,
-        duplicateReason: skipped.duplicateReason ? `Imported anyway despite duplicate warning: ${skipped.duplicateReason}` : null,
-        needsReview: false,
-        included: true,
-        autoSkipped: false,
-        approvalStatus: 'manual_approved',
-      },
-    ]);
-  }
-
-  async function handleCommit() {
-    setImporting(true);
-    setError(null);
-    try {
-      undoSnapshotRef.current = await snapshotCaptureState();
-      const selectedRvu = reviewRows
-        .filter(isRowFinalizableAfterApproval)
-        .reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
-      const result = await finalizeReviewSession({
-        sessionId,
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        logDate,
-        rows: reviewRows,
-        skippedRows,
-        timeline,
-      });
-      setImportedCount(result.importedCount);
-      setSkippedCount(result.skippedCount);
-      setReviewNeeded(result.reviewNeededCount);
-      setCommittedWrvu(selectedRvu);
-      setUndoAvailable(true);
-      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-      undoTimerRef.current = setTimeout(() => {
-        setUndoAvailable(false);
-        undoSnapshotRef.current = null;
-      }, 10_000);
-      setStep('done');
-      pushToast(
-        result.reviewNeededCount > 0 ? 'warning' : 'success',
-        `Imported ${result.importedCount} exam${result.importedCount === 1 ? '' : 's'}`,
-        `+${selectedRvu.toFixed(1)} wRVUs - ${result.skippedCount} duplicate${result.skippedCount === 1 ? '' : 's'} skipped - ${result.reviewNeededCount} require review`,
-      );
-    } catch (e) {
-      undoSnapshotRef.current = null;
-      setError(e instanceof Error ? e.message : 'Import failed');
-      pushToast('danger', 'Import failed', e instanceof Error ? e.message : 'The review session was not saved.');
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  async function undoLastCapture() {
-    const snapshot = undoSnapshotRef.current;
-    if (!snapshot || !undoAvailable) return;
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    await restoreCaptureState(snapshot);
-    undoSnapshotRef.current = null;
-    setUndoAvailable(false);
-    setImportedCount(0);
-    setSkippedCount(0);
-    setReviewNeeded(0);
-    setCommittedWrvu(0);
-    setStep('review');
-    pushToast('info', 'Capture undone', 'The local data is back exactly where it was before this batch was counted.');
-  }
-
-  async function discardSession() {
-    if (!confirm('Discard this active review session? No productivity history will be saved.')) return;
-    await discardActiveReviewSession({
-      sessionId,
-      profileId: activeProfile?.id ?? null,
-      siteId: activePractice?.id ?? null,
-      logDate,
-      reviewRowCount: reviewRows.length,
-      skippedRowCount: skippedRows.length,
-    });
-    setSessionId(null);
-    setReviewRows([]);
-    setSkippedRows([]);
-    setTimeline([]);
-    setStep('input');
-  }
-
-  function updateRow(tempId: string, patch: Partial<PipelineReviewRow>) {
-    setReviewRows((rows) =>
-      rows.map((r) => (r.tempId === tempId ? { ...r, ...patch } : r)),
-    );
-  }
-
-  function setSelectedCandidates(row: PipelineReviewRow, indices: number[]) {
-    const uniqueIndices = Array.from(new Set(indices)).filter((index) => Boolean(row.candidates[index]));
-    const selected = uniqueIndices.map((index) => row.candidates[index]);
-    const nextRow = { ...row, selectedCandidateIndex: uniqueIndices[0] ?? null, selectedCandidateIndices: uniqueIndices };
-    updateRow(row.tempId, {
-      selectedCandidateIndex: uniqueIndices[0] ?? null,
-      selectedCandidateIndices: uniqueIndices,
-      needsReview: uniqueIndices.length === 0 || selected.length !== 1 || Boolean(manualReviewReason(nextRow)),
-    });
-  }
-
-  function approveRows(predicate: (row: PipelineReviewRow) => boolean) {
-    setReviewRows((rows) =>
-      rows.map((row) => {
-        if (!predicate(row)) return row;
-        const patch = buildApprovalPatch(row);
-        return patch ? { ...row, ...patch } : row;
-      }),
-    );
-  }
-
-  function approveReviewRow(tempId: string) {
-    const row = reviewRows.find((item) => item.tempId === tempId);
-    if (!row) return;
-    const patch = buildUserApprovalPatch(row);
-    if (!patch) {
-      setSearchPanelTempId(tempId);
-      return;
-    }
-    updateRow(tempId, patch);
-    pushToast('success', row.duplicateStatus === 'possible' ? 'Approved as new' : 'Study approved', `${getSelectedWorkRvu(row).toFixed(1)} wRVUs added to finalizable total.`);
-  }
-
-  function approveAllReviewable(includeWarnings: boolean) {
-    let approved = 0;
-    let approvedWrvu = 0;
-    setReviewRows((rows) =>
-      rows.map((row) => {
-        if (!row.needsReview) return row;
-        if (!includeWarnings && row.duplicateStatus === 'possible') return row;
-        const patch = buildUserApprovalPatch(row);
-        if (!patch) return row;
-        approved++;
-        approvedWrvu += getSelectedWorkRvu(row);
-        return { ...row, ...patch };
-      }),
-    );
-    if (approved > 0) {
-      pushToast('success', `Approved ${approved} reviewable stud${approved === 1 ? 'y' : 'ies'}`, `+${approvedWrvu.toFixed(1)} wRVUs now finalizable.`);
-    }
-  }
-
-  function approveHighConfidence() {
-    approveRows((row) => isSafeAutoApprovalRow(row));
-  }
-
-  function approvePriorMappings() {
-    approveRows((row) => isPriorApprovedMappingRow(row));
-  }
-
-  function approveSameNormalizedDescription(tempId: string) {
-    const sourceRow = reviewRows.find((row) => row.tempId === tempId);
-    if (!sourceRow) return;
-    const patch = buildApprovalPatch(sourceRow);
-    if (!patch) return;
-    const sourceCandidate = sourceRow.candidates[patch.selectedCandidateIndex ?? -1];
-    if (!sourceCandidate) return;
-    const sourceKey = normalizedExamKey(sourceRow);
-
-    setReviewRows((rows) =>
-      rows.map((row) => {
-        if (normalizedExamKey(row) !== sourceKey || !row.included) return row;
-        if (manualReviewReason({ ...row, candidates: row.candidates, selectedCandidateIndex: patch.selectedCandidateIndex, selectedCandidateIndices: patch.selectedCandidateIndices })) {
-          const manualPatch = buildManualSelectionPatch(row, [sourceCandidate], true);
-          return { ...row, ...manualPatch };
-        }
-        const approvalPatch = buildManualSelectionPatch(row, [sourceCandidate], true);
-        return { ...row, ...approvalPatch };
-      }),
-    );
-  }
-
-  async function handleManualSelect(tempId: string, candidate: MatchCandidate) {
-    const row = reviewRows.find((r) => r.tempId === tempId);
-    if (!row) return;
-
-    const normalizedSourceKey = normalizedExamKey(row);
-    const rowsToUpdate = reviewRows.filter(
-      (reviewRow) => normalizedExamKey(reviewRow) === normalizedSourceKey,
-    );
-
-    const patchesByTempId = new Map<string, ReturnType<typeof buildManualSelectionPatch>>();
-    for (const reviewRow of rowsToUpdate) {
-      patchesByTempId.set(reviewRow.tempId, buildManualSelectionPatch(reviewRow, [candidate], true));
-    }
-
-    setReviewRows((rows) =>
-      rows.map((reviewRow) => {
-        const patch = patchesByTempId.get(reviewRow.tempId);
-        return patch ? { ...reviewRow, ...patch } : reviewRow;
-      }),
-    );
-
-    const rowsByRawTitle = new Map<string, PipelineReviewRow>();
-    rowsToUpdate.forEach((reviewRow) => rowsByRawTitle.set(procedureNameForSource(reviewRow.source), reviewRow));
-
-    for (const aliasRow of rowsByRawTitle.values()) {
-      const patch = patchesByTempId.get(aliasRow.tempId);
-      const selectedForAlias = patch ? getCandidatesFromPatch(patch) : [];
-      if (!selectedForAlias.length) continue;
-
-      await rememberCorrectedExam({
-        rawText: procedureNameForSource(aliasRow.source),
-        candidates: selectedForAlias.map((c) => ({
-          cptCode: c.cptCode,
-          modifier: c.modifier,
-          workRvu: c.workRvu,
-          description: c.description,
-          modality: c.modality,
-        })),
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-      });
-    }
-
-    setSearchPanelTempId(null);
-  }
-
-  async function askAssistant(
-    row: PipelineReviewRow,
-    rowIndex: number,
-    requestText: string,
-    categoryHint?: FeedbackEventCategory,
-  ) {
-    const trimmed = requestText.trim();
-    if (!trimmed) return;
-    setAssistantBusy(true);
-    setError(null);
-    try {
-      const artifacts = createAssistantArtifacts({
-        requestText: trimmed,
-        categoryHint,
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-        row,
-        rowIndex,
-        rows: reviewRows,
-      });
-      await db.feedbackEvents.add(artifacts.feedbackEvent);
-      if (feedbackQueueOpen) {
-        setFeedbackEvents((events) => [artifacts.feedbackEvent, ...events]);
-      }
-      if (artifacts.correctionActions.length > 0) {
-        await db.correctionActions.bulkAdd(artifacts.correctionActions);
-      }
-      setAssistantPanel({
-        rowId: row.tempId,
-        response: artifacts.response,
-        feedbackEvent: artifacts.feedbackEvent,
-        actions: artifacts.correctionActions,
-      });
-      setAssistantTempId(row.tempId);
-      pushToast('info', 'Assistant reviewed row', artifacts.response.explanation);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Assistant failed');
-      pushToast('danger', 'Assistant failed', e instanceof Error ? e.message : 'Could not create feedback.');
-    } finally {
-      setAssistantBusy(false);
-    }
-  }
-
-  async function applyAssistantAction(action: CorrectionAction) {
-    const row = reviewRows.find((item) => item.tempId === action.targetRowId);
-    if (!row) return;
-
-    setAssistantBusy(true);
-    try {
-      if (action.actionType === 'correct_exam_title') {
-        const proposed = action.proposedRowJson ? JSON.parse(action.proposedRowJson) as { procedureName?: string } : {};
-        if (!proposed.procedureName) throw new Error('No corrected title was proposed.');
-        const corrected = await buildCorrectedTitleRow(row, proposed.procedureName, activeProfile?.id ?? null);
-        setReviewRows((rows) => rows.map((item) => item.tempId === row.tempId ? corrected : item));
-      } else if (action.actionType === 'correct_cpt') {
-        const proposed = action.proposedRowJson ? JSON.parse(action.proposedRowJson) as { cptCodes?: string[] } : {};
-        const codes = proposed.cptCodes ?? [];
-        const candidates: MatchCandidate[] = [];
-        for (const code of codes) {
-          const results = await searchExamLibrary(code, 4);
-          const valid = results.find((candidate) => candidate.cptCode === code && candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0);
-          if (valid) candidates.push(valid);
-        }
-        if (candidates.length === 0) throw new Error('No modifier 26 RVU row was found for the requested CPT.');
-        const patch = buildManualSelectionPatch(row, candidates, true);
-        updateRow(row.tempId, {
-          ...patch,
-          needsReview: false,
-          reviewReason: 'Corrected by AI Assistant / user approved',
-          duplicateStatus: null,
-          duplicateReason: null,
-          duplicateExistingLogId: null,
-          autoApproved: false,
-          autoApprovalLevel: null,
-        });
-      } else if (action.actionType === 'split_merged_row') {
-        const proposedRows = action.proposedNewRowsJson
-          ? JSON.parse(action.proposedNewRowsJson) as Array<{ procedureName: string; examDateTime: string | null; modifiedDateTime: string | null; dateTimePairingConfidence: number; reviewReason: string }>
-          : [];
-        if (proposedRows.length === 0) throw new Error('No split rows were proposed.');
-        const splitRows = await buildSplitRows(row, proposedRows, activeProfile?.id ?? null);
-        setReviewRows((rows) => rows.flatMap((item) => item.tempId === row.tempId ? splitRows : [item]));
-      } else if (action.actionType === 'mark_not_duplicate') {
-        updateRow(row.tempId, {
-          duplicateStatus: null,
-          duplicateReason: null,
-          duplicateExistingLogId: null,
-          autoSkipped: false,
-          included: true,
-          needsReview: false,
-          approvalStatus: 'approved_as_new',
-          reviewReason: 'Marked not duplicate by AI Assistant / user approved',
-        });
-      } else if (action.actionType === 'mark_duplicate') {
-        updateRow(row.tempId, {
-          duplicateStatus: 'exact',
-          duplicateReason: 'Marked duplicate by user-approved assistant correction',
-          included: false,
-          approvalStatus: 'exact_duplicate_skipped',
-          needsReview: true,
-          reviewReason: 'Marked duplicate by AI Assistant / user approved',
-        });
-      }
-
-      await db.correctionActions.update(action.id, {
-        approvedByUser: true,
-        appliedAt: new Date().toISOString(),
-      });
-      addTimeline(`Assistant correction applied: ${action.actionType.replace(/_/g, ' ')}`);
-      pushToast('success', 'Assistant correction applied', action.explanation);
-      setAssistantPanel((panel) =>
-        panel
-          ? {
-              ...panel,
-              actions: panel.actions.map((item) =>
-                item.id === action.id ? { ...item, approvedByUser: true, appliedAt: new Date().toISOString() } : item,
-              ),
-            }
-          : panel,
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Correction failed');
-      pushToast('danger', 'Correction failed', e instanceof Error ? e.message : 'The row was not changed.');
-    } finally {
-      setAssistantBusy(false);
-    }
-  }
-
-  function saveAssistantFeedbackOnly() {
-    setAssistantPanel(null);
-    setAssistantPrompt('');
-    pushToast('success', 'Feedback saved', 'No review rows were changed.');
-  }
-
-  function showFeedbackSummary() {
-    const summary = generateFeedbackSummary(feedbackEvents);
-    setFeedbackSummary(summary.codexPrompt);
-  }
-
-  const includedCount = reviewRows.filter((r) => r.included).length;
-  const matchedCount = reviewRows.filter((r) => r.included && getSelectedCandidates(r).length > 0).length;
-  const selectedCodeCount = reviewRows
-    .filter((r) => r.included)
-    .reduce((sum, row) => sum + getSelectedCandidates(row).length, 0);
-  const possibleDupes = reviewRows.filter(
-    (r) => r.included && r.duplicateStatus === 'possible',
-  ).length;
-  const safeApprovalCount = reviewRows.filter(isSafeAutoApprovalRow).length;
-  const priorMappingCount = reviewRows.filter(isPriorApprovedMappingRow).length;
-  const autoCodedCount = reviewRows.filter((row) => row.included && !row.needsReview).length;
-  const requiresReviewCount = reviewRows.filter((row) => row.included && row.needsReview).length;
-  const approvalSummary = summarizeReviewApproval(reviewRows, skippedRows);
-  const reviewableWarningCount = reviewRows.filter((row) => row.needsReview && row.duplicateStatus === 'possible' && canApproveReviewRow(row)).length;
-  const reviewableCleanCount = reviewRows.filter((row) => row.needsReview && row.duplicateStatus !== 'possible' && canApproveReviewRow(row)).length;
-  const autoCodingPct = includedCount ? (autoCodedCount / includedCount) * 100 : 0;
-  const estimatedMinutesSaved = Math.round(autoCodedCount * 0.35);
-  const visibleReviewRows = reviewRows.filter((row) => {
-    if (reviewMode === 'everything') return true;
-    if (reviewMode === 'auto') return row.autoApproved || !row.needsReview;
-    if (reviewMode === 'low') return row.included && row.needsReview && (row.candidates[0]?.confidence ?? 0) < 0.95;
-    return row.included && row.needsReview;
-  });
-
-  // ── Done screen ───────────────────────────────────────────────────────────
-  if (step === 'done') {
-    return (
-      <>
-        <div className="max-w-lg mx-auto text-center space-y-6 py-16 animate-in fade-in duration-300">
-          <div className="w-20 h-20 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto text-4xl">
-            ✓
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-white">✓ {importedCount} {importedCount === 1 ? 'study' : 'studies'} · +{committedWrvu.toFixed(1)} wRVU</h2>
-            <div className="mt-3 space-y-1.5">
-              <p className="text-emerald-400 text-sm font-medium">
-                Imported: {importedCount} {importedCount === 1 ? 'study' : 'studies'}
-              </p>
-              {skippedCount > 0 && (
-                <p className="text-slate-400 text-sm">
-                  Skipped duplicates: {skippedCount}
-                </p>
-              )}
-              {reviewNeeded > 0 && (
-                <p className="text-amber-400 text-sm">
-                  Needs review: {reviewNeeded}
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="flex gap-3 justify-center">
-            {undoAvailable && (
-              <button onClick={() => void undoLastCapture()} className="px-6 py-2.5 rounded-xl border border-amber-500/40 text-amber-300 text-sm font-semibold">
-                Undo · 10s
-              </button>
-            )}
-            <button
-              onClick={() => {
-                setStep('input');
-                setPasteText('');
-                setOcrFile(null);
-                setReviewRows([]);
-                setSkippedRows([]);
-                setLastExtractedCount(0);
-                setShowSkipped(false);
-                sessionStorage.removeItem(WATCHER_REVIEW_KEY);
-              }}
-              className="px-6 py-2.5 rounded-xl border border-white/15 text-slate-300 text-sm hover:border-white/30 transition-colors"
-            >
-              Import More
-            </button>
-            <button
-              onClick={onImported}
-              className="px-6 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity"
-              style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
-            >
-              View Dashboard
-            </button>
-          </div>
-        </div>
-        <ImportToastStack toasts={toasts} />
-      </>
-    );
   }
 
   if (step === 'review') {

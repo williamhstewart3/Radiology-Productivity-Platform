@@ -56,7 +56,7 @@ export function TimelineHistory({ onOpenLegacy }: { onOpenLegacy: () => void }) 
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={buckets} onClick={(state) => { const bucket = buckets.find((item) => item.label === state?.activeLabel); if (bucket && lens !== 'year') setDrillDate(bucket.key); }}>
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--rd-label-secondary)' }} axisLine={false} tickLine={false} /><YAxis hide />
-            <Tooltip formatter={(value: number) => [`${value.toFixed(1)} wRVU`, '']} contentStyle={{ background: 'var(--rd-surface)', border: '1px solid var(--rd-separator)', borderRadius: 10, fontSize: 12 }} />
+            <Tooltip formatter={(value) => [`${Number(value ?? 0).toFixed(1)} wRVU`, '']} contentStyle={{ background: 'var(--rd-surface)', border: '1px solid var(--rd-separator)', borderRadius: 10, fontSize: 12 }} />
             {goalLine > 0 && <ReferenceLine y={goalLine} stroke="var(--rd-label-secondary)" strokeDasharray="4 4" />}
             <Bar dataKey="rvu" fill="var(--rd-label-primary)" radius={[4, 4, 0, 0]} cursor="pointer" />
           </BarChart>

@@ -331,7 +331,7 @@ export function Automation() {
     const correction = bulkCorrections[key];
     const query = correction?.query.trim();
     if (!query) return;
-    const matches = await searchExamLibrary(query, profileId);
+    const matches = await searchExamLibrary(query, 8);
     const selected = matches.find((match) => match.cptCode === query.replace(/\D/g, '')) ?? matches[0];
     if (!selected) return;
 

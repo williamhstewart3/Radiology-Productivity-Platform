@@ -70,7 +70,7 @@ export function Log({ onImported, onReviewReady, onClose }: LogProps) {
         onChange={setSegment}
       />
 
-      {segment === 'capture' && <Import onImported={onImported} onReviewReady={onReviewReady} />}
+      {segment === 'capture' && <Import onReviewReady={onReviewReady} />}
       {segment === 'manual' && (
         <div className="space-y-3">
           <LogStudy onSaved={onImported} />

@@ -186,7 +186,7 @@ export function Trends({ onNavigate }: TrendsProps) {
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--rd-label-secondary)' }} axisLine={false} tickLine={false} />
             <YAxis hide />
             <Tooltip
-              formatter={(value: number) => [`${value.toFixed(1)} wRVU`, '']}
+              formatter={(value) => [`${Number(value ?? 0).toFixed(1)} wRVU`, '']}
               contentStyle={{ background: 'var(--rd-surface)', border: 'none', borderRadius: 10, fontSize: 12 }}
             />
             {goalLine > 0 && <ReferenceLine y={goalLine} stroke="var(--rd-label-secondary)" strokeDasharray="4 4" />}
