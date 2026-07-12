@@ -53,7 +53,7 @@ export function BaptistLogoLockup({ size = 'md', showTagline = false, className 
     <div className={`flex items-center gap-2.5 shrink-0 ${className}`}>
       <BaptistLogoMark size={iconSize} />
       <div className="flex flex-col leading-tight">
-        <span className={`font-bold tracking-tight text-white ${textSize}`}>
+        <span className={`font-bold tracking-tight text-rd-label-primary ${textSize}`}>
           wRVU Tracker
         </span>
         {showTagline && (

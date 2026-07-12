@@ -2,9 +2,11 @@ import { useState, useEffect, Component } from 'react';
 import type { ReactNode } from 'react';
 import { Route, Switch, Redirect, useLocation } from 'wouter';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { useAppInitialization } from './hooks/useAppInitialization';
 import { OrgProvider } from './contexts/OrgContext';
 import { useOrg } from './hooks/useOrg';
+import { db, ensureUserSettings } from './db/database';
 import { Today } from './pages/Today';
 import { MiniPaceWindow } from './components/MiniPaceWindow';
 import { ProfileSwitcherButton } from './components/ProfileSwitcherSheet';
@@ -110,26 +112,46 @@ function AppLoadingOverlay() {
   );
 }
 
+function useSystemPrefersDark(): boolean {
+  const [prefersDark, setPrefersDark] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches,
+  );
+  useEffect(() => {
+    const mql = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => setPrefersDark(mql.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return prefersDark;
+}
+
 function MainApp() {
   const { isReady, error } = useAppInitialization();
-  const [isDark, setIsDark] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { activeProfile, activePractice } = useOrg();
   const [location, navigate] = useLocation();
+
+  // Settings > Appearance (auto/light/dark) drives both the legacy Baptist
+  // theme (`.dark`) and the new token system (`.rd-dark`/`.rd-light`) so
+  // not-yet-migrated screens and the new shell stay visually coherent.
+  const themeSetting = useLiveQuery(async () => (await db.userSettings.get('default'))?.theme ?? 'dark', [], 'dark');
+  const systemPrefersDark = useSystemPrefersDark();
+  const isDark = themeSetting === 'system' ? systemPrefersDark : themeSetting !== 'light';
 
   useEffect(() => {
     injectTheme();
   }, []);
 
   useEffect(() => {
-    // Drives both the legacy Baptist theme (`.dark`) and the new token system
-    // (`.rd-dark`) so not-yet-migrated screens and the new shell stay visually
-    // coherent during the phased rollout. True light-mode support (Settings >
-    // Appearance) lands in Phase 5 — the token system already supports it.
     document.documentElement.classList.toggle('dark', isDark);
     document.documentElement.classList.toggle('rd-dark', isDark);
     document.documentElement.classList.toggle('rd-light', !isDark);
   }, [isDark]);
+
+  async function toggleTheme() {
+    const current = await ensureUserSettings();
+    await db.userSettings.put({ ...current, theme: isDark ? 'light' : 'dark', updatedAt: new Date().toISOString() });
+  }
 
   if (error) {
     return (
@@ -226,7 +248,7 @@ function MainApp() {
                   <Bell className="size-4" />
                 </button>
                 <button
-                  onClick={() => setIsDark(!isDark)}
+                  onClick={() => void toggleTheme()}
                   className="flex size-9 items-center justify-center rounded-full text-rd-label-secondary hover:bg-rd-bg"
                   title="Toggle theme"
                 >

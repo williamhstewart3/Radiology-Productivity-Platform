@@ -86,6 +86,7 @@ export function Trends({ onNavigate }: TrendsProps) {
   const profileId = activeProfile?.id ?? null;
   const [range, setRange] = useState<Range>('week');
   const [locationFilter, setLocationFilter] = useState<string | null>(null);
+  const settings = useLiveQuery(() => db.userSettings.get('default'), [], undefined);
 
   const today = useMemo(() => isoDate(new Date()), []);
   const start = useMemo(() => rangeStart(range, today), [range, today]);
@@ -195,7 +196,14 @@ export function Trends({ onNavigate }: TrendsProps) {
       </div>
 
       <GroupedList>
-        <Row trailing={<span className="[font-variant-numeric:tabular-nums]">{totals.totalWorkRvu.toFixed(1)}</span>}>
+        <Row
+          footnote={
+            settings?.estimatedCompPerWrvu != null && settings.estimatedCompPerWrvu > 0
+              ? `≈ $${(totals.totalWorkRvu * settings.estimatedCompPerWrvu).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+              : undefined
+          }
+          trailing={<span className="[font-variant-numeric:tabular-nums]">{totals.totalWorkRvu.toFixed(1)}</span>}
+        >
           Total wRVUs
         </Row>
         <Row trailing={<span className="[font-variant-numeric:tabular-nums]">{totals.studyCount}</span>}>

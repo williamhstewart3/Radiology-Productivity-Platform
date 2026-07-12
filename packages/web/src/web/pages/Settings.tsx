@@ -1,6 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState, useRef } from 'react';
-import { theme } from '../lib/theme';
 import { db, ensureUserSettings } from '../db/database';
 import { importRvuFile } from '../utils/rvuFileImporter';
 import { dedupeCptRvuRowsForBulkPut } from '../utils/cptRowDeduplication';
@@ -10,6 +9,8 @@ import {
   importInstitutionProcedureMappings,
   type InstitutionProcedureMappingSummary,
 } from '../utils/institutionProcedureMappingImporter';
+import { GroupedList, Row } from '../components/ui/GroupedList';
+import { SegmentedControl } from '../components/ui/SegmentedControl';
 import type { UserSettings, ExamAlias, ExamDictionaryEntry } from '../types';
 import type { ImportResult } from '../utils/rvuFileImporter';
 
@@ -41,7 +42,6 @@ export function Settings({ onNavigate }: SettingsProps) {
   }, []);
 
   const [local, setLocal] = useState<Partial<UserSettings>>({});
-
   const merged: Partial<UserSettings> = { ...settings, ...local };
 
   function update(patch: Partial<UserSettings>) {
@@ -64,6 +64,16 @@ export function Settings({ onNavigate }: SettingsProps) {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function setTheme(theme: 'light' | 'dark' | 'system') {
+    const current = await ensureUserSettings();
+    await db.userSettings.put({ ...current, theme, updatedAt: new Date().toISOString() });
+  }
+
+  async function setCompRate(value: number | null) {
+    const current = await ensureUserSettings();
+    await db.userSettings.put({ ...current, estimatedCompPerWrvu: value, updatedAt: new Date().toISOString() });
   }
 
   async function handleRvuFileImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -100,7 +110,7 @@ export function Settings({ onNavigate }: SettingsProps) {
     setCptCount(count);
   }
 
-  // ── Learned Mappings ───────────────────────────────────────────────────────
+  // ── Aliases ─────────────────────────────────────────────────────────────
   const learnedAliases = useLiveQuery<ExamAlias[]>(
     () => db.examAliases.orderBy('lastUsedAt').reverse().toArray(),
     [],
@@ -171,9 +181,7 @@ export function Settings({ onNavigate }: SettingsProps) {
   }
 
   function formatCptList(alias: ExamAlias): string {
-    if (alias.cptCodes && alias.cptCodes.length > 0) {
-      return alias.cptCodes.join(' · ');
-    }
+    if (alias.cptCodes && alias.cptCodes.length > 0) return alias.cptCodes.join(' · ');
     return alias.modifier ? `${alias.cptCode}-${alias.modifier}` : alias.cptCode;
   }
 
@@ -189,671 +197,332 @@ export function Settings({ onNavigate }: SettingsProps) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
-      <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">Settings</h1>
-        <p className="text-slate-400 text-sm mt-0.5">Goals, automation, profiles, and RVU data</p>
-      </div>
+    <div className="mx-auto max-w-2xl space-y-8">
+      <h1 className="text-[34px] font-bold leading-tight text-rd-label-primary">Settings</h1>
 
-      {onNavigate && (
-        <div className="card space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Configuration</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              These are setup tools, not workday destinations. Keep them here unless something needs attention.
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {[
-              { label: 'Automation', detail: 'Capture and review behavior', tab: 'automation' as const },
-              { label: 'Profiles', detail: 'Radiologists and goals', tab: 'profiles' as const },
-              { label: 'Locations', detail: 'Practices and workspaces', tab: 'locations' as const },
-              { label: 'Admin Data', detail: 'CPT tables and diagnostics', tab: 'admin' as const },
-            ].map((item) => (
-              <button
-                key={item.tab}
-                type="button"
-                onClick={() => onNavigate(item.tab)}
-                className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-left transition-all hover:border-white/20 hover:bg-white/[0.06]"
-              >
-                <p className="text-sm font-medium text-white">{item.label}</p>
-                <p className="mt-0.5 text-xs text-slate-500">{item.detail}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* ── Profiles & locations ─────────────────────────────────────── */}
+      <section className="space-y-3">
+        <p className="px-1 text-[13px] font-medium text-rd-label-secondary">Profiles & locations</p>
 
-      {/* Goal settings */}
-      <div className="card space-y-4">
-        <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Annual Goal</h2>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Annual wRVU Goal</label>
-            <input
-              type="number"
-              value={merged.annualRvuGoal ?? 15000}
-              onChange={(e) => update({ annualRvuGoal: Number(e.target.value) })}
-              min={1000}
-              max={50000}
-              step={500}
-              className="input w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Fiscal Year Start Month</label>
-            <select
-              value={merged.fiscalYearStartMonth ?? 1}
-              onChange={(e) => update({ fiscalYearStartMonth: Number(e.target.value) })}
-              className="input w-full"
-            >
-              {['January','February','March','April','May','June','July','August','September','October','November','December'].map((m, i) => (
-                <option key={i + 1} value={i + 1}>{m}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Workdays per Week</label>
-            <input
-              type="number"
-              value={merged.workdaysPerWeek ?? 5}
-              onChange={(e) => update({ workdaysPerWeek: Number(e.target.value) })}
-              min={1}
-              max={7}
-              step={0.5}
-              className="input w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Vacation Days Planned</label>
-            <input
-              type="number"
-              value={merged.vacationDaysPlanned ?? 0}
-              onChange={(e) => update({ vacationDaysPlanned: Number(e.target.value) })}
-              min={0}
-              max={200}
-              className="input w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Low Confidence Threshold</label>
-            <input
-              type="number"
-              value={merged.lowConfidenceThreshold ?? 0.75}
-              onChange={(e) => update({ lowConfidenceThreshold: Number(e.target.value) })}
-              min={0}
-              max={1}
-              step={0.05}
-              className="input w-full"
-            />
-            <p className="text-[10px] text-slate-500 mt-1">Matches below this score flag for review</p>
-          </div>
-        </div>
-
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all ${
-            saved
-              ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
-              : 'text-white hover:opacity-90'
-          }`}
-          style={!saved ? { background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` } : {}}
-        >
-          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Settings'}
-        </button>
-      </div>
-
-      {/* Daily Pace settings */}
-      <div className="card space-y-4">
-        <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Daily Pace</h2>
-        <p className="text-xs text-slate-400">Used by Home to track real-time productivity during your shift.</p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Daily wRVU Goal</label>
-            <input
-              type="number"
-              value={merged.dailyRvuGoal ?? 90}
-              onChange={(e) => update({ dailyRvuGoal: Number(e.target.value) })}
-              min={1}
-              max={500}
-              step={5}
-              className="input w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Break Minutes</label>
-            <input
-              type="number"
-              value={merged.breakMinutes ?? 0}
-              onChange={(e) => update({ breakMinutes: Number(e.target.value) })}
-              min={0}
-              max={480}
-              step={5}
-              className="input w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Workday Start</label>
-            <input
-              type="time"
-              value={merged.workdayStart ?? '08:00'}
-              onChange={(e) => update({ workdayStart: e.target.value })}
-              className="input w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Workday End</label>
-            <input
-              type="time"
-              value={merged.workdayEnd ?? '17:00'}
-              onChange={(e) => update({ workdayEnd: e.target.value })}
-              className="input w-full"
-            />
-          </div>
-        </div>
-
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all ${
-            saved
-              ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
-              : 'text-white hover:opacity-90'
-          }`}
-          style={!saved ? { background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` } : {}}
-        >
-          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Settings'}
-        </button>
-      </div>
-
-      {/* RVU file import */}
-      <div className="card space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-white uppercase tracking-wider">CMS RVU File</h2>
-          <span className="text-xs text-slate-400">
-            {cptCount !== null ? `${cptCount.toLocaleString()} CPT codes loaded` : 'Loading…'}
-          </span>
-        </div>
-
-        <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
-          <p className="text-blue-300 text-xs font-medium">Import CY2026 PPRRVU file</p>
-          <p className="text-blue-300/70 text-xs mt-1">
-            Download the CMS Physician Fee Schedule ZIP from CMS.gov, then import here.
-            Work RVUs are snapshotted at log time — existing logs are never modified.
-          </p>
-        </div>
-
-        <div>
-          <input
-            ref={rvuFileRef}
-            type="file"
-            accept=".zip,.csv,.txt"
-            onChange={handleRvuFileImport}
-            className="hidden"
-          />
-          <button
-            onClick={() => rvuFileRef.current?.click()}
-            disabled={importing}
-            className="w-full py-2.5 rounded-xl border border-white/15 text-slate-300 text-sm font-medium hover:border-white/30 hover:text-white transition-all disabled:opacity-50"
-          >
-            {importing ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="w-4 h-4 border border-t-transparent rounded-full animate-spin" style={{ borderColor: `${theme.colors.accent} transparent transparent transparent` }} />
-                Importing…
-              </span>
-            ) : (
-              '📂 Select PPRRVU ZIP or CSV'
+        {onNavigate && (
+          <GroupedList>
+            <Row onClick={() => onNavigate('profiles')} footnote="Radiologists and goals" trailing={<span className="text-rd-label-secondary">›</span>}>
+              Profiles
+            </Row>
+            <Row onClick={() => onNavigate('locations')} footnote="Practices and workspaces" trailing={<span className="text-rd-label-secondary">›</span>}>
+              Locations
+            </Row>
+            <Row onClick={() => onNavigate('automation')} footnote="Capture and review behavior" trailing={<span className="text-rd-label-secondary">›</span>}>
+              Automation
+            </Row>
+            {onNavigate && (
+              <Row onClick={() => onNavigate('admin')} footnote="CPT tables and diagnostics" trailing={<span className="text-rd-label-secondary">›</span>}>
+                Admin data
+              </Row>
             )}
+          </GroupedList>
+        )}
+
+        <div className="rounded-[16px] bg-rd-surface p-4 space-y-4" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+          <div className="grid grid-cols-2 gap-4">
+            <label className="grid gap-1 text-[13px] text-rd-label-secondary">
+              Annual wRVU goal
+              <input
+                type="number"
+                aria-label="Annual wRVU goal"
+                value={merged.annualRvuGoal ?? 15000}
+                onChange={(e) => update({ annualRvuGoal: Number(e.target.value) })}
+                min={1000} max={50000} step={500}
+                className="h-10 rounded-[8px] bg-rd-bg px-3 text-[15px] text-rd-label-primary"
+              />
+            </label>
+            <label className="grid gap-1 text-[13px] text-rd-label-secondary">
+              Daily wRVU goal
+              <input
+                type="number"
+                aria-label="Daily wRVU goal"
+                value={merged.dailyRvuGoal ?? 90}
+                onChange={(e) => update({ dailyRvuGoal: Number(e.target.value) })}
+                min={1} max={500} step={5}
+                className="h-10 rounded-[8px] bg-rd-bg px-3 text-[15px] text-rd-label-primary"
+              />
+            </label>
+            <label className="grid gap-1 text-[13px] text-rd-label-secondary">
+              Workday start
+              <input
+                type="time"
+                aria-label="Workday start"
+                value={merged.workdayStart ?? '08:00'}
+                onChange={(e) => update({ workdayStart: e.target.value })}
+                className="h-10 rounded-[8px] bg-rd-bg px-3 text-[15px] text-rd-label-primary"
+              />
+            </label>
+            <label className="grid gap-1 text-[13px] text-rd-label-secondary">
+              Workday end
+              <input
+                type="time"
+                aria-label="Workday end"
+                value={merged.workdayEnd ?? '17:00'}
+                onChange={(e) => update({ workdayEnd: e.target.value })}
+                className="h-10 rounded-[8px] bg-rd-bg px-3 text-[15px] text-rd-label-primary"
+              />
+            </label>
+          </div>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="min-h-11 w-full rounded-[10px] text-[15px] font-semibold text-white disabled:opacity-60"
+            style={{ background: saved ? 'var(--rd-positive)' : 'var(--rd-accent)' }}
+          >
+            {saving ? 'Saving…' : saved ? 'Saved' : 'Save'}
           </button>
         </div>
+      </section>
 
-        {importError && (
-          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20">
-            <p className="text-red-400 text-xs">{importError}</p>
-          </div>
-        )}
+      {/* ── Aliases ───────────────────────────────────────────────────── */}
+      <section className="space-y-3">
+        <p className="px-1 text-[13px] font-medium text-rd-label-secondary">
+          Aliases {learnedAliases && `· ${learnedAliases.length} saved`}
+        </p>
 
-        {importResult && (
-          <div className={`p-3 rounded-xl border text-xs space-y-1 ${
-            importResult.success
-              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
-              : 'bg-red-500/10 border-red-500/20 text-red-300'
-          }`}>
-            <p className="font-semibold">
-              {importResult.success ? '✓ Import complete' : '✕ Import failed'} — {importResult.fileVersion}
-            </p>
-            <p>Added: {importResult.rowsAdded} · Updated: {importResult.rowsUpdated} · Unchanged: {importResult.rowsUnchanged}</p>
-            {importResult.rowsSkippedNoWorkRvu > 0 && (
-              <p className="text-slate-400">Skipped (no work RVU): {importResult.rowsSkippedNoWorkRvu}</p>
-            )}
-            {importResult.significantChanges.length > 0 && (
-              <p className="text-amber-300">⚠️ {importResult.significantChanges.length} codes changed ≥5%</p>
-            )}
-            {importResult.errors.length > 0 && (
-              <div className="mt-1 space-y-0.5">
-                {importResult.errors.map((e, i) => (
-                  <p key={i} className="text-slate-400">{e}</p>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        <button
-          onClick={handleResetCpt}
-          className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
-        >
-          Reset to built-in seed data
-        </button>
-      </div>
-
-      {/* Learned Mappings */}
-      <div className="card space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Learned Mappings</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              OCR titles you've manually corrected. Applied automatically on future imports.
-            </p>
-          </div>
-          <span className="text-xs text-slate-500 shrink-0">
-            {learnedAliases?.length ?? 0} saved
-          </span>
-        </div>
-
-        {/* Search */}
         {(learnedAliases?.length ?? 0) > 0 && (
           <input
             type="text"
+            aria-label="Search learned aliases"
             value={aliasSearch}
             onChange={(e) => setAliasSearch(e.target.value)}
-            placeholder="Search by raw title, exam name, or CPT…"
-            className="input w-full text-xs"
+            placeholder="Search by raw title, exam name, or CPT"
+            className="h-10 w-full rounded-[10px] bg-rd-surface px-3 text-[15px] text-rd-label-primary"
+            style={{ boxShadow: 'var(--rd-shadow-card)' }}
           />
         )}
 
-        {/* Edit modal */}
         {editingAlias && (
-          <div className="rounded-xl border border-sky-500/30 bg-slate-800/80 p-3 space-y-2">
-            <p className="text-xs text-sky-400 font-semibold uppercase tracking-wider">Edit Raw Title</p>
-            <p className="text-[10px] text-slate-500">Changing the raw title updates the normalized lookup key.</p>
+          <div className="rounded-[12px] bg-rd-surface p-3 space-y-2" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+            <p className="text-[13px] font-medium text-rd-label-primary">Edit raw title</p>
             <input
-              autoFocus
               type="text"
+              aria-label="Raw title"
               value={editRaw}
               onChange={(e) => setEditRaw(e.target.value)}
-              className="input w-full text-xs"
+              className="h-9 w-full rounded-[8px] bg-rd-bg px-2 text-[13px] text-rd-label-primary"
             />
             <div className="flex gap-2">
-              <button
-                onClick={handleSaveAlias}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
-              >
+              <button onClick={handleSaveAlias} className="rounded-[8px] px-3 py-1.5 text-[13px] font-semibold text-white" style={{ background: 'var(--rd-accent)' }}>
                 Save
               </button>
-              <button
-                onClick={() => setEditingAlias(null)}
-                className="px-3 py-1.5 rounded-lg text-xs text-slate-400 border border-white/10 hover:text-white transition-colors"
-              >
+              <button onClick={() => setEditingAlias(null)} className="rounded-[8px] px-3 py-1.5 text-[13px] text-rd-label-secondary">
                 Cancel
               </button>
             </div>
           </div>
         )}
 
-        {/* Alias list */}
-        {filteredAliases.length === 0 && (
-          <div className="text-center py-8 text-slate-500 text-xs">
-            {(learnedAliases?.length ?? 0) === 0
-              ? 'No learned mappings yet. Correct an exam during import and it will appear here.'
-              : 'No mappings match your search.'}
-          </div>
-        )}
-
-        <div className="space-y-2">
+        <GroupedList footer={(learnedAliases?.length ?? 0) === 0 ? 'Correct an exam during import and it will appear here.' : undefined}>
+          {filteredAliases.length === 0 && <Row footnote="No matches">No learned mappings yet</Row>}
           {filteredAliases.map((alias) => (
-            <div
+            <Row
               key={alias.id}
-              className="rounded-xl border border-white/8 bg-white/3 p-3 space-y-1.5 hover:border-white/15 transition-colors"
+              footnote={`${formatCptList(alias)} · ${sourceLabel(alias.source)} · ${alias.timesUsed}× used`}
+              trailing={
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => startEditAlias(alias)} className="rounded-[6px] px-2 py-1 text-[12px] text-rd-accent">Edit</button>
+                  <button onClick={() => handleDeleteAlias(alias.id)} className="rounded-[6px] px-2 py-1 text-[12px] text-red-400">Remove</button>
+                </div>
+              }
             >
-              {/* Row header */}
-              <div className="flex items-start gap-2">
-                <div className="flex-1 min-w-0">
-                  {/* Raw OCR title */}
-                  <p className="text-xs font-mono text-slate-300 truncate" title={alias.aliasTextRaw}>
-                    {alias.aliasTextRaw}
-                  </p>
-                  {/* Arrow + canonical name */}
-                  {alias.canonicalExamName && (
-                    <p className="text-[10px] text-slate-500 mt-0.5 truncate">
-                      → <span className="text-slate-400">{alias.canonicalExamName}</span>
-                    </p>
-                  )}
-                </div>
-                {/* Actions */}
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    onClick={() => startEditAlias(alias)}
-                    className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-slate-400 hover:text-white hover:border-white/25 transition-colors"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDeleteAlias(alias.id)}
-                    className="text-[10px] px-2 py-0.5 rounded border border-red-500/20 text-red-400/70 hover:text-red-400 hover:border-red-500/40 transition-colors"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-
-              {/* CPT codes + RVU */}
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="font-mono text-[10px] text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded">
-                  {formatCptList(alias)}
-                </span>
-                {alias.totalWorkRvu != null && alias.totalWorkRvu > 0 && (
-                  <span className="text-[10px] text-emerald-400">
-                    {alias.totalWorkRvu.toFixed(2)} wRVU
-                  </span>
-                )}
-                <span className="text-[10px] text-slate-600 ml-auto">
-                  {sourceLabel(alias.source)} · {Math.round((alias.matchConfidence ?? 0) * 100)}% · {alias.timesUsed}× used
-                  {(alias.corrections ?? 0) > 0 && ` · ${alias.corrections} corrections`}
-                  {alias.lastUsedAt && ` · ${new Date(alias.lastUsedAt).toLocaleDateString()}`}
-                </span>
-              </div>
-            </div>
+              {alias.aliasTextRaw}
+              {alias.canonicalExamName && <span className="text-rd-label-secondary"> → {alias.canonicalExamName}</span>}
+            </Row>
           ))}
+        </GroupedList>
+      </section>
+
+      {/* ── Appearance ────────────────────────────────────────────────── */}
+      <section className="space-y-3">
+        <p className="px-1 text-[13px] font-medium text-rd-label-secondary">Appearance</p>
+        <div className="rounded-[16px] bg-rd-surface p-3" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+          <SegmentedControl
+            options={[
+              { value: 'system', label: 'Auto' },
+              { value: 'light', label: 'Light' },
+              { value: 'dark', label: 'Dark' },
+            ]}
+            value={settings?.theme ?? 'dark'}
+            onChange={setTheme}
+          />
         </div>
+      </section>
 
-        {/* Clear all */}
-        {(learnedAliases?.length ?? 0) > 0 && (
-          <button
-            onClick={async () => {
-              if (!confirm(`Delete all ${learnedAliases?.length} learned mappings?`)) return;
-              await db.examAliases.clear();
-            }}
-            className="text-xs text-slate-500 hover:text-red-400 transition-colors"
-          >
-            Clear all learned mappings
-          </button>
-        )}
-      </div>
-
-      {/* Institution Procedure Mappings */}
-      <div className="card space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Institution Procedure Mappings</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Upload local MR, US, and CT procedure-to-CPT mappings. These matches outrank generic CMS fuzzy matching.
-            </p>
-          </div>
-          <span className="text-xs text-slate-500 shrink-0">{institutionMappings.length} rows</span>
-        </div>
-
-        <input
-          ref={institutionFileRef}
-          type="file"
-          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          onChange={handleInstitutionMappingImport}
-          className="hidden"
-        />
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => institutionFileRef.current?.click()}
-            disabled={institutionImporting}
-            className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 text-xs font-medium text-white transition-colors"
-          >
-            {institutionImporting ? 'Importing...' : 'Upload .xlsx'}
-          </button>
-          {institutionMappings.length > 0 && (
-            <button
-              onClick={handleClearInstitutionMappings}
-              className="px-3 py-2 rounded-lg border border-red-500/20 text-xs font-medium text-red-300 hover:border-red-500/40 transition-colors"
-            >
-              Clear mappings
-            </button>
-          )}
-        </div>
-
-        {institutionImportError && (
-          <p className="text-xs text-red-400">{institutionImportError}</p>
-        )}
-
-        {institutionImportSummary && (
-          <div className="rounded-xl border border-white/8 bg-black/20 p-3 space-y-3">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {[
-                ['Total rows', institutionImportSummary.totalRows],
-                ['Mapped rows', institutionImportSummary.mappedRows],
-                ['Blank CPT', institutionImportSummary.skippedBlankCptRows],
-                ['Multi-CPT', institutionImportSummary.multiCptRows],
-              ].map(([label, value]) => (
-                <div key={label} className="rounded-lg bg-white/5 p-2">
-                  <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
-                  <p className="mt-1 text-sm font-semibold text-white">{value}</p>
-                </div>
-              ))}
+      {/* ── Compensation ──────────────────────────────────────────────── */}
+      <section className="space-y-3">
+        <p className="px-1 text-[13px] font-medium text-rd-label-secondary">Compensation</p>
+        <GroupedList footer="Off by default. When set, Today and Trends show an estimated earned-$ footnote.">
+          <Row footnote="Optional — leave blank to hide">
+            <div className="flex items-center justify-between gap-3">
+              <span>$ per wRVU</span>
+              <input
+                type="number"
+                aria-label="Dollars per wRVU"
+                value={merged.estimatedCompPerWrvu ?? ''}
+                onChange={(e) => setCompRate(e.target.value === '' ? null : Number(e.target.value))}
+                placeholder="Off"
+                min={0}
+                step={1}
+                className="h-9 w-28 rounded-[8px] bg-rd-bg px-2 text-right text-[15px] text-rd-label-primary"
+              />
             </div>
-            <p className="text-xs text-slate-400">
-              Modality counts:{' '}
-              {Object.entries(institutionImportSummary.modalityCounts)
-                .map(([modality, count]) => `${modality} ${count}`)
-                .join(' - ') || 'None'}
-              {institutionImportSummary.replacedEntries > 0 && ` - replaced ${institutionImportSummary.replacedEntries}`}
+          </Row>
+        </GroupedList>
+      </section>
+
+      {/* ── Data & privacy ────────────────────────────────────────────── */}
+      <section className="space-y-3">
+        <p className="px-1 text-[13px] font-medium text-rd-label-secondary">Data & privacy</p>
+
+        <div className="rounded-[16px] bg-rd-surface p-4 space-y-3" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+          <div className="flex items-center justify-between">
+            <p className="text-[15px] text-rd-label-primary">CMS RVU file</p>
+            <span className="text-[13px] text-rd-label-secondary">
+              {cptCount !== null ? `${cptCount.toLocaleString()} codes` : 'Loading…'}
+            </span>
+          </div>
+          <input ref={rvuFileRef} type="file" aria-label="Select CMS RVU file" accept=".zip,.csv,.txt" onChange={handleRvuFileImport} className="hidden" />
+          <button
+            onClick={() => rvuFileRef.current?.click()}
+            disabled={importing}
+            className="min-h-10 w-full rounded-[10px] bg-rd-bg text-[13px] font-medium text-rd-label-primary disabled:opacity-50"
+          >
+            {importing ? 'Importing…' : 'Select PPRRVU ZIP or CSV'}
+          </button>
+          {importError && <p className="text-[13px] text-red-400">{importError}</p>}
+          {importResult && (
+            <p className="text-[13px] text-rd-label-secondary">
+              {importResult.success ? 'Import complete' : 'Import failed'} — added {importResult.rowsAdded}, updated {importResult.rowsUpdated}
             </p>
-            {institutionImportSummary.warnings.length > 0 && (
-              <div className="space-y-1">
-                {institutionImportSummary.warnings.map((warning) => (
-                  <p key={warning} className="text-xs text-amber-300">{warning}</p>
-                ))}
-              </div>
+          )}
+          <button onClick={handleResetCpt} className="text-[13px] text-rd-label-secondary">
+            Reset to built-in seed data
+          </button>
+        </div>
+
+        <details className="rounded-[16px] bg-rd-surface p-4" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+          <summary className="cursor-pointer text-[15px] text-rd-label-primary">
+            Institution procedure mappings {institutionMappings.length > 0 && `(${institutionMappings.length})`}
+          </summary>
+          <div className="mt-3 space-y-3">
+            <p className="text-[13px] text-rd-label-secondary">Local MR, US, and CT procedure-to-CPT mappings. These outrank generic CMS fuzzy matching.</p>
+            <input ref={institutionFileRef} type="file" aria-label="Upload institution procedure mappings" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleInstitutionMappingImport} className="hidden" />
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => institutionFileRef.current?.click()} disabled={institutionImporting} className="rounded-[8px] bg-rd-bg px-3 py-2 text-[13px] font-medium text-rd-label-primary disabled:opacity-50">
+                {institutionImporting ? 'Importing…' : 'Upload .xlsx'}
+              </button>
+              {institutionMappings.length > 0 && (
+                <button onClick={handleClearInstitutionMappings} className="rounded-[8px] px-3 py-2 text-[13px] font-medium text-red-400">
+                  Clear mappings
+                </button>
+              )}
+            </div>
+            {institutionImportError && <p className="text-[13px] text-red-400">{institutionImportError}</p>}
+            {institutionImportSummary && (
+              <p className="text-[13px] text-rd-label-secondary">
+                {institutionImportSummary.totalRows} rows · {institutionImportSummary.mappedRows} mapped
+              </p>
             )}
           </div>
-        )}
-      </div>
+        </details>
 
-      {/* Radiology Exam Dictionary */}
-      <div className="card space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Radiology Exam Dictionary</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Canonical exams, local synonyms, PowerScribe names, CPT groups, and modifier 26 wRVUs.
-            </p>
-          </div>
-          <span className="text-xs text-slate-500 shrink-0">{examDictionary?.length ?? 0} exams</span>
-        </div>
-        {(examDictionary?.length ?? 0) === 0 ? (
-          <div className="text-center py-6 text-slate-500 text-xs">
-            No dictionary entries yet. Approved OCR corrections will seed canonical entries over time.
-          </div>
-        ) : (
-          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {(examDictionary ?? []).map((entry) => {
-              const aliases = [
-                ...entry.commonSynonyms,
-                ...entry.hospitalAliases,
-                ...entry.powerScribeNames,
-              ];
-              return (
-                <div key={entry.id} className="rounded-xl border border-white/8 bg-white/3 p-3 space-y-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-white truncate">{entry.canonicalDisplayName}</p>
-                      {entry.cmsDescription && (
-                        <p className="text-[10px] text-slate-500 truncate">{entry.cmsDescription}</p>
-                      )}
-                    </div>
-                    <span className="text-[10px] text-slate-500 shrink-0">
-                      {entry.modality}{entry.bodyRegion ? ` · ${entry.bodyRegion}` : ''}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {entry.cptCodes.length === 0 ? (
-                      <span className="text-[10px] text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                        Reference only - no CPT
-                      </span>
-                    ) : (
-                      entry.cptCodes.map((code) => (
-                        <span key={code} className="font-mono text-[10px] text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded">
-                          {code}
-                        </span>
-                      ))
-                    )}
-                    {entry.modifier26Wrvu != null && (
-                      <span className="text-[10px] text-emerald-400">{entry.modifier26Wrvu.toFixed(2)} wRVU</span>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-slate-500">
-                    Aliases: {aliases.length ? aliases.join(' · ') : 'None yet'}
-                  </p>
+        <details className="rounded-[16px] bg-rd-surface p-4" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+          <summary className="cursor-pointer text-[15px] text-rd-label-primary">
+            Radiology exam dictionary {examDictionary && `(${examDictionary.length})`}
+          </summary>
+          <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+            {(examDictionary?.length ?? 0) === 0 ? (
+              <p className="text-[13px] text-rd-label-secondary">No dictionary entries yet.</p>
+            ) : (
+              (examDictionary ?? []).map((entry) => (
+                <div key={entry.id} className="rounded-[10px] bg-rd-bg p-2.5">
+                  <p className="truncate text-[13px] font-medium text-rd-label-primary">{entry.canonicalDisplayName}</p>
+                  <p className="text-[12px] text-rd-label-secondary">{entry.cptCodes.join(' · ') || 'Reference only'}</p>
                 </div>
-              );
-            })}
+              ))
+            )}
           </div>
-        )}
-      </div>
+        </details>
 
-      {/* PowerScribe Capture / PHI Protection */}
-      <div className="card space-y-4">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-white uppercase tracking-wider">PowerScribe Capture</h2>
-          <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-            style={{ background: 'rgba(91,184,212,0.15)', color: theme.colors.accent, border: `1px solid rgba(91,184,212,0.25)` }}>
-            PHI Protection
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3">
-          {[
-            ['autoImportClipboardScreenshots', 'Automatically import screenshots from clipboard', 'When this app is focused, pasted PowerScribe screenshots can go directly into Capture.'],
-            ['alwaysProcessPowerScribeClipboard', 'Automatically process detected PowerScribe captures', 'Skip the Process/Ignore confirmation for future pasted PowerScribe screenshots.'],
-            ['clearClipboardAfterImport', 'Clear clipboard after import', 'Requested behavior for desktop wrapper support; browsers may block clipboard clearing.'],
-          ].map(([key, label, description]) => (
-            <label key={key} className="flex items-center justify-between gap-3 cursor-pointer select-none">
+        <details className="rounded-[16px] bg-rd-surface p-4" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+          <summary className="cursor-pointer text-[15px] text-rd-label-primary">PowerScribe capture</summary>
+          <div className="mt-3 space-y-3">
+            {[
+              ['autoImportClipboardScreenshots', 'Automatically import screenshots from clipboard', 'When this app is focused, pasted PowerScribe screenshots can go directly into Capture.'],
+              ['alwaysProcessPowerScribeClipboard', 'Automatically process detected captures', 'Skip the Process/Ignore confirmation for future pasted screenshots.'],
+              ['clearClipboardAfterImport', 'Clear clipboard after import', 'Requested for desktop wrapper support; browsers may block clipboard clearing.'],
+            ].map(([key, label, description]) => (
+              <label key={key} className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[15px] text-rd-label-primary">{label}</p>
+                  <p className="text-[13px] text-rd-label-secondary">{description}</p>
+                </div>
+                <input
+                  type="checkbox"
+                  aria-label={label}
+                  checked={Boolean((settings as any)?.[key])}
+                  onChange={async () => {
+                    const s = await ensureUserSettings();
+                    await db.userSettings.put({ ...s, [key]: !(s as any)[key], updatedAt: new Date().toISOString() });
+                  }}
+                  className="size-5 accent-[color:var(--rd-accent)]"
+                />
+              </label>
+            ))}
+            <label className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm text-white font-medium">{label}</p>
-                <p className="text-xs text-slate-500 mt-0.5">{description}</p>
+                <p className="text-[15px] text-rd-label-primary">Require crop before OCR</p>
+                <p className="text-[13px] text-rd-label-secondary">
+                  {settings?.requireCropBeforeOcr !== false ? 'On — protects patient identifiers' : 'Off — full photos sent to OCR without PHI removal'}
+                </p>
               </div>
               <input
                 type="checkbox"
-                checked={Boolean((settings as any)?.[key])}
+                aria-label="Require crop before OCR"
+                checked={settings?.requireCropBeforeOcr !== false}
                 onChange={async () => {
-                  const s = await ensureUserSettings();
-                  await db.userSettings.put({ ...s, [key]: !Boolean((s as any)[key]), updatedAt: new Date().toISOString() });
+                  const s = settings;
+                  if (!s) return;
+                  const newVal = s.requireCropBeforeOcr === false ? true : false;
+                  if (!newVal) {
+                    const ok = window.confirm(
+                      'PHI warning\n\nDisabling crop before OCR may expose patient identifiers.\n\n' +
+                      'Full PowerScribe screenshots contain: patient name, MRN, DOB, room number, and account number.\n\n' +
+                      'Only disable this in fully de-identified demo/testing scenarios.\n\nContinue?',
+                    );
+                    if (!ok) return;
+                  }
+                  await db.userSettings.put({ ...s, requireCropBeforeOcr: newVal, updatedAt: new Date().toISOString() });
                 }}
-                className="h-4 w-4 accent-sky-500"
+                className="size-5 accent-[color:var(--rd-accent)]"
               />
             </label>
-          ))}
-        </div>
-        <p className="text-xs text-slate-400 leading-relaxed">
-          When photographing the PowerScribe list from a phone, mandatory cropping
-          ensures patient identifiers (name, MRN, DOB, room) are excluded before
-          OCR runs. For workstation use, copy a PowerScribe window grab and paste it
-          into PowerScribe Capture. This setting should remain <strong className="text-white">ON</strong> in
-          all clinical environments.
-        </p>
-
-        {/* Require crop toggle */}
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm text-white font-medium">Require crop before OCR</p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {settings?.requireCropBeforeOcr !== false
-                ? 'ON — mandatory crop step protects patient identifiers'
-                : '⚠ OFF — full photos sent to OCR without PHI removal'}
+            <p className="text-[13px] leading-relaxed text-rd-label-secondary">
+              Original photos are deleted immediately after crop is confirmed, cropped images are cleared from memory after OCR
+              completes, nothing is saved to camera roll/disk/cloud, and OCR runs entirely on-device.
             </p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer shrink-0">
-            <input
-              type="checkbox"
-              className="sr-only"
-              checked={settings?.requireCropBeforeOcr !== false}
-              onChange={async () => {
-                const s = settings;
-                if (!s) return;
-                const newVal = s.requireCropBeforeOcr === false ? true : false;
-                if (!newVal) {
-                  // Confirm before disabling
-                  const ok = window.confirm(
-                    '⚠ PHI Warning\n\n' +
-                    'Disabling crop before OCR may expose patient identifiers.\n\n' +
-                    'Full PowerScribe screenshots contain: patient name, MRN, DOB, room number, and account number.\n\n' +
-                    'Only disable this in fully de-identified demo/testing scenarios.\n\n' +
-                    'Continue?',
-                  );
-                  if (!ok) return;
-                }
-                await db.userSettings.put({ ...s, requireCropBeforeOcr: newVal, updatedAt: new Date().toISOString() });
-              }}
-            />
-            <div
-              className="w-11 h-6 rounded-full transition-colors duration-200"
-              style={{
-                background: settings?.requireCropBeforeOcr !== false ? theme.colors.primary : theme.colors.bgDeep,
-                border: `1px solid ${settings?.requireCropBeforeOcr !== false ? theme.colors.primary : theme.colors.border}`,
-              }}
-            >
-              <span
-                className="inline-block h-4 w-4 rounded-full bg-white shadow transition-transform mt-0.5"
-                style={{ transform: settings?.requireCropBeforeOcr !== false ? 'translateX(22px)' : 'translateX(2px)' }}
-              />
-            </div>
-          </label>
+        </details>
+
+        <div className="rounded-[16px] p-4 space-y-3" style={{ background: 'rgba(255,59,48,0.08)' }}>
+          <p className="text-[15px] font-semibold text-red-400">Danger zone</p>
+          <p className="text-[13px] text-rd-label-secondary">All data is stored locally in your browser. Clearing browser data will delete everything.</p>
+          <button onClick={handleClearData} className="rounded-[10px] px-4 py-2 text-[13px] font-semibold text-red-400" style={{ background: 'rgba(255,59,48,0.12)' }}>
+            Delete all study logs
+          </button>
         </div>
 
-        {settings?.requireCropBeforeOcr === false && (
-          <div className="px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/25">
-            <p className="text-red-400 text-xs font-medium">
-              ⚠ Crop requirement is disabled. Enable it before using PowerScribe Capture in a clinical setting.
-            </p>
-          </div>
-        )}
-
-        {/* Privacy summary */}
-        <div className="px-3 py-2.5 rounded-xl bg-emerald-500/8 border border-emerald-500/20">
-          <p className="text-emerald-400 text-xs font-medium mb-1">Privacy guarantees (always enforced)</p>
-          <ul className="text-emerald-300/60 text-xs space-y-0.5">
-            <li>• Original photo deleted immediately after crop is confirmed</li>
-            <li>• Cropped image cleared from memory after OCR completes</li>
-            <li>• No image saved to camera roll, disk, or cloud</li>
-            <li>• All OCR runs locally — no external API calls</li>
-          </ul>
-        </div>
-      </div>
-
-      {/* Danger zone */}
-      <div className="card space-y-3 border-red-500/20">
-        <h2 className="text-sm font-semibold text-red-400 uppercase tracking-wider">Danger Zone</h2>
-        <p className="text-xs text-slate-400">
-          All data is stored locally in your browser (IndexedDB). Clearing browser data will delete everything.
+        <p className="px-1 text-[13px] leading-relaxed text-rd-label-secondary">
+          wRVU Tracker — personal productivity tool for radiologists. All data is stored on-device. Not for billing, coding, or compliance.
+          Built on CY2026 CMS PPRRVU data.
         </p>
-        <button
-          onClick={handleClearData}
-          className="px-4 py-2 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm hover:bg-red-500/20 transition-colors"
-        >
-          Delete All Study Logs
-        </button>
-      </div>
-
-      {/* About */}
-      <div className="card space-y-2">
-        <h2 className="text-sm font-semibold text-white uppercase tracking-wider">About</h2>
-        <p className="text-xs text-slate-400">
-          wRVU Tracker — personal productivity tool for radiologists.
-          All data is stored on-device. Not for billing, coding, or compliance.
-        </p>
-        <p className="text-xs text-slate-500">Built on CY2026 CMS PPRRVU data.</p>
-      </div>
+      </section>
     </div>
   );
 }

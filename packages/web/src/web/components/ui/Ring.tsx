@@ -59,10 +59,16 @@ export function Ring({ percent, size = 220, strokeWidth = 16, children, label, c
   );
 }
 
-/** Count-up number, 300ms, respects prefers-reduced-motion via CSS. */
+/** Count-up number, 300ms. This is a JS value animation (setState), not CSS —
+ *  it has to check prefers-reduced-motion itself rather than rely on a
+ *  stylesheet media query, which can't reach into a raf-driven state loop. */
 export function useCountUp(target: number, durationMs = 300): number {
   const [value, setValue] = useState(target);
   useEffect(() => {
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setValue(target);
+      return;
+    }
     const from = value;
     if (Math.abs(target - from) < 0.05) {
       setValue(target);

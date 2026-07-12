@@ -301,6 +301,11 @@ export function Today({ onNavigate }: TodayProps) {
             {formatMinutes(metrics.elapsedWorkMinutes)} elapsed · {formatMinutes(metrics.remainingWorkMinutes)} remaining
           </p>
         )}
+        {settings?.estimatedCompPerWrvu != null && settings.estimatedCompPerWrvu > 0 && (
+          <p className="text-[13px] text-rd-label-secondary">
+            ≈ ${(metrics.currentRvu * settings.estimatedCompPerWrvu).toLocaleString('en-US', { maximumFractionDigits: 0 })} earned today
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-3">
