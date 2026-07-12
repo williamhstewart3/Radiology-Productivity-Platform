@@ -3,6 +3,79 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ── Redesign token system (Apple-grade UI modernization) ────────────── */
+/* Single source of truth for the new component library in                */
+/* components/ui/ and the Today/Trends/Log/Codes/Settings screens.         */
+/* Namespaced "rd-*" to avoid colliding with the legacy Baptist theme      */
+/* (--theme-*) and shadcn tokens (--color-*) used by not-yet-migrated      */
+/* screens during the phased rollout.                                     */
+@theme {
+  --color-rd-bg:             var(--rd-bg);
+  --color-rd-surface:        var(--rd-surface);
+  --color-rd-label-primary:   var(--rd-label-primary);
+  --color-rd-label-secondary: var(--rd-label-secondary);
+  --color-rd-accent:         var(--rd-accent);
+  --color-rd-positive:       var(--rd-positive);
+  --color-rd-caution:        var(--rd-caution);
+  --color-rd-separator:      var(--rd-separator);
+  --font-rd-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+}
+
+:root {
+  --rd-bg:             #F5F5F7;
+  --rd-surface:        #FFFFFF;
+  --rd-label-primary:   #1D1D1F;
+  --rd-label-secondary: #6E6E73;
+  --rd-accent:         #0A6CFF;
+  --rd-positive:       #34C759;
+  --rd-caution:        #FF9F0A;
+  --rd-separator:      rgba(60,60,67,0.12);
+  --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.06);
+  --rd-radius-card:    16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --rd-bg:             #000000;
+    --rd-surface:        #1C1C1E;
+    --rd-label-primary:   #F5F5F7;
+    --rd-label-secondary: #98989D;
+    --rd-accent:         #0A6CFF;
+    --rd-positive:       #30D158;
+    --rd-caution:        #FF9F0A;
+    --rd-separator:      rgba(84,84,88,0.6);
+    --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.4);
+  }
+}
+
+/* Explicit overrides win over prefers-color-scheme so Settings > Appearance
+   can force light/dark independent of the OS setting; "auto" = no class. */
+:root.rd-light {
+  --rd-bg:             #F5F5F7;
+  --rd-surface:        #FFFFFF;
+  --rd-label-primary:   #1D1D1F;
+  --rd-label-secondary: #6E6E73;
+  --rd-positive:       #34C759;
+  --rd-separator:      rgba(60,60,67,0.12);
+  --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.06);
+}
+:root.rd-dark {
+  --rd-bg:             #000000;
+  --rd-surface:        #1C1C1E;
+  --rd-label-primary:   #F5F5F7;
+  --rd-label-secondary: #98989D;
+  --rd-positive:       #30D158;
+  --rd-separator:      rgba(84,84,88,0.6);
+  --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rd-motion-safe {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

@@ -1,27 +1,26 @@
 import { useState, useEffect, Component } from 'react';
-import type { ComponentType, ReactNode } from 'react';
-import { Route, Switch } from 'wouter';
+import type { ReactNode } from 'react';
+import { Route, Switch, Redirect, useLocation, Link } from 'wouter';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAppInitialization } from './hooks/useAppInitialization';
 import { OrgProvider } from './contexts/OrgContext';
-import { OrgSwitcher } from './components/OrgSwitcher';
 import { useOrg } from './hooks/useOrg';
 import { DailyPaceDashboard } from './components/DailyPaceDashboard';
 import { MiniPaceWindow } from './components/MiniPaceWindow';
+import { ProfileSwitcherButton } from './components/ProfileSwitcherSheet';
 import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
+import { SidebarNav, BottomTabBar, type TabItem } from './components/ui/TabBar';
 import {
   Bell,
-  BarChart3,
-  ChevronRight,
-  History as HistoryIcon,
-  LayoutDashboard,
+  ClipboardList,
+  Gauge,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
   Settings as SettingsIcon,
   Sun,
-  UploadCloud,
+  TrendingUp,
 } from 'lucide-react';
 import { LogStudy } from './pages/LogStudy';
 import { Import } from './pages/Import';
@@ -37,50 +36,41 @@ import { AnalyticsPage } from './pages/ProductDashboards';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 
-type Tab =
-  | 'dashboard'
-  | 'analytics'
-  | 'automation'
-  | 'log'
-  | 'import'
-  | 'history'
-  | 'settings'
-  | 'locations'
-  | 'profiles'
-  | 'camera'
-  | 'explorer'
-  | 'admin';
+// ─── Nav: 5 destinations on real Wouter routes ──────────────────────────────
+// Today/Trends/Log/Codes/Settings per the UI modernization spec. History,
+// Camera, manual Log entry, Profiles, Locations, Admin Data, and Automation
+// aren't primary destinations but stay reachable via secondary routes linked
+// from within Trends/Log/Settings — nothing from the pre-redesign nav is lost.
+const TAB_ITEMS: TabItem[] = [
+  { path: '/today', label: 'Today', icon: Gauge },
+  { path: '/trends', label: 'Trends', icon: TrendingUp },
+  { path: '/log', label: 'Log', icon: ClipboardList },
+  { path: '/codes', label: 'Codes', icon: Search },
+  { path: '/settings', label: 'Settings', icon: SettingsIcon },
+];
 
 class PageErrorBoundary extends Component<
-  { children: ReactNode; tab: string },
+  { children: ReactNode },
   { error: Error | null }
 > {
-  constructor(props: { children: ReactNode; tab: string }) {
+  constructor(props: { children: ReactNode }) {
     super(props);
     this.state = { error: null };
   }
   static getDerivedStateFromError(error: Error) {
     return { error };
   }
-  componentDidUpdate(prev: { tab: string }) {
-    if (prev.tab !== this.props.tab && this.state.error) {
-      this.setState({ error: null });
-    }
-  }
   render() {
     if (this.state.error) {
       return (
         <div className="max-w-2xl mx-auto py-16 text-center space-y-4">
           <div className="text-4xl">⚠️</div>
-          <p className="font-semibold" style={{ color: 'var(--theme-behind)' }}>
-            Something went wrong
-          </p>
-          <p className="text-sm max-w-md mx-auto" style={{ color: 'var(--theme-text-muted)' }}>
-            {this.state.error.message}
-          </p>
+          <p className="font-semibold text-rd-label-primary">Something went wrong</p>
+          <p className="text-sm max-w-md mx-auto text-rd-label-secondary">{this.state.error.message}</p>
           <button
             onClick={() => this.setState({ error: null })}
-            className="px-4 py-2 rounded-lg text-sm font-medium btn-primary"
+            className="px-4 py-2 rounded-lg text-sm font-medium text-white"
+            style={{ background: 'var(--rd-accent)' }}
           >
             Retry
           </button>
@@ -90,15 +80,6 @@ class PageErrorBoundary extends Component<
     return this.props.children;
   }
 }
-
-const NAV_ITEMS: { id: Tab; label: string; icon: ComponentType<{ className?: string }> }[] = [
-  { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
-  { id: 'import',    label: 'Capture', icon: UploadCloud },
-  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-  { id: 'history',   label: 'History',    icon: HistoryIcon },
-  { id: 'explorer',  label: 'CPT Library', icon: Search },
-  { id: 'settings',  label: 'Settings',   icon: SettingsIcon },
-];
 
 function AppLoadingOverlay() {
   const easeOut: [number, number, number, number] = [0.16, 1, 0.3, 1];
@@ -124,11 +105,7 @@ function AppLoadingOverlay() {
           scale: [0.985, 1, 0.985],
           transition: { duration: 2, repeat: Infinity, ease: 'easeInOut' },
         }}
-        exit={{
-          opacity: 0,
-          scale: 1.08,
-          transition: { duration: 0.45, ease: easeOut },
-        }}
+        exit={{ opacity: 0, scale: 1.08, transition: { duration: 0.45, ease: easeOut } }}
       />
     </motion.div>
   );
@@ -136,27 +113,32 @@ function AppLoadingOverlay() {
 
 function MainApp() {
   const { isReady, error } = useAppInitialization();
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [isDark, setIsDark] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { activeProfile, activePractice } = useOrg();
+  const [location, navigate] = useLocation();
 
   useEffect(() => {
     injectTheme();
   }, []);
 
   useEffect(() => {
-    if (isDark) document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
+    // Drives both the legacy Baptist theme (`.dark`) and the new token system
+    // (`.rd-dark`) so not-yet-migrated screens and the new shell stay visually
+    // coherent during the phased rollout. True light-mode support (Settings >
+    // Appearance) lands in Phase 5 — the token system already supports it.
+    document.documentElement.classList.toggle('dark', isDark);
+    document.documentElement.classList.toggle('rd-dark', isDark);
+    document.documentElement.classList.toggle('rd-light', !isDark);
   }, [isDark]);
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--theme-bg-base)' }}>
+      <div className="min-h-screen flex items-center justify-center bg-rd-bg">
         <div className="text-center space-y-4">
           <div className="text-4xl">⚠️</div>
-          <p className="font-semibold" style={{ color: 'var(--theme-behind)' }}>Initialization failed</p>
-          <p className="text-sm max-w-md" style={{ color: 'var(--theme-text-muted)' }}>{error}</p>
+          <p className="font-semibold text-rd-label-primary">Initialization failed</p>
+          <p className="text-sm max-w-md text-rd-label-secondary">{error}</p>
         </div>
       </div>
     );
@@ -164,20 +146,19 @@ function MainApp() {
 
   if (import.meta.env.SSR && !isReady) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--theme-bg-base)' }}>
+      <div className="min-h-screen flex items-center justify-center bg-rd-bg">
         <div className="text-center space-y-6">
           <div className="flex flex-col items-center gap-4">
             <BaptistLogoMark size={52} />
             <div className="flex flex-col items-center gap-1">
-              <p className="font-bold text-lg tracking-tight" style={{ color: 'var(--theme-text-primary)' }}>wRVU Tracker</p>
-              <p className="text-xs font-medium tracking-widest uppercase" style={{ color: 'var(--theme-accent)' }}>Baptist Medical Group</p>
+              <p className="font-bold text-lg tracking-tight text-rd-label-primary">wRVU Tracker</p>
             </div>
           </div>
           <div
             className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin mx-auto"
-            style={{ borderColor: `var(--theme-accent) transparent var(--theme-accent) var(--theme-accent)` }}
+            style={{ borderColor: 'var(--rd-accent) transparent var(--rd-accent) var(--rd-accent)' }}
           />
-          <p className="text-sm" style={{ color: 'var(--theme-text-muted)' }}>Loading…</p>
+          <p className="text-sm text-rd-label-secondary">Loading…</p>
         </div>
       </div>
     );
@@ -185,113 +166,143 @@ function MainApp() {
 
   const activeLocation = activePractice?.name ?? 'Current location';
 
+  // Old page components take a `(tab: string) => void` onNavigate callback.
+  // Map their legacy tab names onto the new route paths.
+  function legacyNavigate(tab: string) {
+    const map: Record<string, string> = {
+      profiles: '/settings/profiles',
+      locations: '/settings/locations',
+      admin: '/settings/admin',
+      automation: '/settings/automation',
+      dashboard: '/today',
+      history: '/trends/history',
+      import: '/log',
+      log: '/log/manual',
+      camera: '/log/camera',
+      explorer: '/codes',
+      settings: '/settings',
+    };
+    navigate(map[tab] ?? '/today');
+  }
+
   return (
     <div className={isDark ? 'dark' : ''}>
       {isReady && (
-      <div className="app-shell flex min-h-screen">
-        <aside className={`desktop-sidebar sticky top-0 hidden h-screen shrink-0 flex-col px-3 py-4 transition-[width] duration-200 lg:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[248px]'}`}>
+      <div className="app-shell flex min-h-screen bg-rd-bg">
+        <aside className={`sticky top-0 hidden h-screen shrink-0 flex-col gap-4 px-3 py-4 transition-[width] duration-200 md:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[248px]'}`}>
           <div className="flex items-center justify-between gap-2 px-1">
             {sidebarCollapsed ? <BaptistLogoMark size={34} /> : <BaptistLogoLockup size="sm" showTagline />}
             <button
               onClick={() => setSidebarCollapsed((v) => !v)}
-              className="desk-icon !h-8 !w-8 shrink-0"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full text-rd-label-secondary hover:bg-rd-surface"
               title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
               {sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
             </button>
           </div>
 
-          <nav className="mt-6 flex flex-1 flex-col gap-1 overflow-y-auto pr-1">
-            {NAV_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const active = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id)}
-                  className={`nav-rail-item ${active ? 'nav-rail-item-active' : ''} ${sidebarCollapsed ? 'justify-center px-0' : ''}`}
-                  title={sidebarCollapsed ? item.label : undefined}
-                >
-                  <Icon className="size-4 shrink-0" />
-                  {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
-                  {!sidebarCollapsed && active && <ChevronRight className="ml-auto size-4 opacity-60" />}
-                </button>
-              );
-            })}
-          </nav>
-
-          {!sidebarCollapsed && (
-            <div className="desk-card p-3">
-              <p className="section-label">Workspace</p>
-              <p className="mt-2 truncate text-sm font-medium text-[var(--theme-text-primary)]">
-                {activeProfile?.name ?? 'No radiologist'}
-              </p>
-              <p className="truncate text-xs text-[var(--theme-text-muted)]">{activeLocation}</p>
-            </div>
-          )}
+          <SidebarNav items={TAB_ITEMS} />
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
           <DisclaimerBanner />
 
-          <header className="desktop-topbar sticky top-0 z-40">
-            <div className="flex h-14 items-center justify-between gap-3 px-4 lg:px-6">
+          <header className="sticky top-0 z-30 border-b border-rd-separator bg-rd-surface">
+            <div className="flex h-14 items-center justify-between gap-3 px-4 md:px-6">
               <div className="flex min-w-0 items-center gap-3">
-                <BaptistLogoMark size={28} className="lg:hidden" />
+                <BaptistLogoMark size={28} className="md:hidden" />
                 <div className="hidden min-w-0 md:block">
-                  <p className="truncate text-sm font-medium text-[var(--theme-text-primary)]">
+                  <p className="truncate text-[15px] font-medium text-rd-label-primary">
                     {activeProfile?.name ?? 'No radiologist selected'}
                   </p>
-                  <p className="truncate text-xs text-[var(--theme-text-muted)]">{activeLocation}</p>
+                  <p className="truncate text-[13px] text-rd-label-secondary">{activeLocation}</p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
-                <OrgSwitcher onManage={() => setActiveTab('locations')} onMyProfile={() => setActiveTab('profiles')} />
-                <button className="desk-icon" title="Notifications"><Bell className="size-4" /></button>
-                <button onClick={() => setIsDark(!isDark)} className="desk-icon" title="Toggle theme">
+                <button
+                  className="flex size-9 items-center justify-center rounded-full text-rd-label-secondary hover:bg-rd-bg"
+                  title="Notifications"
+                >
+                  <Bell className="size-4" />
+                </button>
+                <button
+                  onClick={() => setIsDark(!isDark)}
+                  className="flex size-9 items-center justify-center rounded-full text-rd-label-secondary hover:bg-rd-bg"
+                  title="Toggle theme"
+                >
                   {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
                 </button>
+                <ProfileSwitcherButton onManageLocations={() => navigate('/settings/locations')} />
               </div>
             </div>
           </header>
 
-          <main className="min-h-0 flex-1 overflow-auto">
-            <div className="mx-auto w-full max-w-[1720px] px-4 py-5 lg:px-6 lg:py-6">
-              <PageErrorBoundary tab={activeTab}>
-                {activeTab === 'dashboard'     && <DailyPaceDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
-                {activeTab === 'analytics'     && <AnalyticsPage />}
-                {activeTab === 'automation'    && <Automation />}
-                {activeTab === 'log'           && <LogStudy onSaved={() => setActiveTab('dashboard')} />}
-                {activeTab === 'import'        && <Import onImported={() => setActiveTab('dashboard')} />}
-                {activeTab === 'history'       && <History />}
-                {activeTab === 'settings'      && <Settings onNavigate={(t) => setActiveTab(t as Tab)} />}
-                {activeTab === 'locations'     && <Locations onNavigate={(t) => setActiveTab(t as Tab)} />}
-                {activeTab === 'camera'        && <CameraUploadPage onImported={() => setActiveTab('dashboard')} />}
-                {activeTab === 'explorer'      && <CptExplorer onNavigate={(t) => setActiveTab(t as Tab)} />}
-                {activeTab === 'profiles'      && <Profiles onNavigate={(t) => setActiveTab(t as Tab)} initialEditId={activeProfile?.id ?? null} />}
-                {activeTab === 'admin'         && <AdminData />}
+          <main className="min-h-0 flex-1 overflow-auto pb-16 md:pb-0">
+            <div className="mx-auto w-full max-w-[1720px] px-4 py-5 md:px-6 md:py-6">
+              <PageErrorBoundary key={location}>
+                <Switch>
+                  <Route path="/">
+                    <Redirect to="/today" />
+                  </Route>
+                  <Route path="/today">
+                    <DailyPaceDashboard onNavigate={legacyNavigate} />
+                  </Route>
+                  <Route path="/trends">
+                    <div className="space-y-3">
+                      <AnalyticsPage />
+                      <Link href="/trends/history" className="inline-block text-[15px] font-medium text-rd-accent">
+                        View full history →
+                      </Link>
+                    </div>
+                  </Route>
+                  <Route path="/trends/history">
+                    <History />
+                  </Route>
+                  <Route path="/log">
+                    <div className="space-y-3">
+                      <Import onImported={() => navigate('/today')} />
+                      <div className="flex gap-4">
+                        <Link href="/log/manual" className="text-[15px] font-medium text-rd-accent">
+                          Manual entry
+                        </Link>
+                        <Link href="/log/camera" className="text-[15px] font-medium text-rd-accent">
+                          Camera
+                        </Link>
+                      </div>
+                    </div>
+                  </Route>
+                  <Route path="/log/manual">
+                    <LogStudy onSaved={() => navigate('/today')} />
+                  </Route>
+                  <Route path="/log/camera">
+                    <CameraUploadPage onImported={() => navigate('/today')} />
+                  </Route>
+                  <Route path="/codes">
+                    <CptExplorer onNavigate={legacyNavigate} />
+                  </Route>
+                  <Route path="/settings">
+                    <Settings onNavigate={legacyNavigate} />
+                  </Route>
+                  <Route path="/settings/profiles">
+                    <Profiles onNavigate={legacyNavigate} initialEditId={activeProfile?.id ?? null} />
+                  </Route>
+                  <Route path="/settings/locations">
+                    <Locations onNavigate={legacyNavigate} />
+                  </Route>
+                  <Route path="/settings/admin">
+                    <AdminData />
+                  </Route>
+                  <Route path="/settings/automation">
+                    <Automation />
+                  </Route>
+                </Switch>
               </PageErrorBoundary>
             </div>
           </main>
-
-          <nav className="desktop-topbar sticky bottom-0 z-40 grid grid-cols-6 gap-1 px-2 py-2 lg:hidden">
-            {NAV_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const active = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id)}
-                  className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[10px] font-medium transition-colors ${active ? 'bg-cyan-400/10 text-cyan-200' : 'text-slate-500'}`}
-                >
-                  <Icon className="size-4" />
-                  <span className="max-w-full truncate">{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
         </div>
+
+        <BottomTabBar items={TAB_ITEMS} />
       </div>
       )}
       <AnimatePresence>
