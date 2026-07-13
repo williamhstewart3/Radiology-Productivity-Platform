@@ -7,11 +7,38 @@ import { computeByModality, computePeriodTotals, computeYtdStats, topModalitySha
 import { buildInsightStories, buildTimelineBuckets, lensStart, type CustomRange, type HistoryLens } from '../utils/historyTimeline';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { MatchSourceFootnote } from '../components/ui/MatchSourceFootnote';
+import { RecentBatches } from '../components/RecentBatches';
+import { StudyDetailSheet } from '../components/StudyDetailSheet';
+import { listRecentBatches, undoBatch, type RecentBatch } from '../services/studyLogService';
 import type { CptRvuRow, StudyLog } from '../types';
 
 function isDeleted(log: StudyLog): boolean { return Boolean((log as StudyLog & { deletedAt?: string }).deletedAt); }
 function title(log: StudyLog): string { return log.examTitleDisplay?.trim() || log.examNameRaw; }
 function shortDate(date: string): string { return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
+
+/** Combo (multi-CPT) commits share one sessionId across their StudyLog rows -- group them back into one line. */
+function groupBySession(rows: StudyLog[]): StudyLog[][] {
+  const bySession = new Map<string, StudyLog[]>();
+  for (const log of rows) {
+    if (!log.sessionId) continue;
+    const arr = bySession.get(log.sessionId) ?? [];
+    arr.push(log);
+    bySession.set(log.sessionId, arr);
+  }
+  const groups: StudyLog[][] = [];
+  const emitted = new Set<string>();
+  for (const log of rows) {
+    const combo = log.sessionId ? bySession.get(log.sessionId) : undefined;
+    if (combo && combo.length > 1) {
+      if (emitted.has(log.sessionId!)) continue;
+      emitted.add(log.sessionId!);
+      groups.push(combo);
+    } else {
+      groups.push([log]);
+    }
+  }
+  return groups;
+}
 
 function DayGoalBar({ rvu, goal }: { rvu: number; goal: number }) {
   if (goal <= 0) return null;
@@ -71,6 +98,13 @@ export function TimelineHistory({ onOpenLegacy }: { onOpenLegacy: () => void }) 
   const ytd = lens === 'year' && settings ? computeYtdStats(logs, settings) : null;
   const goalLine = lens === 'year' ? (activeProfile?.annualRvuGoal ?? 0) / 12 : (activeProfile?.dailyRvuGoal ?? 0);
   const dailyGoal = activeProfile?.dailyRvuGoal ?? 0;
+  const [detailLogs, setDetailLogs] = useState<StudyLog[] | null>(null);
+
+  const recentBatches = useLiveQuery(
+    () => listRecentBatches(profileId, today),
+    [profileId, today],
+    [] as RecentBatch[],
+  );
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -118,6 +152,8 @@ export function TimelineHistory({ onOpenLegacy }: { onOpenLegacy: () => void }) 
       )}
       {drillDate && <button type="button" onClick={() => setDrillDate(null)} className="min-h-11 text-[13px] text-rd-label-primary">← Back to {lens}</button>}
 
+      {lens === 'day' && <RecentBatches batches={recentBatches} onUndo={(batch) => void undoBatch(batch, profileId)} />}
+
       <div className="rounded-[16px] bg-rd-surface p-4" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={buckets} onClick={(state) => { const bucket = buckets.find((item) => item.label === state?.activeLabel); if (bucket && lens !== 'year') setDrillDate(bucket.key); }}>
@@ -139,12 +175,17 @@ export function TimelineHistory({ onOpenLegacy }: { onOpenLegacy: () => void }) 
           <span className="text-[13px] font-semibold text-rd-label-primary">{new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
           <DayGoalBar rvu={dayRvu} goal={dailyGoal} />
           <span className="text-[13px] text-rd-label-secondary [font-variant-numeric:tabular-nums]">{dayRvu.toFixed(1)} · {rows.length} studies{topModality ? ` · ${topModality.label} ${topModality.percent.toFixed(0)}%` : ''}</span>
-        </header>{rows.map((log) => {
+        </header>{groupBySession(rows).map((comboLogs) => {
+          const log = comboLogs[0];
           const current = currentByCode.get(`${log.cptCode}-${log.modifier}`);
           const historical = current?.workRvu != null && log.workRvu != null && Math.abs(current.workRvu - log.workRvu) > 0.001;
-          return <div key={log.id} className="rd-row grid grid-cols-[62px_1fr_auto] items-center gap-3 border-b border-rd-separator px-1 text-[13px]"><span className="font-mono text-rd-label-secondary">{log.studyDateTime ? new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}</span><span className="min-w-0 truncate text-rd-label-primary">{title(log)} <span className="font-mono text-rd-label-secondary">{log.cptCode}</span> <MatchSourceFootnote method={log.matchMethod} /> {log.dateTimeSource === 'import_default' && <span className="text-rd-caution">inferred</span>} {historical && <span className="rounded bg-rd-surface-2 px-1.5 text-[11px] text-rd-label-secondary">{new Date(log.createdAt).getFullYear()} table</span>} {log.sourceImportId && <span className="text-[11px] text-rd-label-secondary">batch</span>}</span><span className="font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">{log.workRvu?.toFixed(2) ?? '—'}</span></div>;
+          const cptDisplay = comboLogs.length > 1 ? comboLogs.map((l) => l.cptCode).filter(Boolean).join(' + ') : log.cptCode;
+          const wrvuDisplay = comboLogs.length > 1 ? comboLogs.reduce((sum, l) => sum + (l.workRvu ?? 0), 0).toFixed(2) : (log.workRvu?.toFixed(2) ?? '—');
+          return <button type="button" key={log.sessionId ?? log.id} onClick={() => setDetailLogs(comboLogs)} className="rd-row grid w-full grid-cols-[62px_1fr_auto] items-center gap-3 border-b border-rd-separator px-1 text-left text-[13px] hover:bg-rd-surface-2"><span className="font-mono text-rd-label-secondary">{log.studyDateTime ? new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}</span><span className="min-w-0 truncate text-rd-label-primary">{title(log)} <span className="font-mono text-rd-label-secondary">{cptDisplay}</span> <MatchSourceFootnote method={log.matchMethod} /> {log.dateTimeSource === 'import_default' && <span className="text-rd-caution">inferred</span>} {historical && <span className="rounded bg-rd-surface-2 px-1.5 text-[11px] text-rd-label-secondary">{new Date(log.createdAt).getFullYear()} table</span>} {log.sourceImportId && <span className="text-[11px] text-rd-label-secondary">batch</span>}</span><span className="font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">{wrvuDisplay}</span></button>;
         })}</section>;
       })}
+
+      <StudyDetailSheet open={detailLogs != null} logs={detailLogs} onClose={() => setDetailLogs(null)} profileId={profileId} />
     </div>
   );
 }
