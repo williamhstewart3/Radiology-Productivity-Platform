@@ -1,9 +1,11 @@
 import type { StudyLog } from '../types';
 
-export type HistoryLens = 'day' | 'month' | 'year';
+export type HistoryLens = 'day' | 'month' | 'year' | 'custom';
 export interface TimelineBucket { key: string; label: string; rvu: number; studies: number }
+export interface CustomRange { start: string; end: string }
 
-export function lensStart(lens: HistoryLens, today: string, dayLensDays = 7): string {
+export function lensStart(lens: HistoryLens, today: string, dayLensDays = 7, customRange?: CustomRange): string {
+  if (lens === 'custom') return customRange?.start ?? today;
   const date = new Date(`${today}T12:00:00`);
   if (lens === 'day') date.setDate(date.getDate() - (dayLensDays - 1));
   else if (lens === 'month') date.setDate(1);
@@ -11,7 +13,7 @@ export function lensStart(lens: HistoryLens, today: string, dayLensDays = 7): st
   return date.toISOString().slice(0, 10);
 }
 
-export function buildTimelineBuckets(lens: HistoryLens, logs: StudyLog[], today: string, dayLensDays = 7): TimelineBucket[] {
+export function buildTimelineBuckets(lens: HistoryLens, logs: StudyLog[], today: string, dayLensDays = 7, customRange?: CustomRange): TimelineBucket[] {
   const counted = logs.filter((log) => !log.needsReview);
   if (lens === 'year') {
     const year = today.slice(0, 4);
@@ -21,8 +23,9 @@ export function buildTimelineBuckets(lens: HistoryLens, logs: StudyLog[], today:
       return { key, label: new Date(`${key}-01T12:00:00`).toLocaleDateString('en-US', { month: 'short' }), rvu: rows.reduce((sum, log) => sum + (log.workRvu ?? 0), 0), studies: rows.length };
     });
   }
-  const start = new Date(`${lensStart(lens, today, dayLensDays)}T12:00:00`);
-  const end = new Date(`${today}T12:00:00`);
+  const rangeEnd = lens === 'custom' ? (customRange?.end ?? today) : today;
+  const start = new Date(`${lensStart(lens, today, dayLensDays, customRange)}T12:00:00`);
+  const end = new Date(`${rangeEnd}T12:00:00`);
   const buckets: TimelineBucket[] = [];
   for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
     const key = date.toISOString().slice(0, 10);
