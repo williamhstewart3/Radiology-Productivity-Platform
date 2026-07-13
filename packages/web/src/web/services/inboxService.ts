@@ -9,7 +9,47 @@ import {
   loadActiveReviewSession,
   persistActiveReviewSession,
 } from './reviewSessionService';
-import type { MatchMethod } from '../types';
+import type { ActiveReviewSession, MatchMethod } from '../types';
+
+export interface InboxAccounting {
+  totalRows: number;
+  readyCount: number;
+  possibleDuplicateCount: number;
+  needsCptCount: number;
+}
+
+/**
+ * The Inbox header's permanent batch-accounting line — every field comes
+ * straight off the session summary (already computed by
+ * summarizeReviewSession) and the pending rows already loaded for the card
+ * queue. No parallel counting, no new pipeline fields.
+ */
+export function summarizeInboxAccounting(
+  session: Pick<ActiveReviewSession, 'totalExams' | 'needsReviewCount'> | null,
+  pending: PipelineReviewRow[],
+): InboxAccounting | null {
+  if (!session || session.totalExams === 0) return null;
+  return {
+    totalRows: session.totalExams,
+    readyCount: session.totalExams - session.needsReviewCount,
+    possibleDuplicateCount: pending.filter((row) => row.duplicateStatus === 'possible').length,
+    needsCptCount: pending.filter((row) => row.duplicateStatus !== 'possible' && row.candidates.length === 0).length,
+  };
+}
+
+export function formatInboxAccounting(accounting: InboxAccounting): string {
+  const parts = [
+    `${accounting.totalRows} row${accounting.totalRows === 1 ? '' : 's'}`,
+    `${accounting.readyCount} ready`,
+  ];
+  if (accounting.possibleDuplicateCount > 0) {
+    parts.push(`${accounting.possibleDuplicateCount} possible duplicate${accounting.possibleDuplicateCount === 1 ? '' : 's'}`);
+  }
+  if (accounting.needsCptCount > 0) {
+    parts.push(`${accounting.needsCptCount} needs CPT`);
+  }
+  return parts.join(' · ');
+}
 
 export type ConfidencePhrase =
   | 'Learned match'

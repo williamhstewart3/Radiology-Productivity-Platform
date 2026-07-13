@@ -1,7 +1,22 @@
 import { useEffect, useState } from 'react';
-import type { PipelineReviewRow } from '../pipeline/importPipeline';
+import { selectedCandidatesForRow, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { confidencePhrase } from '../services/inboxService';
+import type { ImportSource } from '../types/importProvider';
 import { KeyHint } from './ui/KeyHint';
+
+const SOURCE_LABELS: Record<ImportSource, string> = {
+  ocr: 'Screenshot',
+  csv: 'CSV',
+  manual: 'Manual',
+  powerscribe: 'PowerScribe',
+};
+
+function shortTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
 
 export function AttentionCard({ row, active, onAccept, onSkip, onChangeCode, expandRequest }: {
   row: PipelineReviewRow;
@@ -14,7 +29,12 @@ export function AttentionCard({ row, active, onAccept, onSkip, onChangeCode, exp
   const [expanded, setExpanded] = useState(false);
   const selectedIndex = row.selectedCandidateIndex ?? row.selectedCandidateIndices?.[0] ?? null;
   const candidate = selectedIndex == null ? row.candidates[0] : row.candidates[selectedIndex];
+  const selectedCandidates = selectedCandidatesForRow(row);
+  const chips = selectedCandidates.length > 0 ? selectedCandidates : candidate ? [candidate] : [];
   const phrase = confidencePhrase(candidate?.method, Boolean(candidate));
+  const examTime = shortTime(row.source.studyTime ?? row.source.examDateTime);
+  const readTime = shortTime(row.source.modifiedDateTime);
+  const sourceLabel = SOURCE_LABELS[row.source.source];
   useEffect(() => { if (expandRequest) setExpanded(true); }, [expandRequest]);
 
   return (
@@ -27,14 +47,29 @@ export function AttentionCard({ row, active, onAccept, onSkip, onChangeCode, exp
             <div className="border-r border-rd-separator p-3"><span className="block text-rd-label-secondary">already counted</span>{row.duplicateReason ?? 'Matching study'}</div>
             <div className="p-3"><span className="block text-rd-label-secondary">this capture</span>{row.source.modifiedDateTime ?? row.source.studyTime ?? 'Time unavailable'}</div>
           </div>
+          <p className="text-[12px] text-rd-label-secondary">{sourceLabel}{examTime ? ` · Exam ${examTime}` : ''}{readTime ? ` · Read ${readTime}` : ''}</p>
         </div>
       ) : (
         <div className="space-y-3">
           <p className="font-mono text-[15px] text-rd-label-secondary">“{row.source.procedureName ?? row.source.examTitle}”</p>
           <div>
             <p className="text-[22px] font-semibold text-rd-label-primary">{candidate?.description ?? 'Choose a code'}</p>
-            <p className="font-mono text-[15px] text-rd-label-secondary">{candidate ? `${candidate.cptCode} · ${candidate.workRvu?.toFixed(2) ?? '—'} wRVU` : 'No CPT selected'}</p>
+            {chips.length > 0 ? (
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {chips.map((option, index) => (
+                  <span key={`${option.cptCode}-${index}`} className="rounded-full bg-rd-surface-2 px-2.5 py-1 font-mono text-[13px] text-rd-label-primary">
+                    {option.cptCode} · {option.workRvu?.toFixed(2) ?? '—'}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="font-mono text-[15px] text-rd-label-secondary">No CPT selected</p>
+            )}
           </div>
+          <p className="text-[12px] text-rd-label-secondary">
+            {sourceLabel}{examTime ? ` · Exam ${examTime}` : ''}{readTime ? ` · Read ${readTime}` : ''}
+          </p>
+          {row.reviewReason && <p className="text-[12px] text-rd-label-secondary">{row.reviewReason}</p>}
           <button type="button" onClick={() => setExpanded((value) => !value)} className="min-h-11 text-left text-[13px] font-medium text-rd-caution" aria-expanded={expanded}>
             {phrase} {expanded ? '⌃' : '⌄'}
           </button>
