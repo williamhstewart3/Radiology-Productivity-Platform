@@ -38,6 +38,7 @@ import { Inbox } from './pages/Inbox';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 import { enqueueGlobalCapture } from './services/globalCaptureQueue';
+import { openMiniWindow } from './utils/miniWindow';
 import { getDesktopAPI } from './lib/desktop';
 
 // ─── Nav: 5 destinations on real Wouter routes ──────────────────────────────
@@ -130,6 +131,12 @@ function MainApp() {
   const { isReady, error } = useAppInitialization();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [miniBlocked, setMiniBlocked] = useState(false);
+  const handleOpenMini = () => {
+    void openMiniWindow().then(({ blocked }) => {
+      if (blocked) setMiniBlocked(true);
+    });
+  };
   const { activeProfile, activePractice } = useOrg();
   const [location, navigate] = useLocation();
   const pendingCount = useLiveQuery(async () => {
@@ -179,6 +186,9 @@ function MainApp() {
       } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
         event.preventDefault();
         navigate('/log');
+      } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'm') {
+        event.preventDefault();
+        handleOpenMini();
       } else if (!typing && !event.metaKey && !event.ctrlKey && ['1', '2', '3'].includes(event.key)) {
         navigate(['/today', '/inbox', '/history'][Number(event.key) - 1]);
       } else if (event.key === 'Escape') {
@@ -387,7 +397,30 @@ function MainApp() {
         </div>
 
         <BottomTabBar items={tabItems} onCapture={() => navigate('/log')} />
-        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate} />
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate} onOpenMini={handleOpenMini} />
+        {miniBlocked && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-3">
+            <button
+              type="button"
+              className="absolute inset-0 cursor-default"
+              aria-label="Close mini pace"
+              onClick={() => setMiniBlocked(false)}
+            />
+            <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-black shadow-2xl">
+              <button
+                type="button"
+                onClick={() => setMiniBlocked(false)}
+                className="absolute right-2 top-2 z-10 rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300 hover:border-white/25 hover:text-white"
+              >
+                Close
+              </button>
+              <p className="border-b border-white/10 bg-black py-2.5 pl-4 pr-14 text-[12px] text-amber-300">
+                Your browser blocked the Mini window pop-up. Allow pop-ups for this site to open it as a separate floating window — for now, here it is inline:
+              </p>
+              <MiniPaceWindow embedded />
+            </div>
+          </div>
+        )}
       </div>
       )}
       <AnimatePresence>
@@ -411,6 +444,12 @@ export default function App() {
       ) : (
         <Switch>
           <Route path="/mini-pace">
+            <div className="min-h-screen" style={{ background: 'var(--theme-bg-deep)' }}>
+              <MiniPaceWindow />
+            </div>
+          </Route>
+          {/* /mini is the spec-named manual-open fallback route -- same instrument as /mini-pace, for enterprise policies that block window.open entirely. */}
+          <Route path="/mini">
             <div className="min-h-screen" style={{ background: 'var(--theme-bg-deep)' }}>
               <MiniPaceWindow />
             </div>

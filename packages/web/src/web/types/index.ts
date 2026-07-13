@@ -459,6 +459,10 @@ export interface UserSettings {
   alwaysProcessPowerScribeClipboard: boolean;
   clearClipboardAfterImport: boolean;
   savedPowerScribeCropRegions: Record<string, { x: number; y: number; width: number; height: number }>;
+  /** Last known size/position of the Mini pace popup, remembered across opens. Optional so existing records predating this field read as "use defaults". */
+  miniWindowBounds?: { width: number; height: number; left: number | null; top: number | null } | null;
+  /** Desktop shell only: whether the Mini window should stay pinned always-on-top. */
+  miniWindowPinned?: boolean;
 }
 
 /** Color accent for a radiologist profile, practice, or org. */

@@ -32,6 +32,7 @@ import {
 } from '../utils/dailyPaceCalculations';
 import { todayDateString } from '../utils/calculations';
 import { resolveDisplayName } from '../utils/displayName';
+import { saveMiniWindowBounds } from '../utils/miniWindow';
 import type { StudyLog } from '../types';
 
 const HUD_BG = '#0A0E1A';
@@ -151,6 +152,33 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
   useEffect(() => {
     document.title = metrics ? `${metrics.currentRvu.toFixed(1)} / ${metrics.dailyGoal} wRVU` : 'wRVU Pace';
   }, [metrics]);
+
+  // Remember this popup's size/position so the next open lands where the
+  // radiologist left it. Only meaningful for a real separate window, not the
+  // inline embedded fallback rendered inside the main document.
+  useEffect(() => {
+    if (embedded || typeof window === 'undefined' || window.opener == null) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const persistBounds = () => {
+      void saveMiniWindowBounds({
+        width: window.outerWidth,
+        height: window.outerHeight,
+        left: window.screenX,
+        top: window.screenY,
+      });
+    };
+    const onResize = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(persistBounds, 400);
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('beforeunload', persistBounds);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('beforeunload', persistBounds);
+    };
+  }, [embedded]);
 
   const recentStudies = useMemo(
     () => [...todayLogs]

@@ -22,6 +22,7 @@ import {
 import { computeByModality, computeYtdStats, todayDateString, topModalityShares } from '../utils/calculations';
 import { buildTimelineBuckets, lensStart } from '../utils/historyTimeline';
 import { resolveDisplayName, type ResolvedDisplayName } from '../utils/displayName';
+import { openMiniWindow } from '../utils/miniWindow';
 import { MiniPaceWindow } from '../components/MiniPaceWindow';
 import { Readout, type ReadoutTone } from '../components/ui/Readout';
 import { Ring, useCountUp } from '../components/ui/Ring';
@@ -210,19 +211,10 @@ export function Today({ onNavigate }: TodayProps) {
   }, [recalculate]);
 
   const [miniFallbackOpen, setMiniFallbackOpen] = useState(false);
-  const openMiniWindow = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    const url = new URL('/?mini=pace', window.location.origin).toString();
-    const popup = window.open(
-      url,
-      'wrvu-mini-pace',
-      'width=320,height=280,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no',
-    );
-    if (!popup) {
-      setMiniFallbackOpen(true);
-      return;
-    }
-    popup.focus();
+  const handleOpenMiniWindow = useCallback(() => {
+    void openMiniWindow().then(({ blocked }) => {
+      if (blocked) setMiniFallbackOpen(true);
+    });
   }, []);
 
   const animatedRvu = useCountUp(metrics?.currentRvu ?? 0);
@@ -338,11 +330,11 @@ export function Today({ onNavigate }: TodayProps) {
         </div>
         <button
           type="button"
-          onClick={openMiniWindow}
-          title="Open mini pace window"
-          className="mt-1 flex size-9 shrink-0 items-center justify-center rounded-full text-rd-label-secondary hover:bg-rd-surface"
+          onClick={handleOpenMiniWindow}
+          title="Open the Mini window (Ctrl/Cmd+M) — a small floating pace tracker for beside PACS"
+          className="mt-1 flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-rd-separator px-3 text-[13px] font-medium text-rd-label-secondary hover:bg-rd-surface"
         >
-          📌
+          <span aria-hidden="true">📌</span> Mini window
         </button>
       </div>
 
@@ -362,6 +354,9 @@ export function Today({ onNavigate }: TodayProps) {
             >
               Close
             </button>
+            <p className="border-b border-white/10 bg-black py-2.5 pl-4 pr-14 text-[12px] text-amber-300">
+              Your browser blocked the Mini window pop-up. Allow pop-ups for this site to open it as a separate floating window — for now, here it is inline:
+            </p>
             <MiniPaceWindow embedded />
           </div>
         </div>

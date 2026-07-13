@@ -8,7 +8,7 @@ import { todayDateString } from '../utils/calculations';
 import { logConfirmedStudy } from '../utils/manualLog';
 import type { CptRvuRow } from '../types';
 
-export function CommandPalette({ open, onClose, onNavigate }: { open: boolean; onClose: () => void; onNavigate: (path: string) => void }) {
+export function CommandPalette({ open, onClose, onNavigate, onOpenMini }: { open: boolean; onClose: () => void; onNavigate: (path: string) => void; onOpenMini?: () => void }) {
   const { activeProfile } = useOrg();
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -69,6 +69,16 @@ export function CommandPalette({ open, onClose, onNavigate }: { open: boolean; o
           {!query.trim() && [
             ['/today', 'Today'], ['/inbox', 'Inbox'], ['/history', 'History'], ['/log', 'Capture'], ['/settings', 'Settings'],
           ].map(([path, label]) => <button key={path} type="button" onClick={() => navigate(path)} className="flex min-h-11 w-full items-center rounded-[10px] px-3 text-left text-[15px] text-rd-label-primary hover:bg-rd-surface-2">{label}</button>)}
+          {!query.trim() && onOpenMini && (
+            <button
+              type="button"
+              onClick={() => { onClose(); onOpenMini(); }}
+              className="flex min-h-11 w-full items-center justify-between rounded-[10px] px-3 text-left text-[15px] text-rd-label-primary hover:bg-rd-surface-2"
+            >
+              <span>Mini window</span>
+              <kbd className="text-[12px] text-rd-label-secondary">⌘M</kbd>
+            </button>
+          )}
           {results.map((row) => (
             <button key={`${row.cptCode}-${row.modifier}`} type="button" onClick={() => void logRow(row)} className="flex min-h-12 w-full items-center justify-between gap-3 rounded-[10px] px-3 text-left hover:bg-rd-surface-2">
               <span className="min-w-0"><span className="block truncate text-[15px] text-rd-label-primary">{row.description}</span><span className="font-mono text-[12px] text-rd-label-secondary">{row.cptCode}</span></span>
