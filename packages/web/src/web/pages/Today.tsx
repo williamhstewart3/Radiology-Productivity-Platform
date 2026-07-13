@@ -6,18 +6,21 @@
  * untouched, only the presentation changes.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useOrg } from '../hooks/useOrg';
 import {
   computeDailyPace,
+  currentRatePerHour,
   DEFAULT_DAILY_PACE_SETTINGS,
   formatMinutes,
+  projectedFinishClockTime,
   type DailyPaceMetrics,
   type DailyPaceSettings,
 } from '../utils/dailyPaceCalculations';
-import { todayDateString } from '../utils/calculations';
+import { computeByModality, computeYtdStats, todayDateString, topModalityShares } from '../utils/calculations';
+import { buildTimelineBuckets, lensStart } from '../utils/historyTimeline';
 import { MiniPaceWindow } from '../components/MiniPaceWindow';
 import { Readout, type ReadoutTone } from '../components/ui/Readout';
 import { Ring, useCountUp } from '../components/ui/Ring';
@@ -27,6 +30,20 @@ import { GroupedList, Row } from '../components/ui/GroupedList';
 import { MatchSourceFootnote } from '../components/ui/MatchSourceFootnote';
 import type { StudyLog } from '../types';
 import { MODALITY_LABELS } from '../types';
+
+const SPARKLINE_DAYS = 14;
+
+/** One fixed-position cluster cell — label never disappears, value shows "—" when unavailable. */
+function ClusterCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[20px] font-semibold leading-none text-rd-label-primary [font-variant-numeric:tabular-nums]">
+        {value}
+      </span>
+      <span className="text-[12px] text-rd-label-secondary">{label}</span>
+    </div>
+  );
+}
 
 function displayTitle(log: StudyLog): string {
   return log.examTitleDisplay?.trim() || log.examNameRaw;
@@ -110,9 +127,31 @@ export function Today({ onNavigate }: TodayProps) {
       return all
         .filter((log) => !isDeleted(log) && (log.profileId === profileId || log.profileId == null))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-        .slice(0, 5);
+        .slice(0, 8);
     },
     [today, profileId],
+    [],
+  );
+
+  const sparklineWindowStart = useMemo(() => lensStart('day', today, SPARKLINE_DAYS), [today]);
+  const sparklineLogs = useLiveQuery(
+    async () => {
+      if (!profileId) return [];
+      const all = await db.studyLogs.where('logDate').between(sparklineWindowStart, today, true, true).toArray();
+      return all.filter((log) => !isDeleted(log) && (log.profileId === profileId || log.profileId == null));
+    },
+    [sparklineWindowStart, today, profileId],
+    [],
+  );
+
+  const yearStart = useMemo(() => lensStart('year', today), [today]);
+  const ytdLogs = useLiveQuery(
+    async () => {
+      if (!profileId) return [];
+      const all = await db.studyLogs.where('logDate').between(yearStart, today, true, true).toArray();
+      return all.filter((log) => !isDeleted(log) && (log.profileId === profileId || log.profileId == null));
+    },
+    [yearStart, today, profileId],
     [],
   );
 
@@ -238,6 +277,41 @@ export function Today({ onNavigate }: TodayProps) {
         ? 'caution'
         : 'neutral';
 
+  // ── Pace cluster: fixed six-cell grid, every value from computeDailyPace's
+  // own outputs (or a simple derived rate) — no parallel math, no new queries.
+  const notStarted = metrics.status === 'before_work';
+  const rate = currentRatePerHour(metrics);
+  const projectedValue = notStarted ? '—' : metrics.status === 'goal_achieved' ? 'Goal hit' : metrics.projectedEndOfDay.toFixed(0);
+  const projectedTime = notStarted || metrics.status === 'goal_achieved' ? null : projectedFinishClockTime(metrics);
+  const cluster = {
+    expectedNow: notStarted ? '—' : metrics.expectedRvu.toFixed(1),
+    aheadBehind: notStarted ? '—' : `${metrics.paceDifference >= 0 ? '+' : ''}${metrics.paceDifference.toFixed(1)}`,
+    projected: projectedTime ? `${projectedValue} · ${projectedTime}` : projectedValue,
+    remaining: metrics.status === 'goal_achieved' ? '0.0' : metrics.remainingToGoal.toFixed(1),
+    requiredRate: metrics.status === 'goal_achieved' || metrics.status === 'after_work' ? '—' : `${metrics.requiredRvuPerHour.toFixed(1)}/hr`,
+    currentRate: rate == null ? '—' : `${rate.toFixed(1)}/hr`,
+  };
+
+  // ── Trends row: sparkline, annual progress, modality mix — all derived
+  // from data already queried on this screen, reconciled by construction.
+  const sparklineBuckets = buildTimelineBuckets('day', sparklineLogs, today, SPARKLINE_DAYS);
+  const sparklineMax = Math.max(1, ...sparklineBuckets.map((bucket) => bucket.rvu));
+  const modalityShares = topModalityShares(computeByModality(todayLogs));
+  const ytdStats = settings ? computeYtdStats(ytdLogs, settings) : null;
+  let annualText: string | null = null;
+  if (ytdStats && ytdStats.annualGoal > 0) {
+    const totalDaysInYear = ytdStats.daysElapsedInYear + ytdStats.daysRemainingInYear;
+    const yearFraction = totalDaysInYear > 0 ? ytdStats.daysElapsedInYear / totalDaysInYear : 0;
+    const expectedYtd = ytdStats.annualGoal * yearFraction;
+    const pctVsExpected = expectedYtd > 0 ? ((ytdStats.ytdWorkRvu - expectedYtd) / expectedYtd) * 100 : 0;
+    const vsTarget = Math.abs(pctVsExpected) < 1
+      ? 'on target'
+      : `${Math.abs(pctVsExpected).toFixed(0)}% ${pctVsExpected >= 0 ? 'over' : 'under'} target`;
+    annualText = `Annual ${ytdStats.ytdWorkRvu.toFixed(0)}/${ytdStats.annualGoal.toLocaleString('en-US')} · ${vsTarget}`;
+  } else if (ytdStats) {
+    annualText = `Annual ${ytdStats.ytdWorkRvu.toLocaleString('en-US', { maximumFractionDigits: 0 })} wRVU`;
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="sticky top-0 z-20 -mx-3 border-b border-rd-separator bg-rd-bg/95 px-3 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
@@ -322,10 +396,55 @@ export function Today({ onNavigate }: TodayProps) {
         )}
       </div>
 
+      <div className="grid grid-cols-3 gap-x-4 gap-y-3 rounded-[16px] bg-rd-surface p-4" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+        <ClusterCell label="Expected now" value={cluster.expectedNow} />
+        <ClusterCell label="Ahead/behind" value={cluster.aheadBehind} />
+        <ClusterCell label="Projected" value={cluster.projected} />
+        <ClusterCell label="Remaining" value={cluster.remaining} />
+        <ClusterCell label="Required rate" value={cluster.requiredRate} />
+        <ClusterCell label="Current rate" value={cluster.currentRate} />
+      </div>
+
       <div className="grid grid-cols-3 gap-3">
         <StatCard label="Today" value={String(todayLogs.length)} onClick={() => onNavigate('/trends')} />
         <StatCard label="This week" value={String(weekCount)} onClick={() => onNavigate('/trends')} />
         <StatCard label="This month" value={String(monthCount)} onClick={() => onNavigate('/trends')} />
+      </div>
+
+      <div className="space-y-2 rounded-[16px] bg-rd-surface p-4" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+        <p className="sr-only">
+          Daily wRVU for the last {SPARKLINE_DAYS} days: {sparklineBuckets.map((bucket) => `${bucket.label} ${bucket.rvu.toFixed(1)}`).join(', ')}
+        </p>
+        <div className="flex h-8 items-end gap-[3px]" aria-hidden="true">
+          {sparklineBuckets.map((bucket) => (
+            <span
+              key={bucket.key}
+              title={`${bucket.label}: ${bucket.rvu.toFixed(1)} wRVU`}
+              className="flex-1 rounded-[2px] bg-rd-label-primary"
+              style={{ height: `${Math.max(6, (bucket.rvu / sparklineMax) * 100)}%`, opacity: bucket.key === today ? 1 : 0.45 }}
+            />
+          ))}
+        </div>
+        {annualText && (
+          <button
+            type="button"
+            onClick={() => onNavigate('/trends/history?lens=year')}
+            className="block text-[13px] text-rd-label-secondary"
+          >
+            {annualText}
+          </button>
+        )}
+        {modalityShares.length > 0 && (
+          <p className="text-[13px] text-rd-label-secondary [font-variant-numeric:tabular-nums]">
+            {modalityShares.map((share, index) => (
+              <span key={share.modality}>
+                {index > 0 && ' · '}
+                {share.label} {share.percent.toFixed(0)}%
+              </span>
+            ))}
+            {' of today’s wRVU'}
+          </p>
+        )}
       </div>
 
       <GroupedList header="Recent studies">

@@ -1,5 +1,5 @@
 import type { Modality, StudyLog, UserSettings } from '../types';
-import { MODALITIES } from '../types';
+import { MODALITIES, MODALITY_LABELS } from '../types';
 
 /**
  * All productivity math lives here so formulas are auditable in one place.
@@ -209,6 +209,37 @@ export function computePeriodTotals(logs: StudyLog[]): PeriodTotals {
     avgRvuPerStudy: studyCount > 0 ? totalWorkRvu / studyCount : 0,
     byModality: computeByModality(countedLogs, true),
   };
+}
+
+export interface ModalityShare {
+  modality: string;
+  label: string;
+  percent: number;
+}
+
+/**
+ * Top modalities by wRVU share, always summing to 100% of the input's total
+ * (any remainder beyond `max` is folded into a trailing "Other" slice, never
+ * silently dropped).
+ */
+export function topModalityShares(byModality: Record<string, number>, max = 4): ModalityShare[] {
+  const total = Object.values(byModality).reduce((sum, v) => sum + v, 0);
+  if (total <= 0) return [];
+  const sorted = Object.entries(byModality)
+    .filter(([, rvu]) => rvu > 0)
+    .sort((a, b) => b[1] - a[1]);
+  const top = sorted.slice(0, max);
+  const shown = top.reduce((sum, [, rvu]) => sum + rvu, 0);
+  const shares: ModalityShare[] = top.map(([modality, rvu]) => ({
+    modality,
+    label: MODALITY_LABELS[modality as Modality] ?? modality,
+    percent: (rvu / total) * 100,
+  }));
+  const remainder = total - shown;
+  if (remainder > 0.01) {
+    shares.push({ modality: 'OTHER_REMAINDER', label: 'Other', percent: (remainder / total) * 100 });
+  }
+  return shares;
 }
 
 /** Groups logs by their logDate, useful for weekly/monthly trend charts. */
