@@ -40,6 +40,30 @@ function createWindow() {
   } else {
     win.loadFile(path.join(WEB_DIST, "index.html"));
   }
+
+  // The renderer's Document PiP feature-detection is false in Electron (no
+  // documentPictureInPicture support), so the Mini window falls through to
+  // window.open() -- allow that specific popup through as its own
+  // always-on-top BrowserWindow, matching the "must float above PACS for the
+  // entire shift" ask. Everything else stays denied (Electron's default).
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.includes("mini=pace") || url.includes("/mini-pace") || url.endsWith("/mini")) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          width: 320,
+          height: 280,
+          alwaysOnTop: true,
+          webPreferences: {
+            preload: path.join(__dirname, "preload.mjs"),
+            contextIsolation: true,
+            nodeIntegration: false,
+          },
+        },
+      };
+    }
+    return { action: "deny" };
+  });
 }
 
 // --- IPC Handlers ---
@@ -169,6 +193,9 @@ ipcMain.handle("window:maximize", () => {
   }
 });
 ipcMain.handle("window:close", () => win?.close());
+ipcMain.handle("window:set-always-on-top", (event, pinned: boolean) => {
+  BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(pinned);
+});
 
 // --- App lifecycle ---
 

@@ -5,12 +5,12 @@ import { db } from '../db/database';
 import { useOrg } from '../hooks/useOrg';
 import { computeByModality, computePeriodTotals, computeYtdStats, topModalityShares } from '../utils/calculations';
 import { buildInsightStories, buildTimelineBuckets, lensStart, type CustomRange, type HistoryLens } from '../utils/historyTimeline';
+import { resolveDisplayName } from '../utils/displayName';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { MatchSourceFootnote } from '../components/ui/MatchSourceFootnote';
 import type { CptRvuRow, StudyLog } from '../types';
 
 function isDeleted(log: StudyLog): boolean { return Boolean((log as StudyLog & { deletedAt?: string }).deletedAt); }
-function title(log: StudyLog): string { return log.examTitleDisplay?.trim() || log.examNameRaw; }
 function shortDate(date: string): string { return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
 
 function DayGoalBar({ rvu, goal }: { rvu: number; goal: number }) {
@@ -129,7 +129,18 @@ export function TimelineHistory({ onOpenLegacy }: { onOpenLegacy: () => void }) 
         </ResponsiveContainer>
       </div>
 
-      {stories.length > 0 && <div className="grid gap-2 sm:grid-cols-2">{stories.map((story, index) => <button key={story} type="button" onClick={() => setStoryOpen(storyOpen === index ? null : index)} className="rounded-[12px] border border-rd-separator bg-rd-surface p-4 text-left text-[15px] text-rd-label-primary">✦ {story}{storyOpen === index && <span className="mt-2 block text-[12px] text-rd-label-secondary">Evidence: {totals.studyCount} counted studies totaling {totals.totalWorkRvu.toFixed(1)} wRVU in the visible range.</span>}</button>)}</div>}
+      {stories.length > 0 ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {stories.map((story, index) => (
+            <button key={story.text} type="button" onClick={() => setStoryOpen(storyOpen === index ? null : index)} className="rounded-[12px] border border-rd-separator bg-rd-surface p-4 text-left text-[15px] text-rd-label-primary">
+              {story.muted ? story.text : `✦ ${story.text}`}
+              {storyOpen === index && <span className="mt-2 block text-[12px] text-rd-label-secondary">Evidence: {totals.studyCount} counted studies totaling {totals.totalWorkRvu.toFixed(1)} wRVU in the visible range.</span>}
+            </button>
+          ))}
+        </div>
+      ) : logs.length > 0 && (
+        <p className="text-[13px] text-rd-label-secondary">Collecting your baseline — patterns appear after a few weeks.</p>
+      )}
 
       {grouped.length === 0 ? <div className="rounded-[16px] bg-rd-surface py-14 text-center text-rd-label-secondary">Your history starts with your first capture.</div> : grouped.map(([date, rows]) => {
         const countedRows = rows.filter((row) => !row.needsReview);
@@ -138,11 +149,15 @@ export function TimelineHistory({ onOpenLegacy }: { onOpenLegacy: () => void }) 
         return <section key={date} className="space-y-1"><header className="sticky top-14 z-10 flex items-center justify-between gap-3 border-b border-rd-separator bg-rd-bg/95 py-2">
           <span className="text-[13px] font-semibold text-rd-label-primary">{new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
           <DayGoalBar rvu={dayRvu} goal={dailyGoal} />
-          <span className="text-[13px] text-rd-label-secondary [font-variant-numeric:tabular-nums]">{dayRvu.toFixed(1)} · {rows.length} studies{topModality ? ` · ${topModality.label} ${topModality.percent.toFixed(0)}%` : ''}</span>
+          {/* Grouped.length === 1 means this single day's total IS the period total already shown in the header above -- repeating it here would say the same thing twice on one screen. */}
+          {grouped.length > 1 && (
+            <span className="text-[13px] text-rd-label-secondary [font-variant-numeric:tabular-nums]">{dayRvu.toFixed(1)} · {rows.length} studies{topModality ? ` · ${topModality.label} ${topModality.percent.toFixed(0)}%` : ''}</span>
+          )}
         </header>{rows.map((log) => {
           const current = currentByCode.get(`${log.cptCode}-${log.modifier}`);
           const historical = current?.workRvu != null && log.workRvu != null && Math.abs(current.workRvu - log.workRvu) > 0.001;
-          return <div key={log.id} className="rd-row grid grid-cols-[62px_1fr_auto] items-center gap-3 border-b border-rd-separator px-1 text-[13px]"><span className="font-mono text-rd-label-secondary">{log.studyDateTime ? new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}</span><span className="min-w-0 truncate text-rd-label-primary">{title(log)} <span className="font-mono text-rd-label-secondary">{log.cptCode}</span> <MatchSourceFootnote method={log.matchMethod} /> {log.dateTimeSource === 'import_default' && <span className="text-rd-caution">inferred</span>} {historical && <span className="rounded bg-rd-surface-2 px-1.5 text-[11px] text-rd-label-secondary">{new Date(log.createdAt).getFullYear()} table</span>} {log.sourceImportId && <span className="text-[11px] text-rd-label-secondary">batch</span>}</span><span className="font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">{log.workRvu?.toFixed(2) ?? '—'}</span></div>;
+          const resolved = resolveDisplayName(log);
+          return <div key={log.id} className="rd-row grid grid-cols-[62px_1fr_auto] items-center gap-3 border-b border-rd-separator px-1 text-[13px]"><span className="font-mono text-rd-label-secondary">{log.studyDateTime ? new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}</span><span className="flex min-w-0 items-center gap-1.5"><span className="min-w-0 truncate text-rd-label-primary">{resolved.name}</span><span className="flex shrink-0 items-center gap-1.5 text-rd-label-secondary">{resolved.isFallback && <button type="button" onClick={onOpenLegacy} className="shrink-0 text-rd-caution underline underline-offset-2">unnamed — tap to fix</button>} <span className="font-mono">{log.cptCode}</span> <MatchSourceFootnote method={log.matchMethod} /> {log.dateTimeSource === 'import_default' && <span className="text-rd-caution">inferred</span>} {historical && <span className="rounded bg-rd-surface-2 px-1.5 text-[11px]">{new Date(log.createdAt).getFullYear()} table</span>} {log.sourceImportId && <span className="text-[11px]">batch</span>}</span></span><span className="font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">{log.workRvu?.toFixed(2) ?? '—'}</span></div>;
         })}</section>;
       })}
     </div>

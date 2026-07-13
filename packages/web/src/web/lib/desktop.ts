@@ -30,6 +30,8 @@ export interface ElectronAPI {
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;
   close: () => Promise<void>;
+  /** Pins/unpins whichever window this call originates from (the main window or a Mini popup) always-on-top. Optional so older preload bundles degrade gracefully. */
+  setAlwaysOnTop?: (pinned: boolean) => Promise<void>;
 
   // Events
   onDeepLink: (cb: (url: string) => void) => () => void;

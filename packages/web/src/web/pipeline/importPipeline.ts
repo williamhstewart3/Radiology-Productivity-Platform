@@ -7,6 +7,7 @@ import type { MatchCandidate, StudyLog, DuplicateStatus } from '../types';
 import type { ImportedStudy, ImportSource } from '../types/importProvider';
 import type { StudyCandidate } from '../utils/duplicateDetection';
 import { effectiveAutoCommitThreshold } from '../services/automationSettings';
+import type { CaptureTimer } from '../utils/captureTimings';
 
 export interface PipelineReviewRow {
   tempId: string;
@@ -145,6 +146,7 @@ export async function runImportPipeline(
   studies: ImportedStudy[],
   logDate: string,
   profileId?: string | null,
+  timer?: CaptureTimer,
 ): Promise<PipelineResult> {
   if (studies.length === 0) {
     return { reviewRows: [], skippedRows: [], sources: [], profileId: profileId ?? null };
@@ -153,17 +155,22 @@ export async function runImportPipeline(
   const sources = [...new Set(studies.map((s) => s.source))];
   const userSettings = await db.userSettings.get('default');
   const autoCommitThreshold = effectiveAutoCommitThreshold(userSettings?.lowConfidenceThreshold);
-  const matched: Array<{ study: ImportedStudy; candidates: MatchCandidate[] }> = [];
 
-  for (const study of studies) {
-    const procedureName = procedureNameFor(study);
-    const query = study.cpt ?? procedureName;
-    const candidates = (await findMatchCandidates(query, 6, profileId, {
-      requireExamContextForDirectCpt: study.source === 'ocr' && !study.cpt,
-      directCptContext: procedureName,
-    })).filter(productivityRelevant);
-    matched.push({ study, candidates });
-  }
+  // Each study's candidate lookup is an independent read (Dexie + in-memory
+  // matching, no shared mutable state) -- run them concurrently rather than
+  // one at a time.
+  const matched: Array<{ study: ImportedStudy; candidates: MatchCandidate[] }> = await Promise.all(
+    studies.map(async (study) => {
+      const procedureName = procedureNameFor(study);
+      const query = study.cpt ?? procedureName;
+      const candidates = (await findMatchCandidates(query, 6, profileId, {
+        requireExamContextForDirectCpt: study.source === 'ocr' && !study.cpt,
+        directCptContext: procedureName,
+      })).filter(productivityRelevant);
+      return { study, candidates };
+    }),
+  );
+  timer?.mark('match');
 
   const dupeCandidates: StudyCandidate[] = matched.map(({ study, candidates }) => ({
     examNameRaw: procedureNameFor(study),
@@ -181,6 +188,7 @@ export async function runImportPipeline(
   }));
 
   const dupeResults = await checkBatchDuplicates(dupeCandidates, logDate);
+  timer?.mark('dedupe');
   const reviewRows: PipelineReviewRow[] = [];
   const skippedRows: PipelineReviewRow[] = [];
 

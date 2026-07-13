@@ -21,6 +21,8 @@ import {
 } from '../utils/dailyPaceCalculations';
 import { computeByModality, computeYtdStats, todayDateString, topModalityShares } from '../utils/calculations';
 import { buildTimelineBuckets, lensStart } from '../utils/historyTimeline';
+import { resolveDisplayName, type ResolvedDisplayName } from '../utils/displayName';
+import { useMiniWindowLauncher } from '../hooks/useMiniWindowLauncher';
 import { MiniPaceWindow } from '../components/MiniPaceWindow';
 import { Readout, type ReadoutTone } from '../components/ui/Readout';
 import { Ring, useCountUp } from '../components/ui/Ring';
@@ -45,8 +47,8 @@ function ClusterCell({ label, value }: { label: string; value: string }) {
   );
 }
 
-function displayTitle(log: StudyLog): string {
-  return log.examTitleDisplay?.trim() || log.examNameRaw;
+function displayTitle(log: StudyLog): ResolvedDisplayName {
+  return resolveDisplayName(log);
 }
 
 function isDeleted(log: StudyLog): boolean {
@@ -208,21 +210,7 @@ export function Today({ onNavigate }: TodayProps) {
     return () => clearInterval(interval);
   }, [recalculate]);
 
-  const [miniFallbackOpen, setMiniFallbackOpen] = useState(false);
-  const openMiniWindow = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    const url = new URL('/?mini=pace', window.location.origin).toString();
-    const popup = window.open(
-      url,
-      'wrvu-mini-pace',
-      'width=320,height=280,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no',
-    );
-    if (!popup) {
-      setMiniFallbackOpen(true);
-      return;
-    }
-    popup.focus();
-  }, []);
+  const { openMini, blocked: miniFallbackOpen, dismissBlocked: dismissMiniFallback, floatingUnavailable, dismissFloatingUnavailable } = useMiniWindowLauncher();
 
   const animatedRvu = useCountUp(metrics?.currentRvu ?? 0);
 
@@ -337,13 +325,20 @@ export function Today({ onNavigate }: TodayProps) {
         </div>
         <button
           type="button"
-          onClick={openMiniWindow}
-          title="Open mini pace window"
-          className="mt-1 flex size-9 shrink-0 items-center justify-center rounded-full text-rd-label-secondary hover:bg-rd-surface"
+          onClick={openMini}
+          title="Open the Mini window (Ctrl/Cmd+M) — a small floating pace tracker for beside PACS"
+          className="mt-1 flex h-9 shrink-0 items-center rounded-full border border-rd-separator px-3 text-[13px] font-medium text-rd-label-secondary hover:bg-rd-surface"
         >
-          📌
+          Mini window
         </button>
       </div>
+
+      {floatingUnavailable && (
+        <p className="rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 text-[12px] text-rd-label-secondary">
+          Opened as a regular window — automatic floating isn’t available in this browser.
+          <button type="button" onClick={dismissFloatingUnavailable} className="ml-2 underline">Dismiss</button>
+        </p>
+      )}
 
       {miniFallbackOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-3">
@@ -351,16 +346,19 @@ export function Today({ onNavigate }: TodayProps) {
             type="button"
             className="absolute inset-0 cursor-default"
             aria-label="Close mini pace"
-            onClick={() => setMiniFallbackOpen(false)}
+            onClick={dismissMiniFallback}
           />
           <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-black shadow-2xl">
             <button
               type="button"
-              onClick={() => setMiniFallbackOpen(false)}
+              onClick={dismissMiniFallback}
               className="absolute right-2 top-2 z-10 rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300 hover:border-white/25 hover:text-white"
             >
               Close
             </button>
+            <p className="border-b border-white/10 bg-black py-2.5 pl-4 pr-14 text-[12px] text-amber-300">
+              Your browser blocked the Mini window pop-up. Allow pop-ups for this site to open it as a separate floating window — for now, here it is inline:
+            </p>
             <MiniPaceWindow embedded />
           </div>
         </div>
@@ -449,29 +447,41 @@ export function Today({ onNavigate }: TodayProps) {
 
       <GroupedList header="Recent studies">
         {recentLogs.length === 0 && <Row dense footnote="Nothing logged yet">No recent studies</Row>}
-        {recentLogs.map((log, index) => (
-          <Row
-            key={log.id}
-            dense
-            className={index >= 6 ? 'rd-density-extra' : undefined}
-            footnote={
-              <div className="flex items-center gap-1.5 text-[13px] text-rd-label-secondary">
-                {log.modality && <span>{MODALITY_LABELS[log.modality]}</span>}
-                <MatchSourceFootnote method={log.matchMethod} />
+        {recentLogs.map((log, index) => {
+          const resolved = displayTitle(log);
+          return (
+            <Row
+              key={log.id}
+              dense
+              className={index >= 6 ? 'rd-density-extra' : undefined}
+              footnote={
+                <div className="flex items-center gap-1.5 text-[13px] text-rd-label-secondary">
+                  {log.modality && <span>{MODALITY_LABELS[log.modality]}</span>}
+                  <MatchSourceFootnote method={log.matchMethod} />
+                </div>
+              }
+              trailing={
+                <span className="text-[15px] font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">
+                  {log.workRvu?.toFixed(2) ?? '—'}
+                </span>
+              }
+            >
+              <div className="flex items-center gap-1.5">
+                {isCaptureCommitted(log) && <span title="Auto-committed from capture">📷</span>}
+                <span className="truncate">{log.cptCode ? `${log.cptCode} — ` : ''}{resolved.name}</span>
+                {resolved.isFallback && (
+                  <button
+                    type="button"
+                    onClick={(event) => { event.stopPropagation(); onNavigate('/history/legacy'); }}
+                    className="shrink-0 text-[12px] text-rd-caution underline underline-offset-2"
+                  >
+                    unnamed — tap to fix
+                  </button>
+                )}
               </div>
-            }
-            trailing={
-              <span className="text-[15px] font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">
-                {log.workRvu?.toFixed(2) ?? '—'}
-              </span>
-            }
-          >
-            <div className="flex items-center gap-1.5">
-              {isCaptureCommitted(log) && <span title="Auto-committed from capture">📷</span>}
-              <span className="truncate">{log.cptCode ? `${log.cptCode} — ` : ''}{displayTitle(log)}</span>
-            </div>
-          </Row>
-        ))}
+            </Row>
+          );
+        })}
         <Row dense onClick={() => onNavigate('/trends/history')} trailing={<span className="text-rd-accent">→</span>}>
           See all
         </Row>

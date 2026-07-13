@@ -15,6 +15,7 @@ import { useOrg } from '../hooks/useOrg';
 import { computePeriodTotals } from '../utils/calculations';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { GroupedList, Row } from '../components/ui/GroupedList';
+import { resolveDisplayName } from '../utils/displayName';
 import type { StudyLog } from '../types';
 
 type Range = 'week' | 'month' | 'year';
@@ -139,7 +140,7 @@ export function Trends({ onNavigate }: TrendsProps) {
     for (const log of rangeLogs) {
       if (log.needsReview || !log.cptCode) continue;
       const key = log.cptCode;
-      const entry = byCpt.get(key) ?? { cptCode: key, description: log.examTitleDisplay ?? log.examNameRaw, rvu: 0, count: 0 };
+      const entry = byCpt.get(key) ?? { cptCode: key, description: resolveDisplayName(log).name, rvu: 0, count: 0 };
       entry.rvu += log.workRvu ?? 0;
       entry.count += 1;
       byCpt.set(key, entry);

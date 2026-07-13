@@ -7,6 +7,7 @@ import { useProfile } from '../hooks/useProfile';
 import { todayDateString, computePeriodTotals } from '../utils/calculations';
 import { rememberExamMapping } from '../services/memoryLearningService';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import { resolveDisplayName } from '../utils/displayName';
 import type { StudyLog, Modality } from '../types';
 import { MODALITY_LABELS } from '../types';
 
@@ -28,7 +29,7 @@ function monthKey(dateString: string): string {
 }
 
 function displayTitle(log: StudyLog): string {
-  return log.examTitleDisplay?.trim() || log.examNameRaw;
+  return resolveDisplayName(log).name;
 }
 
 export function LegacyHistory() {
@@ -306,7 +307,8 @@ export function LegacyHistory() {
                 <div className="space-y-2">
                   {dayLogs.map((log) => {
                     const notRelevant = (log.workRvu ?? 0) <= 0 || log.modifier !== '26';
-                    const title = displayTitle(log);
+                    const resolvedName = resolveDisplayName(log);
+                    const title = resolvedName.name;
                     const cmsDescription = log.cmsDescription && log.cmsDescription !== title ? log.cmsDescription : null;
                     const isEditing = editingLogId === log.id;
                     return (
@@ -345,10 +347,21 @@ export function LegacyHistory() {
                               <button onClick={() => { setEditingLogId(null); setEditingTitle(''); }} className="text-[10px] px-2 py-1 rounded-lg border border-white/12 text-slate-400">Cancel</button>
                             </div>
                           ) : (
-                            <p className="text-sm text-white mt-0.5 line-clamp-1">{title}</p>
+                            <div className="mt-0.5 flex items-baseline gap-2">
+                              <p className="min-w-0 flex-1 truncate text-sm text-white">{title}</p>
+                              {resolvedName.isFallback && (
+                                <button
+                                  type="button"
+                                  onClick={() => startRename(log)}
+                                  className="shrink-0 text-[11px] font-normal text-amber-400 underline"
+                                >
+                                  unnamed — tap to fix
+                                </button>
+                              )}
+                            </div>
                           )}
                           {cmsDescription && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">CMS: {cmsDescription}</p>}
-                          {log.examNameRaw !== title && <p className="text-xs text-slate-600 mt-0.5 line-clamp-1">OCR: {log.examNameRaw}</p>}
+                          {resolvedName.isFallback && <p className="text-xs text-slate-600 mt-0.5 line-clamp-1">OCR: {log.examNameRaw}</p>}
                           {log.notes && <p className="text-xs text-slate-500 mt-0.5">{log.notes}</p>}
                         </div>
                         <div className="text-right shrink-0">
