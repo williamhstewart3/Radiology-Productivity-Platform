@@ -16,9 +16,10 @@ export function TimelineHistory({ onOpenLegacy }: { onOpenLegacy: () => void }) 
   const { activeProfile } = useOrg();
   const profileId = activeProfile?.id ?? null;
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const initialLens = new URLSearchParams(window.location.search).get('lens');
+  const initialParams = new URLSearchParams(window.location.search);
+  const initialLens = initialParams.get('lens');
   const [lens, setLens] = useState<HistoryLens>(initialLens === 'year' ? 'year' : initialLens === 'month' ? 'month' : 'day');
-  const [drillDate, setDrillDate] = useState<string | null>(null);
+  const [drillDate, setDrillDate] = useState<string | null>(initialParams.get('date'));
   const [storyOpen, setStoryOpen] = useState<number | null>(null);
   const start = lensStart(lens, today);
 

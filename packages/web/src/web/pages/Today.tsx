@@ -215,7 +215,7 @@ export function Today({ onNavigate }: TodayProps) {
     const popup = window.open(
       url,
       'wrvu-mini-pace',
-      'width=440,height=230,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no',
+      'width=320,height=280,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no',
     );
     if (!popup) {
       setMiniFallbackOpen(true);
