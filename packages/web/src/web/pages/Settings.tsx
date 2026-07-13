@@ -73,6 +73,11 @@ export function Settings({ onNavigate }: SettingsProps) {
     await db.userSettings.put({ ...current, theme, updatedAt: new Date().toISOString() });
   }
 
+  async function setDensity(density: 'compact' | 'comfortable') {
+    const current = await ensureUserSettings();
+    await db.userSettings.put({ ...current, density, updatedAt: new Date().toISOString() });
+  }
+
   async function setCompRate(value: number | null) {
     const current = await ensureUserSettings();
     await db.userSettings.put({ ...current, estimatedCompPerWrvu: value, updatedAt: new Date().toISOString() });
@@ -373,6 +378,16 @@ export function Settings({ onNavigate }: SettingsProps) {
             ]}
             value={settings?.theme ?? 'dark'}
             onChange={setTheme}
+          />
+        </div>
+        <div className="rounded-[16px] bg-rd-surface p-3" style={{ boxShadow: 'var(--rd-shadow-card)' }}>
+          <SegmentedControl
+            options={[
+              { value: 'compact', label: 'Compact' },
+              { value: 'comfortable', label: 'Comfortable' },
+            ]}
+            value={settings?.density ?? 'compact'}
+            onChange={setDensity}
           />
         </div>
       </section>

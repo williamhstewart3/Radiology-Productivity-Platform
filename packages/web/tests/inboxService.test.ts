@@ -42,12 +42,12 @@ describe('Inbox confidence language', () => {
 describe('summarizeInboxAccounting — the permanent batch-accounting line', () => {
   test('null when there is no active session or it is empty', () => {
     expect(summarizeInboxAccounting(null, [])).toBeNull();
-    expect(summarizeInboxAccounting({ totalExams: 0, needsReviewCount: 0 }, [])).toBeNull();
+    expect(summarizeInboxAccounting({ totalExams: 0, needsReviewCount: 0, confirmedWrvu: 0 }, [])).toBeNull();
   });
 
-  test('readyCount is totalExams minus needsReviewCount, from the session summary directly', () => {
-    const summary = summarizeInboxAccounting({ totalExams: 11, needsReviewCount: 2 }, []);
-    expect(summary).toMatchObject({ totalRows: 11, readyCount: 9 });
+  test('readyCount is totalExams minus needsReviewCount, readyWrvu is the session confirmedWrvu directly', () => {
+    const summary = summarizeInboxAccounting({ totalExams: 11, needsReviewCount: 2, confirmedWrvu: 27.45 }, []);
+    expect(summary).toMatchObject({ totalRows: 11, readyCount: 9, readyWrvu: 27.45 });
   });
 
   test('possibleDuplicateCount and needsCptCount are counted from the pending rows, mutually exclusive', () => {
@@ -56,31 +56,34 @@ describe('summarizeInboxAccounting — the permanent batch-accounting line', () 
       pendingRow(null, false), // needs CPT
       pendingRow(null, true), // ordinary review row — neither bucket
     ];
-    const summary = summarizeInboxAccounting({ totalExams: 11, needsReviewCount: 3 }, pending);
+    const summary = summarizeInboxAccounting({ totalExams: 11, needsReviewCount: 3, confirmedWrvu: 12.6 }, pending);
     expect(summary).toMatchObject({ possibleDuplicateCount: 1, needsCptCount: 1 });
   });
 
   test('a possible-duplicate row with no candidate is not double-counted as needing a CPT', () => {
-    const summary = summarizeInboxAccounting({ totalExams: 1, needsReviewCount: 1 }, [pendingRow('possible', false)]);
+    const summary = summarizeInboxAccounting({ totalExams: 1, needsReviewCount: 1, confirmedWrvu: 0 }, [pendingRow('possible', false)]);
     expect(summary).toMatchObject({ possibleDuplicateCount: 1, needsCptCount: 0 });
   });
 });
 
 describe('formatInboxAccounting', () => {
-  test('always shows rows and ready, omits zero-value duplicate/CPT segments', () => {
-    expect(formatInboxAccounting({ totalRows: 11, readyCount: 9, possibleDuplicateCount: 0, needsCptCount: 0 }))
-      .toBe('11 rows · 9 ready');
+  test('shows the ready wRVU total (the auto-approved batch summary), omits zero-value duplicate/CPT segments', () => {
+    expect(formatInboxAccounting({ totalRows: 11, readyCount: 9, readyWrvu: 27.4, possibleDuplicateCount: 0, needsCptCount: 0 }))
+      .toBe('11 rows · 9 ready (+27.4 wRVU)');
   });
 
   test('appends non-zero segments, matching the spec\'s example line', () => {
-    expect(formatInboxAccounting({ totalRows: 11, readyCount: 9, possibleDuplicateCount: 1, needsCptCount: 1 }))
-      .toBe('11 rows · 9 ready · 1 possible duplicate · 1 needs CPT');
+    expect(formatInboxAccounting({ totalRows: 11, readyCount: 9, readyWrvu: 27.4, possibleDuplicateCount: 1, needsCptCount: 1 }))
+      .toBe('11 rows · 9 ready (+27.4 wRVU) · 1 possible duplicate · 1 needs CPT');
   });
 
-  test('singular/plural agreement on rows and possible duplicates', () => {
-    expect(formatInboxAccounting({ totalRows: 1, readyCount: 1, possibleDuplicateCount: 0, needsCptCount: 0 }))
-      .toBe('1 row · 1 ready');
-    expect(formatInboxAccounting({ totalRows: 2, readyCount: 0, possibleDuplicateCount: 2, needsCptCount: 0 }))
+  test('omits the wRVU parenthetical when nothing is ready yet', () => {
+    expect(formatInboxAccounting({ totalRows: 2, readyCount: 0, readyWrvu: 0, possibleDuplicateCount: 2, needsCptCount: 0 }))
       .toBe('2 rows · 0 ready · 2 possible duplicates');
+  });
+
+  test('singular/plural agreement on rows', () => {
+    expect(formatInboxAccounting({ totalRows: 1, readyCount: 1, readyWrvu: 3.4, possibleDuplicateCount: 0, needsCptCount: 0 }))
+      .toBe('1 row · 1 ready (+3.4 wRVU)');
   });
 });

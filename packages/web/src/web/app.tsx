@@ -146,6 +146,10 @@ function MainApp() {
   const themeSetting = useLiveQuery(async () => (await db.userSettings.get('default'))?.theme ?? 'dark', [], 'dark');
   const systemPrefersDark = useSystemPrefersDark();
   const isDark = themeSetting === 'system' ? systemPrefersDark : themeSetting !== 'light';
+  // Settings > Appearance density (default compact) — one data-attribute
+  // driving token-level spacing overrides in styles.css, not per-component
+  // forks.
+  const densitySetting = useLiveQuery(async () => (await db.userSettings.get('default'))?.density ?? 'compact', [], 'compact');
 
   useEffect(() => {
     injectTheme();
@@ -160,6 +164,10 @@ function MainApp() {
     document.documentElement.classList.toggle('rd-dark', isDark);
     document.documentElement.classList.toggle('rd-light', !isDark);
   }, [isDark]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-density', densitySetting);
+  }, [densitySetting]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

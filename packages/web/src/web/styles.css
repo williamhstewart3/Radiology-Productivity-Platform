@@ -94,6 +94,35 @@
   --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.4);
 }
 
+/* Density Pass row-density control (2026-07-13 owner decision): default
+   compact — the primary persona reads 100+ studies/day. A single
+   data-density attribute on <html> (set in app.tsx from Settings >
+   Appearance, persisted in Dexie) drives these two tokens; components
+   read var(--rd-row-height)/var(--rd-row-gap) instead of forking JSX
+   per density. :root's values are the compact defaults so there's no
+   flash of the wrong spacing before the attribute is set on mount. */
+:root {
+  --rd-row-height: 36px;
+  --rd-row-gap: 4px;
+}
+[data-density="comfortable"] {
+  --rd-row-height: 44px;
+  --rd-row-gap: 8px;
+}
+/* Today's Recent list renders all 8 rows unconditionally (component logic
+   is density-agnostic); Comfortable hides the last two via this rule so
+   the toggle stays a pure display-layer effect. */
+[data-density="comfortable"] .rd-density-extra {
+  display: none;
+}
+/* Shared row-height token for list rows outside the GroupedList/Row
+   primitive (History day rows, Inbox's Next queue) — same mechanism as
+   Row's `dense` prop, applied directly since those screens build rows
+   from plain markup. */
+.rd-row {
+  min-height: var(--rd-row-height);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;

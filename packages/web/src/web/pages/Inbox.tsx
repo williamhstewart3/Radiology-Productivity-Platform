@@ -116,7 +116,7 @@ export function Inbox() {
       {pending.length > 1 && (
         <div className="space-y-1 border-t border-rd-separator pt-3">
           <p className="text-[12px] uppercase tracking-[0.06em] text-rd-label-secondary">Next</p>
-          {pending.slice(activeIndex + 1, activeIndex + 4).map((row) => <button key={row.tempId} type="button" onClick={() => setActiveIndex(pending.indexOf(row))} className="flex min-h-11 w-full items-center justify-between rounded-[10px] px-3 text-left text-[13px] text-rd-label-primary hover:bg-rd-surface-2"><span className="truncate">{row.source.procedureName ?? row.source.examTitle}</span><span className="text-rd-label-secondary">{row.reviewReason ?? 'Needs review'}</span></button>)}
+          {pending.slice(activeIndex + 1, activeIndex + 4).map((row) => <button key={row.tempId} type="button" onClick={() => setActiveIndex(pending.indexOf(row))} className="rd-row flex w-full items-center justify-between rounded-[10px] px-3 text-left text-[13px] text-rd-label-primary hover:bg-rd-surface-2"><span className="truncate">{row.source.procedureName ?? row.source.examTitle}</span><span className="text-rd-label-secondary">{row.reviewReason ?? 'Needs review'}</span></button>)}
         </div>
       )}
 
