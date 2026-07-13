@@ -28,6 +28,7 @@ import { StatCard } from '../components/ui/StatCard';
 import { StatusPill } from '../components/ui/StatusPill';
 import { GroupedList, Row } from '../components/ui/GroupedList';
 import { MatchSourceFootnote } from '../components/ui/MatchSourceFootnote';
+import { StudyDetailSheet } from '../components/StudyDetailSheet';
 import type { StudyLog } from '../types';
 import { MODALITY_LABELS } from '../types';
 
@@ -213,6 +214,7 @@ export function Today({ onNavigate }: TodayProps) {
 
   const prevAchievedRef = useRef(false);
   const [metrics, setMetrics] = useState<DailyPaceMetrics | null>(null);
+  const [detailLogs, setDetailLogs] = useState<StudyLog[] | null>(null);
 
   const recalculate = useCallback(() => {
     if (!todayLogs) return;
@@ -484,6 +486,7 @@ export function Today({ onNavigate }: TodayProps) {
             <Row
               key={log.sessionId ?? log.id}
               dense
+              onClick={() => setDetailLogs(comboLogs)}
               className={index >= 6 ? 'rd-density-extra' : undefined}
               footnote={
                 <div className="flex items-center gap-1.5 text-[13px] text-rd-label-secondary">
@@ -508,6 +511,8 @@ export function Today({ onNavigate }: TodayProps) {
           See all
         </Row>
       </GroupedList>
+
+      <StudyDetailSheet open={detailLogs != null} logs={detailLogs} onClose={() => setDetailLogs(null)} profileId={profileId} />
     </div>
   );
 }

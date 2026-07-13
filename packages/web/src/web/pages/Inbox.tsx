@@ -10,6 +10,9 @@ import { KeyHint } from '../components/ui/KeyHint';
 import { applyInboxCandidateSelection, formatInboxAccounting, resolveInboxRows, summarizeInboxAccounting } from '../services/inboxService';
 import { restoreCaptureState, snapshotCaptureState, type CaptureUndoSnapshot } from '../services/captureUndoService';
 import { recommendedDuplicateAction as computeRecommendedDuplicateAction } from '../utils/duplicateActions';
+import { listRecentBatches, undoBatch, type RecentBatch } from '../services/studyLogService';
+import { RecentBatches } from '../components/RecentBatches';
+import { todayDateString } from '../utils/calculations';
 import type { StudyLog } from '../types';
 
 function parseRows(rowsJson: string | undefined): PipelineReviewRow[] {
@@ -72,6 +75,16 @@ export function Inbox() {
   const currentRecommendedAction = current ? recommendedActions.get(current.tempId) ?? null : null;
   const updatableBatch = pending.length > 0 && pending.every((row) => recommendedActions.get(row.tempId) === 'update_existing');
 
+  const recentBatches = useLiveQuery(
+    () => listRecentBatches(profileId, todayDateString()),
+    [profileId],
+    [] as RecentBatch[],
+  );
+  const handleUndoBatch = useCallback(async (batch: RecentBatch) => {
+    const result = await undoBatch(batch, profileId);
+    setReceipt(`Removed ${result.removedCount} studies · ${result.removedWrvu.toFixed(1)} wRVU`);
+  }, [profileId]);
+
   useEffect(() => {
     if (activeIndex >= pending.length) setActiveIndex(Math.max(0, pending.length - 1));
   }, [activeIndex, pending.length]);
@@ -131,6 +144,8 @@ export function Inbox() {
         </div>
         {pending.length > 1 && <span className="text-[13px] text-rd-label-secondary">{activeIndex + 1} of {pending.length}</span>}
       </div>
+
+      <RecentBatches batches={recentBatches} onUndo={(batch) => void handleUndoBatch(batch)} />
 
       {updatableBatch && (
         <Card className="flex items-center justify-between gap-3 py-3">

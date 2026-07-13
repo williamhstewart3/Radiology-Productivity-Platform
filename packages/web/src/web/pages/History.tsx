@@ -2,19 +2,13 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { theme } from '../lib/theme';
 import { db } from '../db/database';
-import { supabasePersistence } from '../services/supabasePersistence';
 import { useProfile } from '../hooks/useProfile';
 import { todayDateString, computePeriodTotals } from '../utils/calculations';
-import { rememberExamMapping } from '../services/memoryLearningService';
-import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import { isDeleted, renameStudyLog, softDeleteStudyLogs } from '../services/studyLogService';
 import type { StudyLog, Modality } from '../types';
 import { MODALITY_LABELS } from '../types';
 
 type Range = '7d' | '30d' | '90d' | 'all' | 'custom';
-
-function isDeleted(log: StudyLog): boolean {
-  return Boolean((log as any).deletedAt);
-}
 
 function isoWeekKey(dateString: string): string {
   const date = new Date(dateString + 'T12:00:00');
@@ -187,53 +181,7 @@ export function LegacyHistory() {
   }
 
   async function saveRename(log: StudyLog) {
-    const title = editingTitle.trim();
-    if (!title) return;
-    const normalizedTitle = normalizeRadiologyDescription(title);
-    const relatedLogs = (logs ?? []).filter((candidate) =>
-      log.sessionId
-        ? candidate.sessionId === log.sessionId
-        : candidate.id === log.id,
-    );
-    const ids = relatedLogs.length > 0 ? relatedLogs.map((candidate) => candidate.id) : [log.id];
-    const now = new Date().toISOString();
-
-    await db.transaction('rw', db.studyLogs, async () => {
-      for (const id of ids) {
-        await db.studyLogs.update(id, {
-          examTitleDisplay: title,
-          examTitleNormalized: normalizedTitle,
-          updatedAt: now,
-        } as any);
-      }
-    });
-
-    await supabasePersistence.updateStudyLogDisplayTitle(ids, title, normalizedTitle);
-
-    const aliasCandidates = relatedLogs.length > 0 ? relatedLogs : [log];
-    await rememberExamMapping({
-      rawText: log.examNameRaw,
-      canonicalExamName: title,
-      candidates: aliasCandidates
-        .filter((candidate) => candidate.cptCode && candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0)
-        .map((candidate) => ({
-          cptCode: candidate.cptCode!,
-          modifier: '26',
-          workRvu: candidate.workRvu,
-        })),
-      source: 'user',
-      profileId: activeProfile?.id ?? null,
-      siteId: null,
-      sessionId: log.sessionId,
-      logDate: log.logDate,
-      action: 'correct',
-      audit: {
-        action: 'cpt_changed',
-        summary: `Renamed ${log.examNameRaw} to ${title}`,
-        details: { logIds: ids, normalizedTitle },
-      },
-    });
-
+    await renameStudyLog(log, editingTitle, activeProfile?.id ?? null);
     setEditingLogId(null);
     setEditingTitle('');
   }
@@ -243,13 +191,7 @@ export function LegacyHistory() {
     if (!confirm(`Delete ${ids.length} selected exam${ids.length === 1 ? '' : 's'}? Totals and trends will update immediately.`)) return;
     setDeleting(true);
     try {
-      const now = new Date().toISOString();
-      await db.transaction('rw', db.studyLogs, async () => {
-        for (const id of ids) {
-          await db.studyLogs.update(id, { deletedAt: now, updatedAt: now } as any);
-        }
-      });
-      await supabasePersistence.softDeleteStudyLogs(ids);
+      await softDeleteStudyLogs(ids, { profileId: activeProfile?.id ?? null, summary: `Deleted ${ids.length} exam${ids.length === 1 ? '' : 's'} from History` });
       setSelectedIds(new Set());
     } finally {
       setDeleting(false);
