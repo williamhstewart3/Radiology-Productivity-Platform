@@ -28,4 +28,17 @@ describe('History timeline', () => {
     expect(lensStart('day', '2026-07-12', 14)).toBe('2026-06-29');
     expect(buildTimelineBuckets('day', logs, '2026-07-12', 14).length).toBe(14);
   });
+
+  test('the custom lens buckets exactly the given range, inclusive, regardless of dayLensDays', () => {
+    const range = { start: '2026-07-10', end: '2026-07-12' };
+    expect(lensStart('custom', '2026-07-12', 7, range)).toBe('2026-07-10');
+    const buckets = buildTimelineBuckets('custom', logs, '2026-07-12', 7, range);
+    expect(buckets.length).toBe(3);
+    expect(buckets.map((b) => b.key)).toEqual(['2026-07-10', '2026-07-11', '2026-07-12']);
+    expect(buckets.reduce((sum, b) => sum + b.rvu, 0)).toBe(6);
+  });
+
+  test('custom lens without a range falls back to today, not a crash', () => {
+    expect(lensStart('custom', '2026-07-12')).toBe('2026-07-12');
+  });
 });
