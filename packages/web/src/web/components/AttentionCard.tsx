@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { selectedCandidatesForRow, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { confidencePhrase } from '../services/inboxService';
 import type { ImportSource } from '../types/importProvider';
@@ -38,7 +38,17 @@ export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onU
   const examTime = shortTime(row.source.studyTime ?? row.source.examDateTime);
   const readTime = shortTime(row.source.modifiedDateTime);
   const sourceLabel = SOURCE_LABELS[row.source.source];
-  useEffect(() => { if (expandRequest) onOpenPicker(); }, [expandRequest, onOpenPicker]);
+  const handledExpandRequest = useRef(expandRequest);
+  useEffect(() => {
+    if (expandRequest && expandRequest !== handledExpandRequest.current) {
+      handledExpandRequest.current = expandRequest;
+      onOpenPicker();
+    }
+    // onOpenPicker is intentionally excluded: it's a fresh function identity on
+    // every Inbox render, and re-running this effect for that alone would
+    // reopen the picker right after the radiologist just closed it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandRequest]);
   const chipsWrvu = chips.reduce((sum, option) => sum + (option.workRvu ?? 0), 0);
 
   return (
