@@ -24,35 +24,41 @@
   --font-rd-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
 }
 
+/* Density Pass palette (2026-07-12 owner decision): monochrome discipline
+   on warm neutrals. Dark = reading-room navy, light = cream paper. Status
+   colors keep their semantics; light-mode variants below are darkened from
+   the original hues to clear 4.5:1 against the new cream surfaces (the
+   original values only cleared ~3.1-3.3:1, a pre-existing gap this pass
+   also fixes). Dark-mode status colors already clear 4.5:1 unchanged. */
 :root {
-  --rd-bg:             #F7F7F5;
-  --rd-surface:        #FFFFFF;
-  --rd-surface-2:      #F0F0EE;
-  --rd-label-primary:   #1A1A18;
-  --rd-label-secondary: #6E6E73;
-  --rd-accent:         #1A1A18;
-  --rd-positive:       #1F9D61;
-  --rd-caution:        #B97A17;
-  --rd-negative:       #C93338;
-  --rd-reached:        #A8871F;
-  --rd-separator:      #E4E4E1;
+  --rd-bg:             #F6F2E9;
+  --rd-surface:        #FFFDF7;
+  --rd-surface-2:      #F3EEE3;
+  --rd-label-primary:   #1D1B16;
+  --rd-label-secondary: #6E685C;
+  --rd-accent:         #1D1B16;
+  --rd-positive:       #187B4C;
+  --rd-caution:        #946112;
+  --rd-negative:       #C83338;
+  --rd-reached:        #826918;
+  --rd-separator:      #E6DFD0;
   --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.06);
   --rd-radius-card:    16px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --rd-bg:             #0C0D0F;
-    --rd-surface:        #141517;
-    --rd-surface-2:      #1C1D20;
-    --rd-label-primary:   #F2F1EC;
-    --rd-label-secondary: #8E8E93;
-    --rd-accent:         #F2F1EC;
+    --rd-bg:             #0A0E1A;
+    --rd-surface:        #111827;
+    --rd-surface-2:      #1A2234;
+    --rd-label-primary:   #F0F4FF;
+    --rd-label-secondary: #8892A4;
+    --rd-accent:         #F0F4FF;
     --rd-positive:       #4CC38A;
     --rd-caution:        #E5A13D;
-    --rd-negative:       #E5484D;
+    --rd-negative:       #F44D52;
     --rd-reached:        #D4B54E;
-    --rd-separator:      #26272B;
+    --rd-separator:      #1E2D45;
     --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.4);
   }
 }
@@ -60,31 +66,31 @@
 /* Explicit overrides win over prefers-color-scheme so Settings > Appearance
    can force light/dark independent of the OS setting; "auto" = no class. */
 :root.rd-light {
-  --rd-bg:             #F7F7F5;
-  --rd-surface:        #FFFFFF;
-  --rd-surface-2:      #F0F0EE;
-  --rd-label-primary:   #1A1A18;
-  --rd-label-secondary: #6E6E73;
-  --rd-accent:         #1A1A18;
-  --rd-positive:       #1F9D61;
-  --rd-caution:        #B97A17;
-  --rd-negative:       #C93338;
-  --rd-reached:        #A8871F;
-  --rd-separator:      #E4E4E1;
+  --rd-bg:             #F6F2E9;
+  --rd-surface:        #FFFDF7;
+  --rd-surface-2:      #F3EEE3;
+  --rd-label-primary:   #1D1B16;
+  --rd-label-secondary: #6E685C;
+  --rd-accent:         #1D1B16;
+  --rd-positive:       #187B4C;
+  --rd-caution:        #946112;
+  --rd-negative:       #C83338;
+  --rd-reached:        #826918;
+  --rd-separator:      #E6DFD0;
   --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.06);
 }
 :root.rd-dark {
-  --rd-bg:             #0C0D0F;
-  --rd-surface:        #141517;
-  --rd-surface-2:      #1C1D20;
-  --rd-label-primary:   #F2F1EC;
-  --rd-label-secondary: #8E8E93;
-  --rd-accent:         #F2F1EC;
+  --rd-bg:             #0A0E1A;
+  --rd-surface:        #111827;
+  --rd-surface-2:      #1A2234;
+  --rd-label-primary:   #F0F4FF;
+  --rd-label-secondary: #8892A4;
+  --rd-accent:         #F0F4FF;
   --rd-positive:       #4CC38A;
   --rd-caution:        #E5A13D;
-  --rd-negative:       #E5484D;
+  --rd-negative:       #F44D52;
   --rd-reached:        #D4B54E;
-  --rd-separator:      #26272B;
+  --rd-separator:      #1E2D45;
   --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.4);
 }
 

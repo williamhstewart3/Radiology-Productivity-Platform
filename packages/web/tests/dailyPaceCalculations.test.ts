@@ -3,6 +3,7 @@ import {
   computeDailyPace,
   currentRatePerHour,
   DEFAULT_DAILY_PACE_SETTINGS,
+  formatMinutes,
   projectedFinishClockTime,
   type DailyPaceMetrics,
 } from '../src/web/utils/dailyPaceCalculations';
@@ -71,6 +72,23 @@ describe('projectedFinishClockTime', () => {
     );
     // 120 minutes after 2:00pm is 4:00pm.
     expect(result).toBe('4:00p');
+  });
+});
+
+describe('formatMinutes — the Mini window "last capture Xm ago" line', () => {
+  test('renders zero and negative durations as "0m"', () => {
+    expect(formatMinutes(0)).toBe('0m');
+    expect(formatMinutes(-5)).toBe('0m');
+  });
+
+  test('renders sub-hour durations as minutes only', () => {
+    expect(formatMinutes(12)).toBe('12m');
+    expect(formatMinutes(45)).toBe('45m');
+  });
+
+  test('renders multi-hour durations as "Xh Ym", omitting Ym when exactly on the hour', () => {
+    expect(formatMinutes(90)).toBe('1h 30m');
+    expect(formatMinutes(120)).toBe('2h');
   });
 });
 
