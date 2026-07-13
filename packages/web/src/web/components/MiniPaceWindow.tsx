@@ -227,17 +227,26 @@ export function MiniPaceWindow({ embedded = false, onNavigate }: MiniPaceWindowP
     window.focus();
   }, [onNavigate]);
 
-  const [pinned, setPinned] = useState(false);
+  // Floating is the Mini's default state, not a setting -- Electron opens it
+  // alwaysOnTop already (see the desktop shell's window-open handler). This
+  // is only the rare opt-out, surfaced as plain text in the hover chrome
+  // below, never an icon.
+  const [floatOnTop, setFloatOnTop] = useState(true);
   useEffect(() => {
     if (!desktop) return;
-    setPinned(settings?.miniWindowPinned ?? true);
+    setFloatOnTop(settings?.miniWindowPinned ?? true);
   }, [desktop, settings?.miniWindowPinned]);
-  const togglePin = useCallback(() => {
-    const next = !pinned;
-    setPinned(next);
+  const toggleFloatOnTop = useCallback(() => {
+    const next = !floatOnTop;
+    setFloatOnTop(next);
     void desktop?.setAlwaysOnTop?.(next);
     void db.userSettings.update('default', { miniWindowPinned: next });
-  }, [pinned, desktop]);
+  }, [floatOnTop, desktop]);
+
+  // Chrome-less at rest, on purpose -- this is an instrument, not a window
+  // chrome. Controls reveal on hover and fade back out ~1.5s after the
+  // pointer leaves; reduced-motion swaps the fade for an instant hide.
+  const [hoverChromeVisible, setHoverChromeVisible] = useState(false);
 
   if (!metrics || todayLogs === undefined) {
     return (
@@ -254,6 +263,8 @@ export function MiniPaceWindow({ embedded = false, onNavigate }: MiniPaceWindowP
 
   return (
     <div
+      onMouseEnter={embedded ? undefined : () => setHoverChromeVisible(true)}
+      onMouseLeave={embedded ? undefined : () => setHoverChromeVisible(false)}
       style={{
         position: 'relative',
         minHeight: embedded ? 'auto' : '100vh',
@@ -269,18 +280,47 @@ export function MiniPaceWindow({ embedded = false, onNavigate }: MiniPaceWindowP
     >
       <style>{'@keyframes rd-mini-row-fade { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }'}</style>
 
-      {desktop && (
-        <button
-          type="button"
-          onClick={togglePin}
-          title={pinned ? 'Pinned always-on-top — click to unpin' : 'Not pinned — click to keep always-on-top'}
+      {!embedded && (
+        <div
+          data-hover-chrome
+          aria-hidden={!hoverChromeVisible}
           style={{
-            position: 'absolute', top: 8, right: 8, border: 0, background: 'transparent', cursor: 'pointer',
-            fontSize: 13, color: pinned ? HUD_POSITIVE : HUD_LABEL_SECONDARY, padding: 4,
+            position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+            padding: '6px 10px',
+            background: 'rgba(10, 14, 26, 0.94)',
+            borderBottom: `1px solid ${HUD_SEPARATOR}`,
+            opacity: hoverChromeVisible ? 1 : 0,
+            transition: reducedMotion ? 'none' : `opacity ${hoverChromeVisible ? 150 : 1500}ms ease`,
+            pointerEvents: hoverChromeVisible ? 'auto' : 'none',
           }}
         >
-          📌
-        </button>
+          <button
+            type="button"
+            onClick={() => goTo('/today')}
+            style={{ border: 0, background: 'transparent', cursor: 'pointer', fontSize: 12, fontFamily: HUD_FONT, color: HUD_LABEL_SECONDARY, padding: 0 }}
+          >
+            Open full app
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {desktop && (
+              <button
+                type="button"
+                onClick={toggleFloatOnTop}
+                style={{ border: 0, background: 'transparent', cursor: 'pointer', fontSize: 12, fontFamily: HUD_FONT, color: HUD_LABEL_SECONDARY, padding: 0 }}
+              >
+                Float on top {floatOnTop ? '✓' : ''}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => window.close()}
+              style={{ border: 0, background: 'transparent', cursor: 'pointer', fontSize: 12, fontFamily: HUD_FONT, color: HUD_LABEL_SECONDARY, padding: 0 }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Rank #1 — pace block, owns the top half */}

@@ -210,7 +210,7 @@ export function Today({ onNavigate }: TodayProps) {
     return () => clearInterval(interval);
   }, [recalculate]);
 
-  const { openMini, blocked: miniFallbackOpen, dismissBlocked: dismissMiniFallback, pinningUnavailable, dismissPinningUnavailable } = useMiniWindowLauncher();
+  const { openMini, blocked: miniFallbackOpen, dismissBlocked: dismissMiniFallback, floatingUnavailable, dismissFloatingUnavailable } = useMiniWindowLauncher();
 
   const animatedRvu = useCountUp(metrics?.currentRvu ?? 0);
 
@@ -327,16 +327,16 @@ export function Today({ onNavigate }: TodayProps) {
           type="button"
           onClick={openMini}
           title="Open the Mini window (Ctrl/Cmd+M) — a small floating pace tracker for beside PACS"
-          className="mt-1 flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-rd-separator px-3 text-[13px] font-medium text-rd-label-secondary hover:bg-rd-surface"
+          className="mt-1 flex h-9 shrink-0 items-center rounded-full border border-rd-separator px-3 text-[13px] font-medium text-rd-label-secondary hover:bg-rd-surface"
         >
-          <span aria-hidden="true">📌</span> Mini window
+          Mini window
         </button>
       </div>
 
-      {pinningUnavailable && (
+      {floatingUnavailable && (
         <p className="rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 text-[12px] text-rd-label-secondary">
-          Opened as a regular window — always-on-top pinning isn’t available in this browser.
-          <button type="button" onClick={dismissPinningUnavailable} className="ml-2 underline">Dismiss</button>
+          Opened as a regular window — automatic floating isn’t available in this browser.
+          <button type="button" onClick={dismissFloatingUnavailable} className="ml-2 underline">Dismiss</button>
         </p>
       )}
 

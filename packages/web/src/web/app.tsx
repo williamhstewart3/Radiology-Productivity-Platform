@@ -131,7 +131,7 @@ function MainApp() {
   const { isReady, error } = useAppInitialization();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const { openMini: handleOpenMini, blocked: miniBlocked, dismissBlocked: dismissMiniBlocked, pinningUnavailable, dismissPinningUnavailable } = useMiniWindowLauncher();
+  const { openMini: handleOpenMini, blocked: miniBlocked, dismissBlocked: dismissMiniBlocked, floatingUnavailable, dismissFloatingUnavailable } = useMiniWindowLauncher();
   const { activeProfile, activePractice } = useOrg();
   const [location, navigate] = useLocation();
   const pendingCount = useLiveQuery(async () => {
@@ -393,11 +393,11 @@ function MainApp() {
 
         <BottomTabBar items={tabItems} onCapture={() => navigate('/log')} />
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate} onOpenMini={handleOpenMini} />
-        {pinningUnavailable && (
+        {floatingUnavailable && (
           <div className="fixed inset-x-0 bottom-4 z-[100] flex justify-center px-3">
             <p className="rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 text-[12px] text-rd-label-secondary shadow-lg">
-              Opened as a regular window — always-on-top pinning isn’t available in this browser.
-              <button type="button" onClick={dismissPinningUnavailable} className="ml-2 underline">Dismiss</button>
+              Opened as a regular window — automatic floating isn’t available in this browser.
+              <button type="button" onClick={dismissFloatingUnavailable} className="ml-2 underline">Dismiss</button>
             </p>
           </div>
         )}
