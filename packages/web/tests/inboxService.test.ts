@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { approveInboxRow, confidencePhrase, formatInboxAccounting, mergeInboxCandidateSelection, summarizeInboxAccounting } from '../src/web/services/inboxService';
+import { approveInboxRow, buildExistingStudyTouchPatch, confidencePhrase, formatInboxAccounting, mergeInboxCandidateSelection, summarizeInboxAccounting } from '../src/web/services/inboxService';
 import { selectedCandidatesForRow, type PipelineReviewRow } from '../src/web/pipeline/importPipeline';
-import type { MatchCandidate } from '../src/web/types';
+import type { MatchCandidate, StudyLog } from '../src/web/types';
 
 function pendingRow(duplicateStatus: PipelineReviewRow['duplicateStatus'], hasCandidate: boolean): PipelineReviewRow {
   return {
@@ -112,6 +112,70 @@ describe('mergeInboxCandidateSelection — the Change code picker\'s commit path
     mergeInboxCandidateSelection(row, [candidate('71046', 0.4)]);
     expect(row.candidates).toBe(originalCandidates);
     expect(row.candidates).toHaveLength(1);
+  });
+});
+
+describe('buildExistingStudyTouchPatch — the "Update existing" verb\'s field-level rules', () => {
+  function duplicateRow(overrides: Partial<PipelineReviewRow['source']> = {}, displayTitle?: string): PipelineReviewRow {
+    return {
+      ...pendingRow('possible', true),
+      duplicateExistingLogId: 'existing_1',
+      displayTitle,
+      source: {
+        examTitle: 'CT ABDOMEN PELVIS WITH CONTRAST',
+        procedureName: 'CT Abdomen Pelvis with Contrast',
+        examDateTime: '2026-07-13T14:00:00.000Z',
+        studyTime: '2026-07-13T14:00:00.000Z',
+        modifiedDateTime: '2026-07-13T18:30:00.000Z',
+        source: 'powerscribe',
+        ...overrides,
+      },
+    } as PipelineReviewRow;
+  }
+
+  function existing(overrides: Partial<StudyLog> = {}): StudyLog {
+    return {
+      id: 'existing_1', profileId: null, logDate: '2026-07-13',
+      studyDateTime: '2026-07-13T14:05:00.000Z', examDateTime: '2026-07-13T14:00:00.000Z', studyDate: '2026-07-13',
+      dateTimeConfidence: 1, dateTimeSource: 'ocr', examNameRaw: 'CT ABDOMEN PELVIS WITH CONTRAST',
+      examTitleDisplay: 'CT ABDOMEN PELVIS WITH CONTRAST', cptCode: '74177', modifier: '26', workRvu: 3.15,
+      modality: 'CT', matchMethod: 'manual_cpt', matchConfidence: 1, needsReview: false, sessionId: null,
+      sourceImportId: null, notes: null, studyFingerprint: 'weak:x',
+      createdAt: '2026-07-13T14:10:00.000Z', updatedAt: '2026-07-13T14:10:00.000Z',
+      ...overrides,
+    } as StudyLog;
+  }
+
+  test('refreshes the Modified/read time when the incoming capture is newer', () => {
+    const patch = buildExistingStudyTouchPatch(duplicateRow(), existing());
+    expect(patch.studyDateTime).toBe('2026-07-13T18:30:00.000Z');
+  });
+
+  test('never touches workRvu or cptCode -- those fields are absent from the patch entirely', () => {
+    const patch = buildExistingStudyTouchPatch(duplicateRow(), existing());
+    expect(patch).not.toHaveProperty('workRvu');
+    expect(patch).not.toHaveProperty('cptCode');
+  });
+
+  test('resolves a display name when the existing record was never manually cleaned up (display == raw)', () => {
+    const patch = buildExistingStudyTouchPatch(duplicateRow({}, 'CT Abdomen Pelvis with Contrast'), existing());
+    expect(patch.examTitleDisplay).toBe('CT Abdomen Pelvis with Contrast');
+  });
+
+  test('never clobbers a radiologist\'s earlier manual rename', () => {
+    const patch = buildExistingStudyTouchPatch(
+      duplicateRow({}, 'CT Abdomen Pelvis with Contrast'),
+      existing({ examTitleDisplay: 'Appendicitis protocol CT' }),
+    );
+    expect(patch.examTitleDisplay).toBeUndefined();
+  });
+
+  test('empty patch when nothing actually changed', () => {
+    const patch = buildExistingStudyTouchPatch(
+      duplicateRow({ modifiedDateTime: '2026-07-13T14:05:00.000Z' }, 'CT Abdomen Pelvis with Contrast'),
+      existing({ studyDateTime: '2026-07-13T14:05:00.000Z', examTitleDisplay: 'CT Abdomen Pelvis with Contrast' }),
+    );
+    expect(patch).toEqual({});
   });
 });
 

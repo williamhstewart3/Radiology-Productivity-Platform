@@ -205,7 +205,7 @@ function strictFingerprintForLog(log: StudyLog): string | null {
   );
 }
 
-function sameMinute(a: string | null, b: string | null): boolean {
+export function sameMinute(a: string | null, b: string | null): boolean {
   if (!a || !b) return false;
   return isoToDate(a) === isoToDate(b) && isoToMinuteBucket(a) === isoToMinuteBucket(b);
 }

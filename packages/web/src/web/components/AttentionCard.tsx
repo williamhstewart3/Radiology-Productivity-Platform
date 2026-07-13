@@ -18,12 +18,15 @@ function shortTime(iso: string | null | undefined): string | null {
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, expandRequest }: {
+export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onUpdateExisting, recommendedDuplicateAction, expandRequest }: {
   row: PipelineReviewRow;
   active: boolean;
   onAccept: () => void;
   onSkip: () => void;
   onOpenPicker: () => void;
+  onUpdateExisting: () => void;
+  /** null = today's default: "Same study — skip" stays the primary/recommended verb. */
+  recommendedDuplicateAction: 'update_existing' | null;
   expandRequest?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -87,13 +90,31 @@ export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, exp
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={row.duplicateStatus === 'possible' ? onSkip : onAccept} disabled={!candidate && row.duplicateStatus !== 'possible'} className="min-h-11 rounded-[10px] bg-rd-label-primary px-5 text-[15px] font-semibold text-rd-bg disabled:opacity-40">
-          {row.duplicateStatus === 'possible' ? 'Same study — skip' : '✓ Accept'} <KeyHint>↵</KeyHint>
-        </button>
-        {row.duplicateStatus === 'possible'
-          ? <button type="button" onClick={onAccept} className="min-h-11 px-2 text-[15px] text-rd-label-primary">Count both</button>
-          : <button type="button" onClick={onOpenPicker} className="min-h-11 px-2 text-[15px] text-rd-label-primary">Change code <KeyHint>E</KeyHint></button>}
-        <button type="button" onClick={onSkip} className="min-h-11 px-2 text-[15px] text-rd-label-secondary">Skip <KeyHint>S</KeyHint></button>
+        {row.duplicateStatus === 'possible' ? (
+          <>
+            <button
+              type="button"
+              onClick={recommendedDuplicateAction === 'update_existing' ? onUpdateExisting : onSkip}
+              className="min-h-11 rounded-[10px] bg-rd-label-primary px-5 text-[15px] font-semibold text-rd-bg"
+            >
+              {recommendedDuplicateAction === 'update_existing' ? 'Update existing' : 'Same study — skip'} <KeyHint>↵</KeyHint>
+            </button>
+            {recommendedDuplicateAction === 'update_existing' ? (
+              <button type="button" onClick={onSkip} className="min-h-11 px-2 text-[15px] text-rd-label-primary">Same study — skip</button>
+            ) : (
+              <button type="button" onClick={onUpdateExisting} className="min-h-11 px-2 text-[15px] text-rd-label-primary">Update existing</button>
+            )}
+            <button type="button" onClick={onAccept} className="min-h-11 px-2 text-[15px] text-rd-label-secondary">Count both</button>
+          </>
+        ) : (
+          <>
+            <button type="button" onClick={onAccept} disabled={!candidate} className="min-h-11 rounded-[10px] bg-rd-label-primary px-5 text-[15px] font-semibold text-rd-bg disabled:opacity-40">
+              ✓ Accept <KeyHint>↵</KeyHint>
+            </button>
+            <button type="button" onClick={onOpenPicker} className="min-h-11 px-2 text-[15px] text-rd-label-primary">Change code <KeyHint>E</KeyHint></button>
+            <button type="button" onClick={onSkip} className="min-h-11 px-2 text-[15px] text-rd-label-secondary">Skip <KeyHint>S</KeyHint></button>
+          </>
+        )}
       </div>
     </article>
   );
