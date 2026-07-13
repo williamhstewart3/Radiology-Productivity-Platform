@@ -376,7 +376,14 @@ export function Import({ onReviewReady }: ImportProps) {
   const [error, setError]         = useState<string | null>(null);
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  // Eagerly generated (not lazily inside the persist effect below) so that
+  // effect only ever runs once per actual state change instead of twice per
+  // batch — the second, self-triggered run used to just overwrite the same
+  // Dexie row a second time, which was harmless, but now that persisting a
+  // session can also commit rows with no review needed (see
+  // reviewSessionService.sweepQuietRows), a guaranteed extra run would have
+  // double-committed them.
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [toasts, setToasts] = useState<ImportToast[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -414,10 +421,8 @@ export function Import({ onReviewReady }: ImportProps) {
 
   useEffect(() => {
     if (step !== 'review' || reviewRows.length === 0) return;
-    const id = sessionId ?? crypto.randomUUID();
-    if (!sessionId) setSessionId(id);
     void persistActiveReviewSession({
-      sessionId: id,
+      sessionId,
       profileId: activeProfile?.id ?? null,
       readingDate: logDate,
       rows: reviewRows,
