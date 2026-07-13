@@ -9,7 +9,8 @@ import {
   loadActiveReviewSession,
   persistActiveReviewSession,
 } from './reviewSessionService';
-import type { ActiveReviewSession, MatchMethod } from '../types';
+import { candidateKey } from '../utils/cptPicker';
+import type { ActiveReviewSession, MatchCandidate, MatchMethod } from '../types';
 
 export interface InboxAccounting {
   totalRows: number;
@@ -149,15 +150,41 @@ export async function resolveInboxRows(input: {
   return { importedCount: result.importedCount, addedWrvu, remainingAttention };
 }
 
-export async function selectInboxCandidate(profileId: string | null, rowId: string, candidateIndex: number): Promise<void> {
-  const session = await loadActiveReviewSession(profileId);
-  if (!session) return;
-  const rows = session.rows.map((row) => row.tempId === rowId ? {
+/**
+ * The Change code picker's commit path, pure half. `candidates` may include
+ * codes already in row.candidates (a Suggested pick) or codes found via
+ * search (not yet in row.candidates at all, e.g. anything from the open CPT
+ * library) -- either is merged into row.candidates by cptCode+modifier
+ * (deduped, never appended twice) and selectedCandidateIndices points at
+ * the merged positions. This is the only schema-shaped change multi-CPT
+ * selection needs: commitPipelineResults and learnAlias already iterate
+ * `selectedCandidatesForRow(row)` as a set, not a single index.
+ */
+export function mergeInboxCandidateSelection(row: PipelineReviewRow, candidates: MatchCandidate[]): PipelineReviewRow {
+  const mergedCandidates = [...row.candidates];
+  const keyIndex = new Map(mergedCandidates.map((candidate, index) => [candidateKey(candidate), index]));
+  const indices = candidates.map((candidate) => {
+    const key = candidateKey(candidate);
+    const existingIndex = keyIndex.get(key);
+    if (existingIndex != null) return existingIndex;
+    mergedCandidates.push(candidate);
+    const newIndex = mergedCandidates.length - 1;
+    keyIndex.set(key, newIndex);
+    return newIndex;
+  });
+  return {
     ...row,
-    selectedCandidateIndex: candidateIndex,
-    selectedCandidateIndices: [candidateIndex],
+    candidates: mergedCandidates,
+    selectedCandidateIndex: indices[0] ?? null,
+    selectedCandidateIndices: indices,
     needsReview: true,
     approvalStatus: 'pending' as const,
-  } : row);
+  };
+}
+
+export async function applyInboxCandidateSelection(profileId: string | null, rowId: string, candidates: MatchCandidate[]): Promise<void> {
+  const session = await loadActiveReviewSession(profileId);
+  if (!session) return;
+  const rows = session.rows.map((row) => row.tempId === rowId ? mergeInboxCandidateSelection(row, candidates) : row);
   await persistActiveReviewSession({ ...session, profileId, rows });
 }

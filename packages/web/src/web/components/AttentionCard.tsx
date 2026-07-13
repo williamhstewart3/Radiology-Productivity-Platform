@@ -18,12 +18,12 @@ function shortTime(iso: string | null | undefined): string | null {
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-export function AttentionCard({ row, active, onAccept, onSkip, onChangeCode, expandRequest }: {
+export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, expandRequest }: {
   row: PipelineReviewRow;
   active: boolean;
   onAccept: () => void;
   onSkip: () => void;
-  onChangeCode: (index: number) => void;
+  onOpenPicker: () => void;
   expandRequest?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -35,7 +35,8 @@ export function AttentionCard({ row, active, onAccept, onSkip, onChangeCode, exp
   const examTime = shortTime(row.source.studyTime ?? row.source.examDateTime);
   const readTime = shortTime(row.source.modifiedDateTime);
   const sourceLabel = SOURCE_LABELS[row.source.source];
-  useEffect(() => { if (expandRequest) setExpanded(true); }, [expandRequest]);
+  useEffect(() => { if (expandRequest) onOpenPicker(); }, [expandRequest, onOpenPicker]);
+  const chipsWrvu = chips.reduce((sum, option) => sum + (option.workRvu ?? 0), 0);
 
   return (
     <article className={`rounded-[16px] border bg-rd-surface p-5 ${active ? 'border-rd-caution' : 'border-rd-separator'}`} aria-current={active ? 'true' : undefined}>
@@ -55,12 +56,15 @@ export function AttentionCard({ row, active, onAccept, onSkip, onChangeCode, exp
           <div>
             <p className="text-[22px] font-semibold text-rd-label-primary">{candidate?.description ?? 'Choose a code'}</p>
             {chips.length > 0 ? (
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {chips.map((option, index) => (
                   <span key={`${option.cptCode}-${index}`} className="rounded-full bg-rd-surface-2 px-2.5 py-1 font-mono text-[13px] text-rd-label-primary">
                     {option.cptCode} · {option.workRvu?.toFixed(2) ?? '—'}
                   </span>
                 ))}
+                {chips.length > 1 && (
+                  <span className="font-mono text-[13px] font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">= {chipsWrvu.toFixed(2)} wRVU</span>
+                )}
               </div>
             ) : (
               <p className="font-mono text-[15px] text-rd-label-secondary">No CPT selected</p>
@@ -79,11 +83,6 @@ export function AttentionCard({ row, active, onAccept, onSkip, onChangeCode, exp
       {expanded && (
         <div className="mt-3 space-y-2 border-t border-rd-separator pt-3">
           <p className="text-[12px] text-rd-label-secondary">Raw: {row.source.parserRawLine ?? row.source.cleanedText ?? row.source.examTitle}</p>
-          {row.candidates.map((option, index) => (
-            <button key={`${option.cptCode}-${index}`} type="button" onClick={() => onChangeCode(index)} className="flex min-h-11 w-full items-center justify-between rounded-[10px] bg-rd-surface-2 px-3 text-left text-[13px] text-rd-label-primary">
-              <span>{option.cptCode} · {option.description}</span><span>{Math.round(option.confidence * 100)}%</span>
-            </button>
-          ))}
         </div>
       )}
 
@@ -93,7 +92,7 @@ export function AttentionCard({ row, active, onAccept, onSkip, onChangeCode, exp
         </button>
         {row.duplicateStatus === 'possible'
           ? <button type="button" onClick={onAccept} className="min-h-11 px-2 text-[15px] text-rd-label-primary">Count both</button>
-          : <button type="button" onClick={() => setExpanded(true)} className="min-h-11 px-2 text-[15px] text-rd-label-primary">Change code <KeyHint>E</KeyHint></button>}
+          : <button type="button" onClick={onOpenPicker} className="min-h-11 px-2 text-[15px] text-rd-label-primary">Change code <KeyHint>E</KeyHint></button>}
         <button type="button" onClick={onSkip} className="min-h-11 px-2 text-[15px] text-rd-label-secondary">Skip <KeyHint>S</KeyHint></button>
       </div>
     </article>

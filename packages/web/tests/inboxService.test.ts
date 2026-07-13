@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { approveInboxRow, confidencePhrase, formatInboxAccounting, summarizeInboxAccounting } from '../src/web/services/inboxService';
-import type { PipelineReviewRow } from '../src/web/pipeline/importPipeline';
+import { approveInboxRow, confidencePhrase, formatInboxAccounting, mergeInboxCandidateSelection, summarizeInboxAccounting } from '../src/web/services/inboxService';
+import { selectedCandidatesForRow, type PipelineReviewRow } from '../src/web/pipeline/importPipeline';
+import type { MatchCandidate } from '../src/web/types';
 
 function pendingRow(duplicateStatus: PipelineReviewRow['duplicateStatus'], hasCandidate: boolean): PipelineReviewRow {
   return {
@@ -63,6 +64,54 @@ describe('summarizeInboxAccounting — the permanent batch-accounting line', () 
   test('a possible-duplicate row with no candidate is not double-counted as needing a CPT', () => {
     const summary = summarizeInboxAccounting({ totalExams: 1, needsReviewCount: 1, confirmedWrvu: 0 }, [pendingRow('possible', false)]);
     expect(summary).toMatchObject({ possibleDuplicateCount: 1, needsCptCount: 0 });
+  });
+});
+
+describe('mergeInboxCandidateSelection — the Change code picker\'s commit path', () => {
+  function candidate(cptCode: string, workRvu: number, modifier: string | null = '26'): MatchCandidate {
+    return { cptCode, modifier, description: `Desc ${cptCode}`, workRvu, modality: 'CT', confidence: 1, method: 'manual_cpt' };
+  }
+
+  test('a single searched code not already in row.candidates gets appended and selected', () => {
+    const row = pendingRow(null, true); // one existing candidate: 74177
+    const picked = candidate('71046', 0.4);
+    const merged = mergeInboxCandidateSelection(row, [picked]);
+    expect(merged.candidates).toHaveLength(2);
+    expect(merged.selectedCandidateIndices).toEqual([1]);
+    expect(selectedCandidatesForRow(merged)).toEqual([picked]);
+  });
+
+  test('picking a code identical to an existing candidate (by cptCode+modifier) reuses its index instead of duplicating', () => {
+    const row = pendingRow(null, true); // candidates[0] is cptCode 74177/26
+    const sameCode = candidate('74177', 3.15, '26');
+    const merged = mergeInboxCandidateSelection(row, [sameCode]);
+    expect(merged.candidates).toHaveLength(1);
+    expect(merged.selectedCandidateIndices).toEqual([0]);
+  });
+
+  test('multi-select: two picked codes both merge in and both get selected, in order', () => {
+    const row = pendingRow(null, false); // no existing candidates
+    const a = candidate('74176', 2.5);
+    const b = candidate('74177', 3.15);
+    const merged = mergeInboxCandidateSelection(row, [a, b]);
+    expect(merged.candidates).toEqual([a, b]);
+    expect(merged.selectedCandidateIndices).toEqual([0, 1]);
+    expect(selectedCandidatesForRow(merged).reduce((sum, c) => sum + (c.workRvu ?? 0), 0)).toBeCloseTo(5.65);
+  });
+
+  test('marks the row pending review again so the radiologist still confirms the new pick before it commits', () => {
+    const row = { ...pendingRow(null, true), needsReview: false, approvalStatus: 'auto_approved' as const };
+    const merged = mergeInboxCandidateSelection(row, [candidate('71046', 0.4)]);
+    expect(merged.needsReview).toBe(true);
+    expect(merged.approvalStatus).toBe('pending');
+  });
+
+  test('does not mutate the original row\'s candidates array', () => {
+    const row = pendingRow(null, true);
+    const originalCandidates = row.candidates;
+    mergeInboxCandidateSelection(row, [candidate('71046', 0.4)]);
+    expect(row.candidates).toBe(originalCandidates);
+    expect(row.candidates).toHaveLength(1);
   });
 });
 

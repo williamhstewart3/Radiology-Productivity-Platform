@@ -31,6 +31,44 @@ function displayTitle(log: StudyLog): string {
   return log.examTitleDisplay?.trim() || log.examNameRaw;
 }
 
+interface DisplayGroup {
+  key: string;
+  logs: StudyLog[];
+}
+
+/**
+ * Multi-CPT combos commit as several StudyLog rows sharing one sessionId
+ * (see commitPipelineResults). Group them back into one visual line here so
+ * the combo shows as a single exam with multiple CPT chips and a summed
+ * wRVU, matching the Inbox card face rather than looking like duplicates.
+ */
+function groupDayLogs(dayLogs: StudyLog[]): DisplayGroup[] {
+  const bySession = new Map<string, StudyLog[]>();
+  for (const log of dayLogs) {
+    if (!log.sessionId) continue;
+    const arr = bySession.get(log.sessionId) ?? [];
+    arr.push(log);
+    bySession.set(log.sessionId, arr);
+  }
+  const groups: DisplayGroup[] = [];
+  const emitted = new Set<string>();
+  for (const log of dayLogs) {
+    const comboLogs = log.sessionId ? bySession.get(log.sessionId) : undefined;
+    if (comboLogs && comboLogs.length > 1) {
+      if (emitted.has(log.sessionId!)) continue;
+      emitted.add(log.sessionId!);
+      groups.push({ key: log.sessionId!, logs: comboLogs });
+    } else {
+      groups.push({ key: log.id, logs: [log] });
+    }
+  }
+  return groups;
+}
+
+function relevantWrvu(log: StudyLog): number {
+  return (log.workRvu ?? 0) <= 0 || log.modifier !== '26' ? 0 : (log.workRvu ?? 0);
+}
+
 export function LegacyHistory() {
   const [range, setRange] = useState<Range>('30d');
   const [customStart, setCustomStart] = useState('');
@@ -304,7 +342,78 @@ export function LegacyHistory() {
                 </div>
 
                 <div className="space-y-2">
-                  {dayLogs.map((log) => {
+                  {groupDayLogs(dayLogs).map((group) => {
+                    if (group.logs.length > 1) {
+                      const comboLogs = group.logs;
+                      const primary = comboLogs[0];
+                      const title = displayTitle(primary);
+                      const anyNeedsReview = comboLogs.some((l) => l.needsReview);
+                      const allSelected = comboLogs.every((l) => selectedIds.has(l.id));
+                      const comboWrvu = comboLogs.reduce((sum, l) => sum + relevantWrvu(l), 0);
+                      const isEditing = editingLogId === primary.id;
+                      return (
+                        <div key={group.key} className={`card flex items-start gap-3 ${anyNeedsReview ? 'border-amber-500/30 bg-amber-500/5' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={allSelected}
+                            onChange={() => setSelectedIds((prev) => {
+                              const next = new Set(prev);
+                              for (const l of comboLogs) { if (allSelected) next.delete(l.id); else next.add(l.id); }
+                              return next;
+                            })}
+                            className="mt-1 h-4 w-4 shrink-0 rounded border-white/20 bg-white/5"
+                            aria-label={`Select ${title}`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {comboLogs.map((l) => (
+                                <span key={l.id} className="font-mono text-xs font-bold text-slate-300">
+                                  {l.cptCode ? `${l.cptCode}-26` : 'Unmatched'} · {relevantWrvu(l).toFixed(2)}
+                                </span>
+                              ))}
+                              {primary.modality && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/8 text-slate-400">{MODALITY_LABELS[primary.modality as Modality]}</span>}
+                              {primary.studyDateTime && <span className="text-[10px] font-mono text-slate-500">{new Date(primary.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>}
+                              {anyNeedsReview && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">Review</span>}
+                            </div>
+                            {isEditing ? (
+                              <div className="mt-1 flex gap-2">
+                                <input
+                                  value={editingTitle}
+                                  onChange={(e) => setEditingTitle(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') void saveRename(primary);
+                                    if (e.key === 'Escape') {
+                                      setEditingLogId(null);
+                                      setEditingTitle('');
+                                    }
+                                  }}
+                                  className="input flex-1 text-sm py-1"
+                                  aria-label="Edit exam title"
+                                />
+                                <button onClick={() => saveRename(primary)} className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">Save</button>
+                                <button onClick={() => { setEditingLogId(null); setEditingTitle(''); }} className="text-[10px] px-2 py-1 rounded-lg border border-white/12 text-slate-400">Cancel</button>
+                              </div>
+                            ) : (
+                              <p className="text-sm text-white mt-0.5 line-clamp-1">{title}</p>
+                            )}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-sm font-bold text-white">{comboWrvu.toFixed(2)}</p>
+                            <p className="text-[10px] text-slate-400">wRVU</p>
+                          </div>
+                          <div className="flex flex-col gap-1.5 shrink-0">
+                            {!isEditing && (
+                              <button onClick={() => startRename(primary)} className="text-[10px] px-2 py-1 rounded-lg border border-white/12 text-slate-400 hover:border-white/25 hover:text-white transition-colors">Rename</button>
+                            )}
+                            {anyNeedsReview && (
+                              <button onClick={() => comboLogs.forEach((l) => void markReviewed(l))} className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-colors whitespace-nowrap">OK</button>
+                            )}
+                            <button onClick={() => softDelete(comboLogs.map((l) => l.id))} disabled={deleting} className="text-[10px] px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors">Del</button>
+                          </div>
+                        </div>
+                      );
+                    }
+                    const log = group.logs[0];
                     const notRelevant = (log.workRvu ?? 0) <= 0 || log.modifier !== '26';
                     const title = displayTitle(log);
                     const cmsDescription = log.cmsDescription && log.cmsDescription !== title ? log.cmsDescription : null;

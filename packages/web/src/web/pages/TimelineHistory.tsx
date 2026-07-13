@@ -13,6 +13,30 @@ function isDeleted(log: StudyLog): boolean { return Boolean((log as StudyLog & {
 function title(log: StudyLog): string { return log.examTitleDisplay?.trim() || log.examNameRaw; }
 function shortDate(date: string): string { return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
 
+/** Combo (multi-CPT) commits share one sessionId across their StudyLog rows -- group them back into one line. */
+function groupBySession(rows: StudyLog[]): StudyLog[][] {
+  const bySession = new Map<string, StudyLog[]>();
+  for (const log of rows) {
+    if (!log.sessionId) continue;
+    const arr = bySession.get(log.sessionId) ?? [];
+    arr.push(log);
+    bySession.set(log.sessionId, arr);
+  }
+  const groups: StudyLog[][] = [];
+  const emitted = new Set<string>();
+  for (const log of rows) {
+    const combo = log.sessionId ? bySession.get(log.sessionId) : undefined;
+    if (combo && combo.length > 1) {
+      if (emitted.has(log.sessionId!)) continue;
+      emitted.add(log.sessionId!);
+      groups.push(combo);
+    } else {
+      groups.push([log]);
+    }
+  }
+  return groups;
+}
+
 function DayGoalBar({ rvu, goal }: { rvu: number; goal: number }) {
   if (goal <= 0) return null;
   const percent = Math.min(150, (rvu / goal) * 100);
@@ -139,10 +163,13 @@ export function TimelineHistory({ onOpenLegacy }: { onOpenLegacy: () => void }) 
           <span className="text-[13px] font-semibold text-rd-label-primary">{new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
           <DayGoalBar rvu={dayRvu} goal={dailyGoal} />
           <span className="text-[13px] text-rd-label-secondary [font-variant-numeric:tabular-nums]">{dayRvu.toFixed(1)} · {rows.length} studies{topModality ? ` · ${topModality.label} ${topModality.percent.toFixed(0)}%` : ''}</span>
-        </header>{rows.map((log) => {
+        </header>{groupBySession(rows).map((comboLogs) => {
+          const log = comboLogs[0];
           const current = currentByCode.get(`${log.cptCode}-${log.modifier}`);
           const historical = current?.workRvu != null && log.workRvu != null && Math.abs(current.workRvu - log.workRvu) > 0.001;
-          return <div key={log.id} className="rd-row grid grid-cols-[62px_1fr_auto] items-center gap-3 border-b border-rd-separator px-1 text-[13px]"><span className="font-mono text-rd-label-secondary">{log.studyDateTime ? new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}</span><span className="min-w-0 truncate text-rd-label-primary">{title(log)} <span className="font-mono text-rd-label-secondary">{log.cptCode}</span> <MatchSourceFootnote method={log.matchMethod} /> {log.dateTimeSource === 'import_default' && <span className="text-rd-caution">inferred</span>} {historical && <span className="rounded bg-rd-surface-2 px-1.5 text-[11px] text-rd-label-secondary">{new Date(log.createdAt).getFullYear()} table</span>} {log.sourceImportId && <span className="text-[11px] text-rd-label-secondary">batch</span>}</span><span className="font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">{log.workRvu?.toFixed(2) ?? '—'}</span></div>;
+          const cptDisplay = comboLogs.length > 1 ? comboLogs.map((l) => l.cptCode).filter(Boolean).join(' + ') : log.cptCode;
+          const wrvuDisplay = comboLogs.length > 1 ? comboLogs.reduce((sum, l) => sum + (l.workRvu ?? 0), 0).toFixed(2) : (log.workRvu?.toFixed(2) ?? '—');
+          return <div key={log.sessionId ?? log.id} className="rd-row grid grid-cols-[62px_1fr_auto] items-center gap-3 border-b border-rd-separator px-1 text-[13px]"><span className="font-mono text-rd-label-secondary">{log.studyDateTime ? new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}</span><span className="min-w-0 truncate text-rd-label-primary">{title(log)} <span className="font-mono text-rd-label-secondary">{cptDisplay}</span> <MatchSourceFootnote method={log.matchMethod} /> {log.dateTimeSource === 'import_default' && <span className="text-rd-caution">inferred</span>} {historical && <span className="rounded bg-rd-surface-2 px-1.5 text-[11px] text-rd-label-secondary">{new Date(log.createdAt).getFullYear()} table</span>} {log.sourceImportId && <span className="text-[11px] text-rd-label-secondary">batch</span>}</span><span className="font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">{wrvuDisplay}</span></div>;
         })}</section>;
       })}
     </div>

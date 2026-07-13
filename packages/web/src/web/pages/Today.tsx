@@ -57,6 +57,30 @@ function isCaptureCommitted(log: StudyLog): boolean {
   return log.dateTimeSource === 'ocr' || log.dateTimeSource === 'llm_ocr_cleanup';
 }
 
+/** Combo (multi-CPT) commits share one sessionId across their StudyLog rows -- group them back into one line. */
+function groupBySession(rows: StudyLog[]): StudyLog[][] {
+  const bySession = new Map<string, StudyLog[]>();
+  for (const log of rows) {
+    if (!log.sessionId) continue;
+    const arr = bySession.get(log.sessionId) ?? [];
+    arr.push(log);
+    bySession.set(log.sessionId, arr);
+  }
+  const groups: StudyLog[][] = [];
+  const emitted = new Set<string>();
+  for (const log of rows) {
+    const combo = log.sessionId ? bySession.get(log.sessionId) : undefined;
+    if (combo && combo.length > 1) {
+      if (emitted.has(log.sessionId!)) continue;
+      emitted.add(log.sessionId!);
+      groups.push(combo);
+    } else {
+      groups.push([log]);
+    }
+  }
+  return groups;
+}
+
 function startOfWeek(date: string): string {
   const d = new Date(date + 'T12:00:00');
   d.setDate(d.getDate() - d.getDay());
@@ -124,14 +148,17 @@ export function Today({ onNavigate }: TodayProps) {
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       const windowStart = thirtyDaysAgo.toISOString().slice(0, 10);
       const all = await db.studyLogs.where('logDate').between(windowStart, today, true, true).toArray();
+      // Over-fetch beyond the 8-row display limit so a multi-CPT combo's
+      // sibling StudyLog rows aren't truncated mid-group before grouping.
       return all
         .filter((log) => !isDeleted(log) && (log.profileId === profileId || log.profileId == null))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-        .slice(0, 8);
+        .slice(0, 24);
     },
     [today, profileId],
     [],
   );
+  const recentGroups = useMemo(() => groupBySession(recentLogs).slice(0, 8), [recentLogs]);
 
   const sparklineWindowStart = useMemo(() => lensStart('day', today, SPARKLINE_DAYS), [today]);
   const sparklineLogs = useLiveQuery(
@@ -448,30 +475,35 @@ export function Today({ onNavigate }: TodayProps) {
       </div>
 
       <GroupedList header="Recent studies">
-        {recentLogs.length === 0 && <Row dense footnote="Nothing logged yet">No recent studies</Row>}
-        {recentLogs.map((log, index) => (
-          <Row
-            key={log.id}
-            dense
-            className={index >= 6 ? 'rd-density-extra' : undefined}
-            footnote={
-              <div className="flex items-center gap-1.5 text-[13px] text-rd-label-secondary">
-                {log.modality && <span>{MODALITY_LABELS[log.modality]}</span>}
-                <MatchSourceFootnote method={log.matchMethod} />
+        {recentGroups.length === 0 && <Row dense footnote="Nothing logged yet">No recent studies</Row>}
+        {recentGroups.map((comboLogs, index) => {
+          const log = comboLogs[0];
+          const cptDisplay = comboLogs.length > 1 ? comboLogs.map((l) => l.cptCode).filter(Boolean).join(' + ') : log.cptCode;
+          const wrvuDisplay = comboLogs.length > 1 ? comboLogs.reduce((sum, l) => sum + (l.workRvu ?? 0), 0).toFixed(2) : (log.workRvu?.toFixed(2) ?? '—');
+          return (
+            <Row
+              key={log.sessionId ?? log.id}
+              dense
+              className={index >= 6 ? 'rd-density-extra' : undefined}
+              footnote={
+                <div className="flex items-center gap-1.5 text-[13px] text-rd-label-secondary">
+                  {log.modality && <span>{MODALITY_LABELS[log.modality]}</span>}
+                  <MatchSourceFootnote method={log.matchMethod} />
+                </div>
+              }
+              trailing={
+                <span className="text-[15px] font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">
+                  {wrvuDisplay}
+                </span>
+              }
+            >
+              <div className="flex items-center gap-1.5">
+                {isCaptureCommitted(log) && <span title="Auto-committed from capture">📷</span>}
+                <span className="truncate">{cptDisplay ? `${cptDisplay} — ` : ''}{displayTitle(log)}</span>
               </div>
-            }
-            trailing={
-              <span className="text-[15px] font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">
-                {log.workRvu?.toFixed(2) ?? '—'}
-              </span>
-            }
-          >
-            <div className="flex items-center gap-1.5">
-              {isCaptureCommitted(log) && <span title="Auto-committed from capture">📷</span>}
-              <span className="truncate">{log.cptCode ? `${log.cptCode} — ` : ''}{displayTitle(log)}</span>
-            </div>
-          </Row>
-        ))}
+            </Row>
+          );
+        })}
         <Row dense onClick={() => onNavigate('/trends/history')} trailing={<span className="text-rd-accent">→</span>}>
           See all
         </Row>

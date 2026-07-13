@@ -4,9 +4,10 @@ import { db } from '../db/database';
 import { useOrg } from '../hooks/useOrg';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import { AttentionCard } from '../components/AttentionCard';
+import { ChangeCodePicker } from '../components/ChangeCodePicker';
 import { Card } from '../components/ui/Card';
 import { KeyHint } from '../components/ui/KeyHint';
-import { formatInboxAccounting, resolveInboxRows, selectInboxCandidate, summarizeInboxAccounting } from '../services/inboxService';
+import { applyInboxCandidateSelection, formatInboxAccounting, resolveInboxRows, summarizeInboxAccounting } from '../services/inboxService';
 import { restoreCaptureState, snapshotCaptureState, type CaptureUndoSnapshot } from '../services/captureUndoService';
 
 function parseRows(rowsJson: string | undefined): PipelineReviewRow[] {
@@ -27,6 +28,7 @@ export function Inbox() {
   const [receipt, setReceipt] = useState<string | null>(null);
   const [undoSnapshot, setUndoSnapshot] = useState<CaptureUndoSnapshot | null>(null);
   const [expandRequest, setExpandRequest] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const session = useLiveQuery(async () => {
     const sessions = await db.activeReviewSessions.where('status').equals('active').reverse().sortBy('updatedAt');
     return sessions.find((item) => item.profileId === profileId || item.profileId == null) ?? null;
@@ -70,6 +72,7 @@ export function Inbox() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (pickerOpen) return;
       const target = event.target as HTMLElement | null;
       if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
       if (event.key === 'Enter' && current) void resolve([current.tempId], current.duplicateStatus === 'possible' ? 'skip' : 'accept');
@@ -85,7 +88,7 @@ export function Inbox() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [current, pending, resolve, undo]);
+  }, [current, pending, resolve, undo, pickerOpen]);
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
@@ -108,7 +111,7 @@ export function Inbox() {
           active
           onAccept={() => void resolve([current.tempId], 'accept')}
           onSkip={() => void resolve([current.tempId], 'skip')}
-          onChangeCode={(index) => void selectInboxCandidate(profileId, current.tempId, index)}
+          onOpenPicker={() => setPickerOpen(true)}
           expandRequest={expandRequest}
         />
       ) : null}
@@ -120,6 +123,15 @@ export function Inbox() {
         </div>
       )}
 
+      <ChangeCodePicker
+        open={pickerOpen}
+        row={current ?? null}
+        onClose={() => setPickerOpen(false)}
+        onCommit={(candidates) => {
+          if (!current) return;
+          void applyInboxCandidateSelection(profileId, current.tempId, candidates);
+        }}
+      />
     </div>
   );
 }
