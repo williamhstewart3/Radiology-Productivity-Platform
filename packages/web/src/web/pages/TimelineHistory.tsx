@@ -129,7 +129,18 @@ export function TimelineHistory({ onOpenLegacy }: { onOpenLegacy: () => void }) 
         </ResponsiveContainer>
       </div>
 
-      {stories.length > 0 && <div className="grid gap-2 sm:grid-cols-2">{stories.map((story, index) => <button key={story} type="button" onClick={() => setStoryOpen(storyOpen === index ? null : index)} className="rounded-[12px] border border-rd-separator bg-rd-surface p-4 text-left text-[15px] text-rd-label-primary">✦ {story}{storyOpen === index && <span className="mt-2 block text-[12px] text-rd-label-secondary">Evidence: {totals.studyCount} counted studies totaling {totals.totalWorkRvu.toFixed(1)} wRVU in the visible range.</span>}</button>)}</div>}
+      {stories.length > 0 ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {stories.map((story, index) => (
+            <button key={story.text} type="button" onClick={() => setStoryOpen(storyOpen === index ? null : index)} className="rounded-[12px] border border-rd-separator bg-rd-surface p-4 text-left text-[15px] text-rd-label-primary">
+              {story.muted ? story.text : `✦ ${story.text}`}
+              {storyOpen === index && <span className="mt-2 block text-[12px] text-rd-label-secondary">Evidence: {totals.studyCount} counted studies totaling {totals.totalWorkRvu.toFixed(1)} wRVU in the visible range.</span>}
+            </button>
+          ))}
+        </div>
+      ) : logs.length > 0 && (
+        <p className="text-[13px] text-rd-label-secondary">Collecting your baseline — patterns appear after a few weeks.</p>
+      )}
 
       {grouped.length === 0 ? <div className="rounded-[16px] bg-rd-surface py-14 text-center text-rd-label-secondary">Your history starts with your first capture.</div> : grouped.map(([date, rows]) => {
         const countedRows = rows.filter((row) => !row.needsReview);
@@ -138,7 +149,10 @@ export function TimelineHistory({ onOpenLegacy }: { onOpenLegacy: () => void }) 
         return <section key={date} className="space-y-1"><header className="sticky top-14 z-10 flex items-center justify-between gap-3 border-b border-rd-separator bg-rd-bg/95 py-2">
           <span className="text-[13px] font-semibold text-rd-label-primary">{new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
           <DayGoalBar rvu={dayRvu} goal={dailyGoal} />
-          <span className="text-[13px] text-rd-label-secondary [font-variant-numeric:tabular-nums]">{dayRvu.toFixed(1)} · {rows.length} studies{topModality ? ` · ${topModality.label} ${topModality.percent.toFixed(0)}%` : ''}</span>
+          {/* Grouped.length === 1 means this single day's total IS the period total already shown in the header above -- repeating it here would say the same thing twice on one screen. */}
+          {grouped.length > 1 && (
+            <span className="text-[13px] text-rd-label-secondary [font-variant-numeric:tabular-nums]">{dayRvu.toFixed(1)} · {rows.length} studies{topModality ? ` · ${topModality.label} ${topModality.percent.toFixed(0)}%` : ''}</span>
+          )}
         </header>{rows.map((log) => {
           const current = currentByCode.get(`${log.cptCode}-${log.modifier}`);
           const historical = current?.workRvu != null && log.workRvu != null && Math.abs(current.workRvu - log.workRvu) > 0.001;
