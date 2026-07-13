@@ -434,6 +434,8 @@ export interface UserSettings {
   vacationDaysPlanned: number;
   activeRvuFileVersion: string;
   theme: 'light' | 'dark' | 'system';
+  /** Row density across list-shaped surfaces (Recent, History, Inbox). Default 'compact' — optional so existing records predating this field read as compact via `?? 'compact'` at call sites. */
+  density?: 'compact' | 'comfortable';
   updatedAt: string;
   // Daily Pace settings
   dailyRvuGoal: number;

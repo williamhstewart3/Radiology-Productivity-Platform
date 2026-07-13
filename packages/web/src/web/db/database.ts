@@ -453,6 +453,7 @@ export async function ensureUserSettings(): Promise<UserSettings> {
     vacationDaysPlanned: 0,
     activeRvuFileVersion: 'RVU26A',
     theme: 'system',
+    density: 'compact',
     updatedAt: new Date().toISOString(),
     dailyRvuGoal: 90,
     estimatedCompPerWrvu: null,

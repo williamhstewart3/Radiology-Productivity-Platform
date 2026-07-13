@@ -448,10 +448,12 @@ export function Today({ onNavigate }: TodayProps) {
       </div>
 
       <GroupedList header="Recent studies">
-        {recentLogs.length === 0 && <Row footnote="Nothing logged yet">No recent studies</Row>}
-        {recentLogs.map((log) => (
+        {recentLogs.length === 0 && <Row dense footnote="Nothing logged yet">No recent studies</Row>}
+        {recentLogs.map((log, index) => (
           <Row
             key={log.id}
+            dense
+            className={index >= 6 ? 'rd-density-extra' : undefined}
             footnote={
               <div className="flex items-center gap-1.5 text-[13px] text-rd-label-secondary">
                 {log.modality && <span>{MODALITY_LABELS[log.modality]}</span>}
@@ -470,7 +472,7 @@ export function Today({ onNavigate }: TodayProps) {
             </div>
           </Row>
         ))}
-        <Row onClick={() => onNavigate('/trends/history')} trailing={<span className="text-rd-accent">→</span>}>
+        <Row dense onClick={() => onNavigate('/trends/history')} trailing={<span className="text-rd-accent">→</span>}>
           See all
         </Row>
       </GroupedList>

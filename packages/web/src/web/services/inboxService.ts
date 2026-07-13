@@ -14,6 +14,7 @@ import type { ActiveReviewSession, MatchMethod } from '../types';
 export interface InboxAccounting {
   totalRows: number;
   readyCount: number;
+  readyWrvu: number;
   possibleDuplicateCount: number;
   needsCptCount: number;
 }
@@ -22,16 +23,19 @@ export interface InboxAccounting {
  * The Inbox header's permanent batch-accounting line — every field comes
  * straight off the session summary (already computed by
  * summarizeReviewSession) and the pending rows already loaded for the card
- * queue. No parallel counting, no new pipeline fields.
+ * queue. No parallel counting, no new pipeline fields. readyWrvu reuses
+ * session.confirmedWrvu directly — the auto-approved batch's wRVU total —
+ * rather than re-summing candidates here.
  */
 export function summarizeInboxAccounting(
-  session: Pick<ActiveReviewSession, 'totalExams' | 'needsReviewCount'> | null,
+  session: Pick<ActiveReviewSession, 'totalExams' | 'needsReviewCount' | 'confirmedWrvu'> | null,
   pending: PipelineReviewRow[],
 ): InboxAccounting | null {
   if (!session || session.totalExams === 0) return null;
   return {
     totalRows: session.totalExams,
     readyCount: session.totalExams - session.needsReviewCount,
+    readyWrvu: session.confirmedWrvu,
     possibleDuplicateCount: pending.filter((row) => row.duplicateStatus === 'possible').length,
     needsCptCount: pending.filter((row) => row.duplicateStatus !== 'possible' && row.candidates.length === 0).length,
   };
@@ -40,7 +44,7 @@ export function summarizeInboxAccounting(
 export function formatInboxAccounting(accounting: InboxAccounting): string {
   const parts = [
     `${accounting.totalRows} row${accounting.totalRows === 1 ? '' : 's'}`,
-    `${accounting.readyCount} ready`,
+    `${accounting.readyCount} ready${accounting.readyCount > 0 ? ` (+${accounting.readyWrvu.toFixed(1)} wRVU)` : ''}`,
   ];
   if (accounting.possibleDuplicateCount > 0) {
     parts.push(`${accounting.possibleDuplicateCount} possible duplicate${accounting.possibleDuplicateCount === 1 ? '' : 's'}`);

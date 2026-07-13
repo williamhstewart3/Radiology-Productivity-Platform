@@ -35,11 +35,14 @@ interface RowProps {
   footnote?: ReactNode;
   onClick?: () => void;
   className?: string;
+  /** Opt into the density setting's row height (Settings > Appearance) instead of the fixed 44px tap target — for dense list contexts like Recent studies, not primary navigation rows. */
+  dense?: boolean;
 }
 
-/** A single row inside a GroupedList. 44px minimum tap target. */
-export function Row({ children, trailing, footnote, onClick, className }: RowProps) {
-  const rowClassName = cn('flex min-h-11 w-full items-center justify-between gap-3 px-4 py-2.5 text-left', className);
+/** A single row inside a GroupedList. 44px minimum tap target, or the density-controlled height when `dense`. */
+export function Row({ children, trailing, footnote, onClick, className, dense }: RowProps) {
+  const rowClassName = cn('flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left', dense ? '' : 'min-h-11', className);
+  const rowStyle = dense ? { minHeight: 'var(--rd-row-height)' } : undefined;
   const content = (
     <>
       <div className="min-w-0 flex-1">
@@ -59,6 +62,7 @@ export function Row({ children, trailing, footnote, onClick, className }: RowPro
       <button
         type="button"
         onClick={onClick}
+        style={rowStyle}
         className={cn(rowClassName, 'cursor-pointer transition-colors hover:bg-rd-bg/40')}
       >
         {content}
@@ -66,5 +70,5 @@ export function Row({ children, trailing, footnote, onClick, className }: RowPro
     );
   }
 
-  return <div className={rowClassName}>{content}</div>;
+  return <div className={rowClassName} style={rowStyle}>{content}</div>;
 }
