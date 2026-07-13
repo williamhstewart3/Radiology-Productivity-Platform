@@ -6,7 +6,7 @@ import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import { AttentionCard } from '../components/AttentionCard';
 import { Card } from '../components/ui/Card';
 import { KeyHint } from '../components/ui/KeyHint';
-import { resolveInboxRows, selectInboxCandidate } from '../services/inboxService';
+import { formatInboxAccounting, resolveInboxRows, selectInboxCandidate, summarizeInboxAccounting } from '../services/inboxService';
 import { restoreCaptureState, snapshotCaptureState, type CaptureUndoSnapshot } from '../services/captureUndoService';
 
 function parseRows(rowsJson: string | undefined): PipelineReviewRow[] {
@@ -37,6 +37,11 @@ export function Inbox() {
     [session?.rowsJson],
   );
   const current = pending[Math.min(activeIndex, Math.max(0, pending.length - 1))];
+
+  const accounting = useMemo(() => {
+    const summary = summarizeInboxAccounting(session, pending);
+    return summary ? formatInboxAccounting(summary) : null;
+  }, [session, pending]);
 
   useEffect(() => {
     if (activeIndex >= pending.length) setActiveIndex(Math.max(0, pending.length - 1));
@@ -88,6 +93,7 @@ export function Inbox() {
         <div>
           <h1 className="text-[34px] font-bold text-rd-label-primary">Inbox · {pending.length}</h1>
           <p className="text-[13px] text-rd-label-secondary">Enter accept · E change · S skip · J/K move · Z undo</p>
+          {accounting && <p className="text-[13px] text-rd-label-secondary [font-variant-numeric:tabular-nums]">{accounting}</p>}
         </div>
         {pending.length > 1 && <span className="text-[13px] text-rd-label-secondary">{activeIndex + 1} of {pending.length}</span>}
       </div>

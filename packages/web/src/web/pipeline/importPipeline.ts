@@ -42,7 +42,7 @@ export interface CommitResult {
   reviewNeededCount: number;
 }
 
-function selectedCandidatesForRow(row: PipelineReviewRow): MatchCandidate[] {
+export function selectedCandidatesForRow(row: PipelineReviewRow): MatchCandidate[] {
   const selectedIndices =
     row.selectedCandidateIndices?.length
       ? row.selectedCandidateIndices

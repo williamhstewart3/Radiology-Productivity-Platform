@@ -506,12 +506,22 @@ export function Import({ onReviewReady }: ImportProps) {
     const readyCount = nextRows.length;
     const estimatedRvu = nextRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
     const reviewCount = nextRows.filter((row) => row.needsReview).length;
+    // The full saved/review/blocked/dup split for the receipt toast, all read
+    // off the same nextRows/nextSkippedRows the pipeline already returned —
+    // no new pipeline math. blockedCount is the subset of reviewCount with no
+    // CPT match at all (candidates.length === 0), broken out for the receipt
+    // only; reviewCount itself stays the full needsReview count so the
+    // desktop watcher notification's "in Inbox" total is unaffected.
+    const savedCount = nextRows.filter((row) => !row.needsReview).length;
+    const blockedCount = nextRows.filter((row) => row.needsReview && row.candidates.length === 0).length;
+    const decidableReviewCount = reviewCount - blockedCount;
+    const dupCount = nextSkippedRows.length;
     pushToast(
       reviewCount > 0 ? 'warning' : 'success',
       readyCount === 0 && nextSkippedRows.length === 0
         ? 'No studies found'
         : `Ready to review ${readyCount} exam${readyCount === 1 ? '' : 's'}`,
-      `+${estimatedRvu.toFixed(1)} wRVUs pending - ${nextSkippedRows.length} duplicate${nextSkippedRows.length === 1 ? '' : 's'} skipped - ${reviewCount} require review`,
+      `+${estimatedRvu.toFixed(1)} wRVUs pending · ${savedCount} saved · ${decidableReviewCount} need review · ${blockedCount} no CPT match · ${dupCount} duplicate${dupCount === 1 ? '' : 's'} skipped`,
     );
     const desktop = getDesktopAPI();
     if (desktop && document.visibilityState !== 'visible' && readyCount > 0) {
