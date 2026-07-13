@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   minimize: () => ipcRenderer.invoke("window:minimize"),
   maximize: () => ipcRenderer.invoke("window:maximize"),
   close: () => ipcRenderer.invoke("window:close"),
+  setAlwaysOnTop: (pinned: boolean) =>
+    ipcRenderer.invoke("window:set-always-on-top", pinned),
 
   // Events from main → renderer
   onDeepLink: (cb: (url: string) => void) => {

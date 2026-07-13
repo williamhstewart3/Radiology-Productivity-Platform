@@ -22,7 +22,7 @@ import {
 import { computeByModality, computeYtdStats, todayDateString, topModalityShares } from '../utils/calculations';
 import { buildTimelineBuckets, lensStart } from '../utils/historyTimeline';
 import { resolveDisplayName, type ResolvedDisplayName } from '../utils/displayName';
-import { openMiniWindow } from '../utils/miniWindow';
+import { useMiniWindowLauncher } from '../hooks/useMiniWindowLauncher';
 import { MiniPaceWindow } from '../components/MiniPaceWindow';
 import { Readout, type ReadoutTone } from '../components/ui/Readout';
 import { Ring, useCountUp } from '../components/ui/Ring';
@@ -210,12 +210,7 @@ export function Today({ onNavigate }: TodayProps) {
     return () => clearInterval(interval);
   }, [recalculate]);
 
-  const [miniFallbackOpen, setMiniFallbackOpen] = useState(false);
-  const handleOpenMiniWindow = useCallback(() => {
-    void openMiniWindow().then(({ blocked }) => {
-      if (blocked) setMiniFallbackOpen(true);
-    });
-  }, []);
+  const { openMini, blocked: miniFallbackOpen, dismissBlocked: dismissMiniFallback, pinningUnavailable, dismissPinningUnavailable } = useMiniWindowLauncher();
 
   const animatedRvu = useCountUp(metrics?.currentRvu ?? 0);
 
@@ -330,7 +325,7 @@ export function Today({ onNavigate }: TodayProps) {
         </div>
         <button
           type="button"
-          onClick={handleOpenMiniWindow}
+          onClick={openMini}
           title="Open the Mini window (Ctrl/Cmd+M) — a small floating pace tracker for beside PACS"
           className="mt-1 flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-rd-separator px-3 text-[13px] font-medium text-rd-label-secondary hover:bg-rd-surface"
         >
@@ -338,18 +333,25 @@ export function Today({ onNavigate }: TodayProps) {
         </button>
       </div>
 
+      {pinningUnavailable && (
+        <p className="rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 text-[12px] text-rd-label-secondary">
+          Opened as a regular window — always-on-top pinning isn’t available in this browser.
+          <button type="button" onClick={dismissPinningUnavailable} className="ml-2 underline">Dismiss</button>
+        </p>
+      )}
+
       {miniFallbackOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-3">
           <button
             type="button"
             className="absolute inset-0 cursor-default"
             aria-label="Close mini pace"
-            onClick={() => setMiniFallbackOpen(false)}
+            onClick={dismissMiniFallback}
           />
           <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-black shadow-2xl">
             <button
               type="button"
-              onClick={() => setMiniFallbackOpen(false)}
+              onClick={dismissMiniFallback}
               className="absolute right-2 top-2 z-10 rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300 hover:border-white/25 hover:text-white"
             >
               Close

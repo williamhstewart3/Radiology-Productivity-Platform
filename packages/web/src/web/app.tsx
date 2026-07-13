@@ -38,7 +38,7 @@ import { Inbox } from './pages/Inbox';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { injectTheme } from './lib/theme';
 import { enqueueGlobalCapture } from './services/globalCaptureQueue';
-import { openMiniWindow } from './utils/miniWindow';
+import { useMiniWindowLauncher } from './hooks/useMiniWindowLauncher';
 import { getDesktopAPI } from './lib/desktop';
 
 // ─── Nav: 5 destinations on real Wouter routes ──────────────────────────────
@@ -131,12 +131,7 @@ function MainApp() {
   const { isReady, error } = useAppInitialization();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [miniBlocked, setMiniBlocked] = useState(false);
-  const handleOpenMini = () => {
-    void openMiniWindow().then(({ blocked }) => {
-      if (blocked) setMiniBlocked(true);
-    });
-  };
+  const { openMini: handleOpenMini, blocked: miniBlocked, dismissBlocked: dismissMiniBlocked, pinningUnavailable, dismissPinningUnavailable } = useMiniWindowLauncher();
   const { activeProfile, activePractice } = useOrg();
   const [location, navigate] = useLocation();
   const pendingCount = useLiveQuery(async () => {
@@ -197,7 +192,7 @@ function MainApp() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [navigate]);
+  }, [navigate, handleOpenMini]);
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -398,18 +393,26 @@ function MainApp() {
 
         <BottomTabBar items={tabItems} onCapture={() => navigate('/log')} />
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate} onOpenMini={handleOpenMini} />
+        {pinningUnavailable && (
+          <div className="fixed inset-x-0 bottom-4 z-[100] flex justify-center px-3">
+            <p className="rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 text-[12px] text-rd-label-secondary shadow-lg">
+              Opened as a regular window — always-on-top pinning isn’t available in this browser.
+              <button type="button" onClick={dismissPinningUnavailable} className="ml-2 underline">Dismiss</button>
+            </p>
+          </div>
+        )}
         {miniBlocked && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-3">
             <button
               type="button"
               className="absolute inset-0 cursor-default"
               aria-label="Close mini pace"
-              onClick={() => setMiniBlocked(false)}
+              onClick={dismissMiniBlocked}
             />
             <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-black shadow-2xl">
               <button
                 type="button"
-                onClick={() => setMiniBlocked(false)}
+                onClick={dismissMiniBlocked}
                 className="absolute right-2 top-2 z-10 rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300 hover:border-white/25 hover:text-white"
               >
                 Close

@@ -33,6 +33,7 @@ import {
 import { todayDateString } from '../utils/calculations';
 import { resolveDisplayName } from '../utils/displayName';
 import { saveMiniWindowBounds } from '../utils/miniWindow';
+import { getDesktopAPI } from '../lib/desktop';
 import type { StudyLog } from '../types';
 
 const HUD_BG = '#0A0E1A';
@@ -95,12 +96,15 @@ function rateText(metrics: DailyPaceMetrics): string {
 
 interface MiniPaceWindowProps {
   embedded?: boolean;
+  /** Overrides the default window.opener-based navigation -- needed for Document PiP, where there is no window.opener since it isn't a real window.open() popup (it's the same script painting into a second surface). */
+  onNavigate?: (path: string) => void;
 }
 
-export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
+export function MiniPaceWindow({ embedded = false, onNavigate }: MiniPaceWindowProps) {
   const today = todayDateString();
   const { activeProfile } = useProfile();
   const profileId = activeProfile?.id ?? null;
+  const desktop = getDesktopAPI();
 
   const todayLogs = useLiveQuery(
     async () => {
@@ -215,9 +219,25 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
   }, [recentStudiesKey, reducedMotion]);
 
   const goTo = useCallback((path: string) => {
+    if (onNavigate) {
+      onNavigate(path);
+      return;
+    }
     window.opener?.location.assign(path);
     window.focus();
-  }, []);
+  }, [onNavigate]);
+
+  const [pinned, setPinned] = useState(false);
+  useEffect(() => {
+    if (!desktop) return;
+    setPinned(settings?.miniWindowPinned ?? true);
+  }, [desktop, settings?.miniWindowPinned]);
+  const togglePin = useCallback(() => {
+    const next = !pinned;
+    setPinned(next);
+    void desktop?.setAlwaysOnTop?.(next);
+    void db.userSettings.update('default', { miniWindowPinned: next });
+  }, [pinned, desktop]);
 
   if (!metrics || todayLogs === undefined) {
     return (
@@ -235,6 +255,7 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
   return (
     <div
       style={{
+        position: 'relative',
         minHeight: embedded ? 'auto' : '100vh',
         width: embedded ? '100%' : undefined,
         background: HUD_BG,
@@ -247,6 +268,20 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
       }}
     >
       <style>{'@keyframes rd-mini-row-fade { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }'}</style>
+
+      {desktop && (
+        <button
+          type="button"
+          onClick={togglePin}
+          title={pinned ? 'Pinned always-on-top — click to unpin' : 'Not pinned — click to keep always-on-top'}
+          style={{
+            position: 'absolute', top: 8, right: 8, border: 0, background: 'transparent', cursor: 'pointer',
+            fontSize: 13, color: pinned ? HUD_POSITIVE : HUD_LABEL_SECONDARY, padding: 4,
+          }}
+        >
+          📌
+        </button>
+      )}
 
       {/* Rank #1 — pace block, owns the top half */}
       <button
