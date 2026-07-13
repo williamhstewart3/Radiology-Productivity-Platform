@@ -23,7 +23,7 @@ export interface PipelineReviewRow {
   autoSkipped: boolean;
   autoApproved: boolean;
   autoApprovalLevel: 'silent' | 'learned' | null;
-  approvalStatus?: 'pending' | 'manual_approved' | 'approved_as_new' | 'auto_approved' | 'excluded' | 'exact_duplicate_skipped';
+  approvalStatus?: 'pending' | 'manual_approved' | 'approved_as_new' | 'auto_approved' | 'excluded' | 'exact_duplicate_skipped' | 'existing_updated';
   reviewReason: string | null;
   /** Caller-supplied note (e.g. manual entry's optional notes field). Overrides the auto-generated combined-CPT note. */
   notes?: string | null;

@@ -9,7 +9,9 @@ import {
   loadActiveReviewSession,
   persistActiveReviewSession,
 } from './reviewSessionService';
-import type { ActiveReviewSession, MatchMethod } from '../types';
+import { candidateKey } from '../utils/cptPicker';
+import { recordAuditEvent } from '../utils/audit';
+import type { ActiveReviewSession, MatchCandidate, MatchMethod, StudyLog } from '../types';
 
 export interface InboxAccounting {
   totalRows: number;
@@ -93,18 +95,30 @@ export interface InboxResolutionResult {
 export async function resolveInboxRows(input: {
   profileId: string | null;
   rowIds: string[];
-  action: 'accept' | 'skip';
+  action: 'accept' | 'skip' | 'update_existing';
 }): Promise<InboxResolutionResult> {
   const session = await loadActiveReviewSession(input.profileId);
   if (!session) return { importedCount: 0, addedWrvu: 0, remainingAttention: 0 };
   const ids = new Set(input.rowIds);
   const selected = session.rows.filter((row) => ids.has(row.tempId));
   const remaining = session.rows.filter((row) => !ids.has(row.tempId));
+
+  if (input.action === 'update_existing') {
+    for (const row of selected) {
+      await updateExistingStudyTouch(row, input.profileId);
+    }
+  }
+
   const accepted = input.action === 'accept'
     ? selected.map(approveInboxRow).filter((row): row is PipelineReviewRow => Boolean(row))
     : [];
-  const skipped = input.action === 'skip'
-    ? selected.map((row) => ({ ...row, included: false, needsReview: false, approvalStatus: 'excluded' as const }))
+  const skipped = input.action === 'skip' || input.action === 'update_existing'
+    ? selected.map((row) => ({
+        ...row,
+        included: false,
+        needsReview: false,
+        approvalStatus: input.action === 'update_existing' ? 'existing_updated' as const : 'excluded' as const,
+      }))
     : [];
 
   const remainingAttention = remaining.filter((row) => row.included && row.needsReview).length;
@@ -119,7 +133,9 @@ export async function resolveInboxRows(input: {
   const result = await commitPipelineResults(rowsToCommit, session.readingDate, skipped.length, input.profileId);
   const nextRows = remainingAttention === 0 ? remaining.filter((row) => !quietRows.includes(row)) : remaining;
   const nextSkipped = [...session.skippedRows, ...skipped];
-  const nextTimeline = [...session.timeline, createTimelineEvent(input.action === 'accept' ? 'Accepted from Inbox' : 'Skipped from Inbox')];
+  const nextTimeline = [...session.timeline, createTimelineEvent(
+    input.action === 'accept' ? 'Accepted from Inbox' : input.action === 'update_existing' ? 'Updated existing from Inbox' : 'Skipped from Inbox',
+  )];
 
   if (nextRows.filter((row) => row.included && row.needsReview).length === 0 && nextRows.length === 0) {
     await db.activeReviewSessions.update(session.sessionId, {
@@ -149,15 +165,92 @@ export async function resolveInboxRows(input: {
   return { importedCount: result.importedCount, addedWrvu, remainingAttention };
 }
 
-export async function selectInboxCandidate(profileId: string | null, rowId: string, candidateIndex: number): Promise<void> {
-  const session = await loadActiveReviewSession(profileId);
-  if (!session) return;
-  const rows = session.rows.map((row) => row.tempId === rowId ? {
+/**
+ * The Change code picker's commit path, pure half. `candidates` may include
+ * codes already in row.candidates (a Suggested pick) or codes found via
+ * search (not yet in row.candidates at all, e.g. anything from the open CPT
+ * library) -- either is merged into row.candidates by cptCode+modifier
+ * (deduped, never appended twice) and selectedCandidateIndices points at
+ * the merged positions. This is the only schema-shaped change multi-CPT
+ * selection needs: commitPipelineResults and learnAlias already iterate
+ * `selectedCandidatesForRow(row)` as a set, not a single index.
+ */
+export function mergeInboxCandidateSelection(row: PipelineReviewRow, candidates: MatchCandidate[]): PipelineReviewRow {
+  const mergedCandidates = [...row.candidates];
+  const keyIndex = new Map(mergedCandidates.map((candidate, index) => [candidateKey(candidate), index]));
+  const indices = candidates.map((candidate) => {
+    const key = candidateKey(candidate);
+    const existingIndex = keyIndex.get(key);
+    if (existingIndex != null) return existingIndex;
+    mergedCandidates.push(candidate);
+    const newIndex = mergedCandidates.length - 1;
+    keyIndex.set(key, newIndex);
+    return newIndex;
+  });
+  return {
     ...row,
-    selectedCandidateIndex: candidateIndex,
-    selectedCandidateIndices: [candidateIndex],
+    candidates: mergedCandidates,
+    selectedCandidateIndex: indices[0] ?? null,
+    selectedCandidateIndices: indices,
     needsReview: true,
     approvalStatus: 'pending' as const,
-  } : row);
+  };
+}
+
+export async function applyInboxCandidateSelection(profileId: string | null, rowId: string, candidates: MatchCandidate[]): Promise<void> {
+  const session = await loadActiveReviewSession(profileId);
+  if (!session) return;
+  const rows = session.rows.map((row) => row.tempId === rowId ? mergeInboxCandidateSelection(row, candidates) : row);
   await persistActiveReviewSession({ ...session, profileId, rows });
+}
+
+export interface ExistingStudyTouchPatch {
+  studyDateTime?: string;
+  examTitleDisplay?: string;
+}
+
+/**
+ * The "Update existing" verb's pure half: what to change on the already-
+ * committed StudyLog for an addendum touch. Never touches workRvu or
+ * cptCode -- the billed code snapshot is immutable once committed. The
+ * display name only moves if the existing record was never manually
+ * cleaned up (still equals its raw OCR text), so a radiologist's earlier
+ * rename is never clobbered by a later recapture's resolved title.
+ */
+export function buildExistingStudyTouchPatch(row: PipelineReviewRow, existing: StudyLog): ExistingStudyTouchPatch {
+  const patch: ExistingStudyTouchPatch = {};
+  const incomingModified = row.source.modifiedDateTime ?? row.source.studyTime ?? null;
+  if (incomingModified && incomingModified !== existing.studyDateTime) {
+    patch.studyDateTime = incomingModified;
+  }
+  const candidateName = (row.displayTitle ?? row.source.procedureName ?? row.source.examTitle ?? '').trim();
+  const currentDisplay = (existing.examTitleDisplay ?? '').trim();
+  const wasManuallyResolved = currentDisplay.length > 0 && currentDisplay !== existing.examNameRaw.trim();
+  if (candidateName && !wasManuallyResolved && candidateName !== currentDisplay) {
+    patch.examTitleDisplay = candidateName;
+  }
+  return patch;
+}
+
+export async function updateExistingStudyTouch(row: PipelineReviewRow, profileId: string | null): Promise<void> {
+  if (!row.duplicateExistingLogId) return;
+  const existing = await db.studyLogs.get(row.duplicateExistingLogId);
+  if (!existing) return;
+  const patch = buildExistingStudyTouchPatch(row, existing);
+  if (Object.keys(patch).length === 0) return;
+  const now = new Date().toISOString();
+  await db.studyLogs.update(existing.id, { ...patch, updatedAt: now } as Partial<StudyLog>);
+  await recordAuditEvent({
+    profileId,
+    sessionId: existing.sessionId,
+    logDate: existing.logDate,
+    action: 'duplicate_touch_updated',
+    summary: `Updated read time for ${existing.examTitleDisplay ?? existing.examNameRaw}`,
+    detailsJson: JSON.stringify({
+      existingLogId: existing.id,
+      previousModified: existing.studyDateTime,
+      newModified: patch.studyDateTime ?? existing.studyDateTime,
+      renamedTo: patch.examTitleDisplay ?? null,
+    }),
+  });
 }
