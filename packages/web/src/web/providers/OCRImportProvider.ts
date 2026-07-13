@@ -28,6 +28,7 @@ import {
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
 import type { ParsedLine } from '../utils/powerScribeParser';
 import type { OcrPositionedLine, OcrResult } from '../utils/ocrProvider';
+import { CaptureTimer } from '../utils/captureTimings';
 
 export interface OCRImportOptions {
   cropBeforeOcr?: boolean;
@@ -264,9 +265,11 @@ export class OCRImportProvider implements ImportProvider {
   private studyDate: string;
   private options: OCRImportOptions;
   private debugInfo: OCRImportDebugInfo | null = null;
+  private timer: CaptureTimer;
 
-  constructor(file: File | Blob, studyDate: string, options: OCRImportOptions = {}) {
+  constructor(file: File | Blob, studyDate: string, options: OCRImportOptions = {}, timer: CaptureTimer = new CaptureTimer()) {
     this.file = file;
+    this.timer = timer;
     this.studyDate = studyDate;
     this.options = options;
   }
@@ -281,6 +284,7 @@ export class OCRImportProvider implements ImportProvider {
             ? this.options.cropRegion ?? DEFAULT_POWERSCRIBE_STUDY_LIST_CROP
             : this.options.cropRegion ?? null,
         );
+    this.timer.mark('image_prep');
     const result = preprocessed
       ? null
       : await provider.extractText(this.file);
@@ -288,10 +292,14 @@ export class OCRImportProvider implements ImportProvider {
       ? {} as ColumnOcrResults
       : null;
     if (preprocessed && columnResults) {
-      for (const column of preprocessed.columns) {
-        columnResults[column.name] = await provider.extractText(column.blob, COLUMN_OCR_PARAMS[column.name]);
-      }
+      // The 3 column crops are independent images -- OCR them concurrently
+      // (small worker pool, cap 3) instead of one after another.
+      const entries = await Promise.all(
+        preprocessed.columns.map(async (column) => [column.name, await provider.extractText(column.blob, COLUMN_OCR_PARAMS[column.name])] as const),
+      );
+      for (const [name, ocrResult] of entries) columnResults[name] = ocrResult;
     }
+    this.timer.mark('ocr');
     let columnDebugRows = columnResults ? reassembleColumnRowsWithDebug(columnResults) : [];
     let rowLines = columnResults ? columnDebugRows.map((row) => row.line) : result?.lines ?? [];
     let parsedWithDebug = parseOcrLinesWithDebug(rowLines);
@@ -334,6 +342,7 @@ export class OCRImportProvider implements ImportProvider {
       ocrConfidence,
       enabled: false,
     });
+    this.timer.mark('normalize');
 
     this.debugInfo = {
       crop: preprocessed?.tableCrop ?? null,
@@ -407,5 +416,9 @@ export class OCRImportProvider implements ImportProvider {
 
   getDebugInfo(): OCRImportDebugInfo | null {
     return this.debugInfo;
+  }
+
+  getTimer(): CaptureTimer {
+    return this.timer;
   }
 }

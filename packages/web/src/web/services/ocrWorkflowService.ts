@@ -5,6 +5,7 @@ import { runImportPipeline, type PipelineResult, type PipelineReviewRow } from '
 import { recordAuditEvent } from '../utils/audit';
 import { ensureUserSettings } from '../db/database';
 import { buildFingerprint } from '../utils/duplicateDetection';
+import { CaptureTimer, formatCaptureTimings, summarizeBatchTimings } from '../utils/captureTimings';
 import type { ImportProvider } from '../types/importProvider';
 import type { PowerScribeStructuredOcrRow } from '../types/structuredOcr';
 
@@ -20,19 +21,27 @@ export interface ProcessedImportResult {
   extractedCount: number;
   timelineLabel: string;
   ocrDebug?: OCRImportDebugInfo | null;
+  /** "1234ms total (image_prep 80ms · ocr 900ms · ...)" -- capture -> Inbox-ready timing, for the Details disclosure. */
+  timingSummary?: string;
 }
 
 async function processProvider(
   provider: ImportProvider,
   context: WorkflowContext,
   timelineLabel: (extractedCount: number) => string,
+  timer: CaptureTimer = new CaptureTimer(),
 ): Promise<ProcessedImportResult> {
   const studies = await provider.importStudies();
-  const result = await runImportPipeline(studies, context.logDate, context.profileId);
+  const result = await runImportPipeline(studies, context.logDate, context.profileId, timer);
+  const summary = summarizeBatchTimings([timer]);
+  if (summary.rowCount > 0) {
+    console.log(`[capture timing] ${studies.length} row(s): ${formatCaptureTimings(summary)}`);
+  }
   return {
     result,
     extractedCount: studies.length,
     timelineLabel: timelineLabel(studies.length),
+    timingSummary: formatCaptureTimings(summarizeBatchTimings([timer])),
   };
 }
 
@@ -142,6 +151,7 @@ export async function processOcrImport(
     });
   }
 
+  const timer = new CaptureTimer();
   const provider = new OCRImportProvider(source, context.logDate, {
       cropBeforeOcr: !metadata?.cropAlreadyApplied && settings.requireCropBeforeOcr !== false,
       cropRegion: savedCrop
@@ -152,11 +162,12 @@ export async function processOcrImport(
             height: savedCrop.height,
           }
         : null,
-    });
+    }, timer);
   const processed = await processProvider(
     provider,
     context,
     (count) => `Screenshot OCR completed (${count} extracted)`,
+    timer,
   );
   await recordAuditEvent({
     profileId: context.profileId,

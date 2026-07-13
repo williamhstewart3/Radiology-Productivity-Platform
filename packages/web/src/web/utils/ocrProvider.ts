@@ -44,63 +44,102 @@ export interface OcrProvider {
   extractText(image: File | Blob, params?: OcrProviderParams): Promise<OcrResult>;
 }
 
-let tesseractWorker: Worker | null = null;
-let lastAppliedParams: Required<OcrProviderParams> | null = null;
+/**
+ * A single screenshot capture needs up to 3 concurrent OCR passes (the
+ * procedure/exam-date/modified-date column crops). Tesseract.js workers run
+ * off the main thread already, but ONE worker only runs one recognize() at
+ * a time -- concurrent calls on a shared worker just queue. A small pool
+ * (cap 3, matching the column count) lets those 3 passes actually run in
+ * parallel instead of serially. Workers are created lazily and kept alive
+ * for reuse across captures in the same session.
+ */
+const WORKER_POOL_SIZE = 3;
+
+interface PooledWorker {
+  worker: Worker;
+  lastAppliedParams: Required<OcrProviderParams> | null;
+  busy: boolean;
+}
+
+const pool: PooledWorker[] = [];
+const waiters: Array<(entry: PooledWorker) => void> = [];
+
+async function acquireWorker(): Promise<PooledWorker> {
+  const idle = pool.find((entry) => !entry.busy);
+  if (idle) {
+    idle.busy = true;
+    return idle;
+  }
+  if (pool.length < WORKER_POOL_SIZE) {
+    const entry: PooledWorker = { worker: await createWorker('eng'), lastAppliedParams: null, busy: true };
+    pool.push(entry);
+    return entry;
+  }
+  return new Promise((resolve) => waiters.push(resolve));
+}
+
+function releaseWorker(entry: PooledWorker): void {
+  const next = waiters.shift();
+  if (next) {
+    next(entry);
+    return;
+  }
+  entry.busy = false;
+}
 
 export class TesseractProvider implements OcrProvider {
   async extractText(image: File | Blob, params: OcrProviderParams = {}): Promise<OcrResult> {
-    if (!tesseractWorker) {
-      tesseractWorker = await createWorker('eng');
+    const entry = await acquireWorker();
+    try {
+      const nextParams: Required<OcrProviderParams> = {
+        pageSegMode: params.pageSegMode ?? PSM.AUTO,
+        charWhitelist: params.charWhitelist ?? '',
+      };
+      if (
+        entry.lastAppliedParams?.pageSegMode !== nextParams.pageSegMode ||
+        entry.lastAppliedParams?.charWhitelist !== nextParams.charWhitelist
+      ) {
+        await entry.worker.setParameters({
+          tessedit_pageseg_mode: nextParams.pageSegMode,
+          tessedit_char_whitelist: nextParams.charWhitelist,
+        });
+        entry.lastAppliedParams = nextParams;
+      }
+
+      const { data } = await entry.worker.recognize(image);
+
+      const lines = data.text
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+      const positionedLines = (data.blocks ?? [])
+        .flatMap((block) => block.paragraphs ?? [])
+        .flatMap((paragraph) => paragraph.lines ?? [])
+        .map((line) => ({
+          text: line.text.trim(),
+          confidence: (line.confidence ?? 0) / 100,
+          bbox: line.bbox ?? null,
+        }))
+        .filter((line) => line.text.length > 0);
+
+      return {
+        rawText: data.text,
+        lines,
+        positionedLines: positionedLines.length
+          ? positionedLines
+          : lines.map((line) => ({ text: line, confidence: (data.confidence ?? 0) / 100, bbox: null })),
+        confidence: (data.confidence ?? 0) / 100,
+      };
+    } finally {
+      releaseWorker(entry);
     }
-
-    const nextParams: Required<OcrProviderParams> = {
-      pageSegMode: params.pageSegMode ?? PSM.AUTO,
-      charWhitelist: params.charWhitelist ?? '',
-    };
-    if (
-      lastAppliedParams?.pageSegMode !== nextParams.pageSegMode ||
-      lastAppliedParams?.charWhitelist !== nextParams.charWhitelist
-    ) {
-      await tesseractWorker.setParameters({
-        tessedit_pageseg_mode: nextParams.pageSegMode,
-        tessedit_char_whitelist: nextParams.charWhitelist,
-      });
-      lastAppliedParams = nextParams;
-    }
-
-    const { data } = await tesseractWorker.recognize(image);
-
-    const lines = data.text
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
-    const positionedLines = (data.blocks ?? [])
-      .flatMap((block) => block.paragraphs ?? [])
-      .flatMap((paragraph) => paragraph.lines ?? [])
-      .map((line) => ({
-        text: line.text.trim(),
-        confidence: (line.confidence ?? 0) / 100,
-        bbox: line.bbox ?? null,
-      }))
-      .filter((line) => line.text.length > 0);
-
-    return {
-      rawText: data.text,
-      lines,
-      positionedLines: positionedLines.length
-        ? positionedLines
-        : lines.map((line) => ({ text: line, confidence: (data.confidence ?? 0) / 100, bbox: null })),
-      confidence: (data.confidence ?? 0) / 100,
-    };
   }
 }
 
 export async function terminateOcrWorker() {
-  if (tesseractWorker) {
-    await tesseractWorker.terminate();
-    tesseractWorker = null;
-    lastAppliedParams = null;
-  }
+  const entries = pool.splice(0, pool.length);
+  waiters.length = 0;
+  await Promise.all(entries.map((entry) => entry.worker.terminate()));
 }
 
 /**

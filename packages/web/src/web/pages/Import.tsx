@@ -31,7 +31,7 @@ import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { MatchCandidate, UserSettings } from '../types';
 
-function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocrDebug']; imageFile?: File | Blob | null }) {
+function OcrDebugPanel({ debug, imageFile, timingSummary }: { debug: ProcessedImportResult['ocrDebug']; imageFile?: File | Blob | null; timingSummary?: string | null }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!imageFile) {
@@ -69,6 +69,12 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
         OCR debug: {debug.parsedRowCount ?? debug.detectedRows.length} parsed / {debug.rawLineCount ?? debug.ocrLines.length} raw lines, {Math.round(debug.ocrConfidence * 100)}% text confidence
       </summary>
       <div className="mt-3 grid gap-3">
+        {timingSummary && (
+          <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-rd-label-secondary">Capture timing</p>
+            <p className="mt-1 font-mono text-[11px] text-rd-label-primary">{timingSummary}</p>
+          </div>
+        )}
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {debugStats.map(([label, value]) => (
             <div key={label} className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
@@ -376,6 +382,7 @@ export function Import({ onReviewReady }: ImportProps) {
   const [error, setError]         = useState<string | null>(null);
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
+  const [timingSummary, setTimingSummary] = useState<string | null>(null);
   // Eagerly generated (not lazily inside the persist effect below) so that
   // effect only ever runs once per actual state change instead of twice per
   // batch — the second, self-triggered run used to just overwrite the same
@@ -557,6 +564,7 @@ export function Import({ onReviewReady }: ImportProps) {
       }, { filename: file.name, size: file.size });
       pushToast('info', 'Matching CPT codes...', 'Running aliases, active CPT filters, and review checks.');
       setOcrDebug(processed.ocrDebug ?? null);
+      setTimingSummary(processed.timingSummary ?? null);
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
       setClipboardFile(null);
     } catch (e) {
@@ -857,7 +865,7 @@ export function Import({ onReviewReady }: ImportProps) {
               The screenshot is cropped, parsed, matched, and checked locally. Already-imported studies are auto-skipped.
             </p>
           </div>
-          <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
+          <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} timingSummary={timingSummary} />
           {error && <p className="text-[13px] text-rd-negative">{error}</p>}
           <button
             type="button"
