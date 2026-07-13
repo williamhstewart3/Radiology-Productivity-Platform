@@ -31,6 +31,7 @@ import {
   type DailyPaceSettings,
 } from '../utils/dailyPaceCalculations';
 import { todayDateString } from '../utils/calculations';
+import { resolveDisplayName } from '../utils/displayName';
 import type { StudyLog } from '../types';
 
 const HUD_BG = '#0A0E1A';
@@ -48,10 +49,6 @@ const HUD_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", 
 
 function isDeleted(log: StudyLog): boolean {
   return Boolean((log as StudyLog & { deletedAt?: string }).deletedAt);
-}
-
-function title(log: StudyLog): string {
-  return log.examTitleDisplay?.trim() || log.examNameRaw;
 }
 
 /** [fill color, gradient-start color] for the given pace status — same
@@ -275,7 +272,7 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
                 {log.studyDateTime ? new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}
               </span>
               <span style={{ fontSize: 12, color: HUD_LABEL_PRIMARY, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {title(log)}
+                {resolveDisplayName(log).name}
               </span>
               <span style={{ fontSize: 12, color: HUD_LABEL_PRIMARY, fontVariantNumeric: 'tabular-nums' }}>{log.workRvu?.toFixed(2) ?? '—'}</span>
             </button>

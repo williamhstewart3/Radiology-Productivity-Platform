@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { selectedCandidatesForRow, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { confidencePhrase } from '../services/inboxService';
+import { resolveCaptureName } from '../utils/displayName';
 import type { ImportSource } from '../types/importProvider';
 import { KeyHint } from './ui/KeyHint';
 
@@ -35,6 +36,11 @@ export function AttentionCard({ row, active, onAccept, onSkip, onChangeCode, exp
   const examTime = shortTime(row.source.studyTime ?? row.source.examDateTime);
   const readTime = shortTime(row.source.modifiedDateTime);
   const sourceLabel = SOURCE_LABELS[row.source.source];
+  const rawProcedureText = row.source.procedureName ?? row.source.examTitle;
+  // The card face never shows the raw OCR line — resolveCaptureName cleans
+  // it (title-cased, artifact tokens stripped) as a fallback when there's
+  // no matched name yet. The true raw text still lives in Details below.
+  const proposedName = resolveCaptureName(null, rawProcedureText);
   useEffect(() => { if (expandRequest) setExpanded(true); }, [expandRequest]);
 
   return (
@@ -42,7 +48,7 @@ export function AttentionCard({ row, active, onAccept, onSkip, onChangeCode, exp
       {row.duplicateStatus === 'possible' ? (
         <div className="space-y-4">
           <p className="text-[13px] font-semibold text-rd-caution">Possible duplicate</p>
-          <p className="text-[22px] font-semibold text-rd-label-primary">{row.source.procedureName ?? row.source.examTitle}</p>
+          <p className="text-[22px] font-semibold text-rd-label-primary">{proposedName.name}</p>
           <div className="grid grid-cols-2 overflow-hidden rounded-[10px] border border-rd-separator text-[13px]">
             <div className="border-r border-rd-separator p-3"><span className="block text-rd-label-secondary">already counted</span>{row.duplicateReason ?? 'Matching study'}</div>
             <div className="p-3"><span className="block text-rd-label-secondary">this capture</span>{row.source.modifiedDateTime ?? row.source.studyTime ?? 'Time unavailable'}</div>
@@ -51,7 +57,7 @@ export function AttentionCard({ row, active, onAccept, onSkip, onChangeCode, exp
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="font-mono text-[15px] text-rd-label-secondary">“{row.source.procedureName ?? row.source.examTitle}”</p>
+          <p className="font-mono text-[15px] text-rd-label-secondary">“{proposedName.name}”</p>
           <div>
             <p className="text-[22px] font-semibold text-rd-label-primary">{candidate?.description ?? 'Choose a code'}</p>
             {chips.length > 0 ? (

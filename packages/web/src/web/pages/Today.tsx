@@ -21,6 +21,7 @@ import {
 } from '../utils/dailyPaceCalculations';
 import { computeByModality, computeYtdStats, todayDateString, topModalityShares } from '../utils/calculations';
 import { buildTimelineBuckets, lensStart } from '../utils/historyTimeline';
+import { resolveDisplayName, type ResolvedDisplayName } from '../utils/displayName';
 import { MiniPaceWindow } from '../components/MiniPaceWindow';
 import { Readout, type ReadoutTone } from '../components/ui/Readout';
 import { Ring, useCountUp } from '../components/ui/Ring';
@@ -45,8 +46,8 @@ function ClusterCell({ label, value }: { label: string; value: string }) {
   );
 }
 
-function displayTitle(log: StudyLog): string {
-  return log.examTitleDisplay?.trim() || log.examNameRaw;
+function displayTitle(log: StudyLog): ResolvedDisplayName {
+  return resolveDisplayName(log);
 }
 
 function isDeleted(log: StudyLog): boolean {
@@ -449,29 +450,41 @@ export function Today({ onNavigate }: TodayProps) {
 
       <GroupedList header="Recent studies">
         {recentLogs.length === 0 && <Row dense footnote="Nothing logged yet">No recent studies</Row>}
-        {recentLogs.map((log, index) => (
-          <Row
-            key={log.id}
-            dense
-            className={index >= 6 ? 'rd-density-extra' : undefined}
-            footnote={
-              <div className="flex items-center gap-1.5 text-[13px] text-rd-label-secondary">
-                {log.modality && <span>{MODALITY_LABELS[log.modality]}</span>}
-                <MatchSourceFootnote method={log.matchMethod} />
+        {recentLogs.map((log, index) => {
+          const resolved = displayTitle(log);
+          return (
+            <Row
+              key={log.id}
+              dense
+              className={index >= 6 ? 'rd-density-extra' : undefined}
+              footnote={
+                <div className="flex items-center gap-1.5 text-[13px] text-rd-label-secondary">
+                  {log.modality && <span>{MODALITY_LABELS[log.modality]}</span>}
+                  <MatchSourceFootnote method={log.matchMethod} />
+                </div>
+              }
+              trailing={
+                <span className="text-[15px] font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">
+                  {log.workRvu?.toFixed(2) ?? '—'}
+                </span>
+              }
+            >
+              <div className="flex items-center gap-1.5">
+                {isCaptureCommitted(log) && <span title="Auto-committed from capture">📷</span>}
+                <span className="truncate">{log.cptCode ? `${log.cptCode} — ` : ''}{resolved.name}</span>
+                {resolved.isFallback && (
+                  <button
+                    type="button"
+                    onClick={(event) => { event.stopPropagation(); onNavigate('/history/legacy'); }}
+                    className="shrink-0 text-[12px] text-rd-caution underline underline-offset-2"
+                  >
+                    unnamed — tap to fix
+                  </button>
+                )}
               </div>
-            }
-            trailing={
-              <span className="text-[15px] font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">
-                {log.workRvu?.toFixed(2) ?? '—'}
-              </span>
-            }
-          >
-            <div className="flex items-center gap-1.5">
-              {isCaptureCommitted(log) && <span title="Auto-committed from capture">📷</span>}
-              <span className="truncate">{log.cptCode ? `${log.cptCode} — ` : ''}{displayTitle(log)}</span>
-            </div>
-          </Row>
-        ))}
+            </Row>
+          );
+        })}
         <Row dense onClick={() => onNavigate('/trends/history')} trailing={<span className="text-rd-accent">→</span>}>
           See all
         </Row>

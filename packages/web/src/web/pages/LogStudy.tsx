@@ -18,6 +18,7 @@ import { useProfile } from '../hooks/useProfile';
 import { todayDateString } from '../utils/calculations';
 import { logConfirmedStudy } from '../utils/manualLog';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import { resolveDisplayName } from '../utils/displayName';
 import type { MatchCandidate } from '../types';
 import { MODALITY_LABELS } from '../types';
 import type { DuplicateMatch, StudyCandidate } from '../utils/duplicateDetection';
@@ -290,7 +291,7 @@ export function LogStudy({ onSaved }: LogStudyProps) {
                 </p>
                 <p className="text-amber-200/70 text-xs mt-0.5">{dupeWarning.reason}</p>
                 <p className="text-slate-400 text-xs mt-1">
-                  Existing: <span className="text-slate-300">{dupeWarning.existingLog.examNameRaw}</span>
+                  Existing: <span className="text-slate-300">{resolveDisplayName(dupeWarning.existingLog).name}</span>
                   {' · '}{dupeWarning.existingLog.logDate}
                   {dupeWarning.existingLog.workRvu != null && ` · ${dupeWarning.existingLog.workRvu.toFixed(2)} wRVU`}
                 </p>

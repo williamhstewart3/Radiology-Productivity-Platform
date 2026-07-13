@@ -5,12 +5,12 @@ import { db } from '../db/database';
 import { useOrg } from '../hooks/useOrg';
 import { computeByModality, computePeriodTotals, computeYtdStats, topModalityShares } from '../utils/calculations';
 import { buildInsightStories, buildTimelineBuckets, lensStart, type CustomRange, type HistoryLens } from '../utils/historyTimeline';
+import { resolveDisplayName } from '../utils/displayName';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { MatchSourceFootnote } from '../components/ui/MatchSourceFootnote';
 import type { CptRvuRow, StudyLog } from '../types';
 
 function isDeleted(log: StudyLog): boolean { return Boolean((log as StudyLog & { deletedAt?: string }).deletedAt); }
-function title(log: StudyLog): string { return log.examTitleDisplay?.trim() || log.examNameRaw; }
 function shortDate(date: string): string { return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
 
 function DayGoalBar({ rvu, goal }: { rvu: number; goal: number }) {
@@ -142,7 +142,8 @@ export function TimelineHistory({ onOpenLegacy }: { onOpenLegacy: () => void }) 
         </header>{rows.map((log) => {
           const current = currentByCode.get(`${log.cptCode}-${log.modifier}`);
           const historical = current?.workRvu != null && log.workRvu != null && Math.abs(current.workRvu - log.workRvu) > 0.001;
-          return <div key={log.id} className="rd-row grid grid-cols-[62px_1fr_auto] items-center gap-3 border-b border-rd-separator px-1 text-[13px]"><span className="font-mono text-rd-label-secondary">{log.studyDateTime ? new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}</span><span className="min-w-0 truncate text-rd-label-primary">{title(log)} <span className="font-mono text-rd-label-secondary">{log.cptCode}</span> <MatchSourceFootnote method={log.matchMethod} /> {log.dateTimeSource === 'import_default' && <span className="text-rd-caution">inferred</span>} {historical && <span className="rounded bg-rd-surface-2 px-1.5 text-[11px] text-rd-label-secondary">{new Date(log.createdAt).getFullYear()} table</span>} {log.sourceImportId && <span className="text-[11px] text-rd-label-secondary">batch</span>}</span><span className="font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">{log.workRvu?.toFixed(2) ?? '—'}</span></div>;
+          const resolved = resolveDisplayName(log);
+          return <div key={log.id} className="rd-row grid grid-cols-[62px_1fr_auto] items-center gap-3 border-b border-rd-separator px-1 text-[13px]"><span className="font-mono text-rd-label-secondary">{log.studyDateTime ? new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}</span><span className="flex min-w-0 items-center gap-1.5"><span className="min-w-0 truncate text-rd-label-primary">{resolved.name}</span><span className="flex shrink-0 items-center gap-1.5 text-rd-label-secondary">{resolved.isFallback && <button type="button" onClick={onOpenLegacy} className="shrink-0 text-rd-caution underline underline-offset-2">unnamed — tap to fix</button>} <span className="font-mono">{log.cptCode}</span> <MatchSourceFootnote method={log.matchMethod} /> {log.dateTimeSource === 'import_default' && <span className="text-rd-caution">inferred</span>} {historical && <span className="rounded bg-rd-surface-2 px-1.5 text-[11px]">{new Date(log.createdAt).getFullYear()} table</span>} {log.sourceImportId && <span className="text-[11px]">batch</span>}</span></span><span className="font-semibold text-rd-label-primary [font-variant-numeric:tabular-nums]">{log.workRvu?.toFixed(2) ?? '—'}</span></div>;
         })}</section>;
       })}
     </div>
