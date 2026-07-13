@@ -1,5 +1,5 @@
 import { db } from '../db/database';
-import { commitPipelineResults } from '../pipeline/importPipeline';
+import { commitPipelineResults, isReviewRowSaveEligible } from '../pipeline/importPipeline';
 import type { CommitResult, PipelineReviewRow } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
@@ -158,6 +158,42 @@ export async function loadActiveReviewSession(profileId: string | null): Promise
   }
 }
 
+/**
+ * Commits every row that's already ready (auto-approved / nothing left to
+ * decide) the moment the batch has zero rows needing review — not only as
+ * a side effect of the user resolving the last row that does.
+ *
+ * Previously this sweep lived exclusively in resolveInboxRows, which only
+ * runs when the user accepts or skips a card. A batch where every row
+ * matched with high confidence from the start never puts a card in front
+ * of the user — Inbox shows "All caught up" immediately — so
+ * resolveInboxRows was never called and those rows sat in rowsJson
+ * forever, never written to studyLogs despite the UI reporting nothing
+ * outstanding. Running the same sweep here, at the single place every
+ * caller already persists a session, closes that gap for all of them
+ * (a fresh capture, a resolved decision, or a candidate change) without
+ * duplicating the eligibility logic.
+ */
+async function sweepQuietRows(input: {
+  readingDate: string;
+  profileId: string | null;
+  rows: PipelineReviewRow[];
+  timeline: TimelineEvent[];
+}): Promise<{ rows: PipelineReviewRow[]; timeline: TimelineEvent[] }> {
+  const stillNeedsAttention = input.rows.some((row) => row.included && row.needsReview);
+  if (stillNeedsAttention) return { rows: input.rows, timeline: input.timeline };
+
+  const quietRows = input.rows.filter(isReviewRowSaveEligible);
+  if (quietRows.length === 0) return { rows: input.rows, timeline: input.timeline };
+
+  await commitPipelineResults(quietRows, input.readingDate, 0, input.profileId);
+  const quietIds = new Set(quietRows.map((row) => row.tempId));
+  return {
+    rows: input.rows.filter((row) => !quietIds.has(row.tempId)),
+    timeline: [...input.timeline, createTimelineEvent(`Auto-counted ${quietRows.length} quiet ${quietRows.length === 1 ? 'study' : 'studies'}`)],
+  };
+}
+
 export async function persistActiveReviewSession(input: {
   sessionId: string;
   profileId: string | null;
@@ -166,16 +202,37 @@ export async function persistActiveReviewSession(input: {
   skippedRows: PipelineReviewRow[];
   timeline: TimelineEvent[];
 }): Promise<void> {
+  const swept = await sweepQuietRows(input);
   const now = new Date().toISOString();
+
+  if (swept.rows.length === 0 && input.rows.length > 0) {
+    // Everything in this batch was quiet-eligible and just got committed —
+    // finalize rather than leave an empty "active" session behind.
+    await db.activeReviewSessions.put({
+      id: input.sessionId,
+      profileId: input.profileId,
+      readingDate: input.readingDate,
+      status: 'finalized',
+      rowsJson: '[]',
+      skippedRowsJson: JSON.stringify(input.skippedRows),
+      timelineJson: JSON.stringify(swept.timeline),
+      ...summarizeReviewSession([], input.skippedRows),
+      createdAt: now,
+      updatedAt: now,
+      finalizedAt: now,
+    });
+    return;
+  }
+
   await db.activeReviewSessions.put({
     id: input.sessionId,
     profileId: input.profileId,
     readingDate: input.readingDate,
     status: 'active',
-    rowsJson: JSON.stringify(input.rows),
+    rowsJson: JSON.stringify(swept.rows),
     skippedRowsJson: JSON.stringify(input.skippedRows),
-    timelineJson: JSON.stringify(input.timeline),
-    ...summarizeReviewSession(input.rows, input.skippedRows),
+    timelineJson: JSON.stringify(swept.timeline),
+    ...summarizeReviewSession(swept.rows, input.skippedRows),
     createdAt: now,
     updatedAt: now,
     finalizedAt: null,
