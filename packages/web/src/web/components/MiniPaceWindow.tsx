@@ -17,6 +17,7 @@ import { useProfile } from '../hooks/useProfile';
 import {
   computeDailyPace,
   DEFAULT_DAILY_PACE_SETTINGS,
+  projectedFinishClockTime,
   type DailyPaceSettings,
   type DailyPaceMetrics,
 } from '../utils/dailyPaceCalculations';
@@ -51,6 +52,13 @@ function paceDeltaText(metrics: DailyPaceMetrics): string {
   const diff = metrics.paceDifference;
   if (Math.abs(diff) < 1) return 'On pace';
   return diff > 0 ? `Ahead by ${diff.toFixed(1)}` : `${Math.abs(diff).toFixed(1)} behind pace`;
+}
+
+function projectedText(metrics: DailyPaceMetrics): string | null {
+  if (metrics.status === 'before_work') return null;
+  if (metrics.status === 'goal_achieved') return 'Projected: goal hit';
+  const time = projectedFinishClockTime(metrics);
+  return `Projected ${metrics.projectedEndOfDay.toFixed(0)}${time ? ` · ${time}` : ''}`;
 }
 
 interface MiniPaceWindowProps {
@@ -183,6 +191,11 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
           >
             {paceDeltaText(metrics)}
           </span>
+          {projectedText(metrics) && (
+            <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY, fontVariantNumeric: 'tabular-nums' }}>
+              {projectedText(metrics)}
+            </span>
+          )}
           <button type="button" onClick={() => { window.opener?.location.assign('/inbox'); window.focus(); }} style={{ border: 0, padding: 0, background: 'transparent', color: inboxCount > 0 ? HUD_CAUTION : HUD_LABEL_SECONDARY, textAlign: 'left', fontSize: 13, cursor: 'pointer' }}>
             {inboxCount > 0 ? `${inboxCount} inbox` : 'All counted'}
           </button>
