@@ -8,7 +8,7 @@
  *   powerscribe → PowerScribeImportProvider (disabled, "Coming Soon")
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Card } from '../components/ui/Card';
 import { useProfile } from '../hooks/useProfile';
@@ -28,6 +28,7 @@ import {
 import { processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
 import { watcherReceiptBody } from '../services/notificationReceipts';
+import { analyzeCapturePreview, type CapturePreviewInfo } from '../utils/capturePreview';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { MatchCandidate, UserSettings } from '../types';
 
@@ -181,6 +182,93 @@ function OcrDebugPanel({ debug, imageFile, timingSummary }: { debug: ProcessedIm
         )}
       </div>
     </details>
+  );
+}
+
+/**
+ * The P5 preview stage: nothing (no OCR, no pipeline, no Dexie write) runs
+ * on `file` until the radiologist explicitly clicks/presses Process. Discard
+ * is the default-safe action (Esc) and leaves no residue -- the caller is
+ * responsible for actually dropping its reference to `file` when it fires.
+ */
+function CapturePreviewCard({ file, onProcess, onDiscard, processing, extraActions }: {
+  file: File;
+  onProcess: () => void;
+  onDiscard: () => void;
+  processing: boolean;
+  extraActions?: ReactNode;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [info, setInfo] = useState<CapturePreviewInfo | null>(null);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    setInfo(null);
+    let cancelled = false;
+    void analyzeCapturePreview(file)
+      .then((result) => { if (!cancelled) setInfo(result); })
+      .catch(() => { if (!cancelled) setInfo(null); });
+    return () => {
+      cancelled = true;
+      URL.revokeObjectURL(url);
+    };
+  }, [file]);
+
+  useEffect(() => {
+    if (processing) return;
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        onProcess();
+      } else if (event.key === 'Escape') {
+        // Capture phase + stopPropagation so this beats the enclosing
+        // Sheet's own bubble-phase Escape handler -- Esc here means
+        // "discard the preview," not "close the whole Capture sheet."
+        event.preventDefault();
+        event.stopPropagation();
+        onDiscard();
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
+  }, [processing, onProcess, onDiscard]);
+
+  return (
+    <div className="space-y-3 rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
+      {previewUrl && (
+        <img src={previewUrl} alt="Capture preview — review before processing" className="max-h-56 w-full rounded-[8px] border border-rd-separator object-contain bg-black/20" />
+      )}
+      <p className="text-[12px] text-rd-label-secondary">
+        {info ? `${info.width} × ${info.height}px` : 'Checking image…'}
+        {info && (
+          info.looksLikePowerScribe
+            ? ' · Looks like a PowerScribe window'
+            : ' · Doesn’t look like a PowerScribe window — double-check before processing'
+        )}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onProcess}
+          disabled={processing}
+          className="min-h-11 rounded-[10px] bg-rd-label-primary px-3 text-[13px] font-semibold text-rd-bg disabled:opacity-40"
+        >
+          {processing ? CAPTURE_PROCESSING_LABEL : 'Process'} <span className="ml-1 opacity-60">↵</span>
+        </button>
+        <button
+          type="button"
+          onClick={onDiscard}
+          disabled={processing}
+          className="min-h-11 px-2 text-[13px] text-rd-label-secondary disabled:opacity-40"
+        >
+          Discard <span className="ml-1 opacity-60">Esc</span>
+        </button>
+        {extraActions}
+      </div>
+    </div>
   );
 }
 
@@ -774,37 +862,25 @@ export function Import({ onReviewReady }: ImportProps) {
       {mode === 'ocr' && (
         <Card className="space-y-4">
           {clipboardFile && !processing && (
-            <div className="space-y-3 rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
+            <div className="space-y-2">
               <p className="text-[13px] font-semibold text-rd-label-primary">{CAPTURE_PROMPT_TITLE}</p>
-              <p className="text-[12px] text-rd-label-secondary">
-                This looks like a PowerScribe worklist screenshot. {CAPTURE_PRIVACY_COPY}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => processPowerScribeCapture(clipboardFile, 'confirmed clipboard')}
-                  disabled={processing}
-                  className="min-h-11 rounded-[10px] bg-rd-label-primary px-3 text-[13px] font-semibold text-rd-bg disabled:opacity-40"
-                >
-                  Process this capture
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setClipboardFile(null)}
-                  disabled={processing}
-                  className="min-h-11 px-2 text-[13px] text-rd-label-secondary disabled:opacity-40"
-                >
-                  Ignore this capture
-                </button>
-                <button
-                  type="button"
-                  onClick={() => alwaysProcessClipboard(clipboardFile)}
-                  disabled={processing}
-                  className="min-h-11 px-2 text-[13px] text-rd-label-primary disabled:opacity-40"
-                >
-                  Always process PowerScribe captures
-                </button>
-              </div>
+              <p className="text-[11px] text-rd-label-secondary">{CAPTURE_PRIVACY_COPY}</p>
+              <CapturePreviewCard
+                file={clipboardFile}
+                processing={processing}
+                onProcess={() => processPowerScribeCapture(clipboardFile, 'confirmed clipboard')}
+                onDiscard={() => setClipboardFile(null)}
+                extraActions={
+                  <button
+                    type="button"
+                    onClick={() => alwaysProcessClipboard(clipboardFile)}
+                    disabled={processing}
+                    className="min-h-11 px-2 text-[13px] text-rd-label-primary disabled:opacity-40"
+                  >
+                    Always process PowerScribe captures
+                  </button>
+                }
+              />
             </div>
           )}
           {processing && <CaptureProcessingState />}
@@ -821,29 +897,34 @@ export function Import({ onReviewReady }: ImportProps) {
               className="hidden"
               onChange={(e) => setOcrFile(e.target.files?.[0] ?? null)}
             />
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className={cn(
-                'w-full cursor-pointer rounded-[16px] border-2 border-dashed p-8 text-center transition-colors',
-                ocrFile ? 'border-rd-label-primary bg-rd-surface-2' : 'border-rd-separator hover:bg-rd-surface-2',
-              )}
-            >
-              {ocrFile ? (
-                <div>
-                  <p className="font-medium text-rd-label-primary">{ocrFile.name}</p>
-                  <p className="mt-1 text-[12px] text-rd-label-secondary">
-                    {(ocrFile.size / 1024).toFixed(0)} KB · Click to change
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="mb-3 text-4xl">📸</p>
-                  <p className="text-[13px] font-medium text-rd-label-primary">Paste, drop, or click to upload</p>
-                  <p className="mt-1 text-[12px] text-rd-label-secondary">Copy the PowerScribe window, then paste here. Images are not stored.</p>
-                </div>
-              )}
-            </button>
+            {ocrFile ? (
+              <CapturePreviewCard
+                file={ocrFile}
+                processing={processing}
+                onProcess={handleOcrProcess}
+                onDiscard={() => setOcrFile(null)}
+                extraActions={
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={processing}
+                    className="min-h-11 px-2 text-[13px] text-rd-label-primary disabled:opacity-40"
+                  >
+                    Choose a different file
+                  </button>
+                }
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="w-full cursor-pointer rounded-[16px] border-2 border-dashed border-rd-separator p-8 text-center transition-colors hover:bg-rd-surface-2"
+              >
+                <p className="mb-3 text-4xl">📸</p>
+                <p className="text-[13px] font-medium text-rd-label-primary">Paste, drop, or click to upload</p>
+                <p className="mt-1 text-[12px] text-rd-label-secondary">Copy the PowerScribe window, then paste here. Images are not stored.</p>
+              </button>
+            )}
           </div>
           <div>
             <label htmlFor="ocr-log-date" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
@@ -867,14 +948,6 @@ export function Import({ onReviewReady }: ImportProps) {
           </div>
           <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} timingSummary={timingSummary} />
           {error && <p className="text-[13px] text-rd-negative">{error}</p>}
-          <button
-            type="button"
-            onClick={handleOcrProcess}
-            disabled={!ocrFile || processing}
-            className="min-h-11 w-full rounded-[10px] bg-rd-label-primary px-5 text-[15px] font-semibold text-rd-bg disabled:opacity-40"
-          >
-            {processing ? CAPTURE_PROCESSING_LABEL : 'Extract & Match'}
-          </button>
         </Card>
       )}
 
