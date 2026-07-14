@@ -34,6 +34,7 @@ describe('PowerScribe header-anchor geometry', () => {
 
   test('infers headerless partial-capture columns from repeated datetime clusters', () => {
     const words = [
+      word('My Reports', 8, 100, 80, 120), word('Browse', 12, 150, 70, 170),
       word('XR', 120, 100, 145, 120), word('CHEST', 150, 100, 210, 120),
       word('7/11/2026', 600, 100, 690, 120), word('8:15', 700, 100, 740, 120),
       word('7/11/2026', 810, 100, 900, 120), word('8:29', 910, 100, 950, 120),
@@ -44,8 +45,32 @@ describe('PowerScribe header-anchor geometry', () => {
 
     const layout = detectPowerScribeDatetimeLayout(words, 1200, 800);
     expect(layout).not.toBeNull();
+    expect(layout!.tableRect.x).toBeGreaterThan(0.09);
     expect(layout!.columns.procedure.x + layout!.columns.procedure.width).toBeLessThan(layout!.columns.examDate.x);
     expect(layout!.columns.examDate.x).toBeLessThan(layout!.columns.modifiedDate.x);
     expect(layout!.modifiedAnchorCount).toBe(2);
+  });
+
+  test('keeps the field-capture sidebar outside the datetime-inferred worklist crop', () => {
+    const words = [
+      word('Quick Search', 5, 56, 72, 68),
+      word('My Reports', 7, 86, 70, 98),
+      word('CT', 96, 48, 107, 56), word('HEAD', 110, 48, 133, 56),
+      word('7/14/2026', 198, 48, 228, 56), word('8:15', 229, 48, 239, 56),
+      word('7/14/2026', 242, 48, 272, 56), word('8:29', 273, 48, 282, 56),
+      word('XR', 96, 60, 107, 68), word('CHEST', 110, 60, 135, 68),
+      word('7/14/2026', 198, 60, 228, 68), word('9:00', 229, 60, 239, 68),
+      word('7/14/2026', 242, 60, 272, 68), word('9:22', 273, 60, 282, 68),
+      word('US', 96, 300, 107, 308), word('ABDOMEN', 110, 300, 150, 308),
+      word('7/14/2026', 198, 300, 228, 308), word('4:05', 229, 300, 239, 308),
+      word('7/14/2026', 242, 300, 272, 308), word('4:21', 273, 300, 282, 308),
+    ];
+
+    const layout = detectPowerScribeDatetimeLayout(words, 450, 352);
+    expect(layout).not.toBeNull();
+    expect(layout!.tableRect.x).toBeGreaterThan(0.2);
+    expect(layout!.tableRect.x).toBeLessThan(0.22);
+    expect(layout!.tableRect.x + layout!.tableRect.width).toBeGreaterThan(0.62);
+    expect(layout!.tableRect.x + layout!.tableRect.width).toBeLessThan(0.66);
   });
 });

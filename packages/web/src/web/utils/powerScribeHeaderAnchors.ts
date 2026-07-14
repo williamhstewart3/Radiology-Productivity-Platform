@@ -27,6 +27,10 @@ function centerY(word: PowerScribeOcrWord): number {
   return (word.bbox.y0 + word.bbox.y1) / 2;
 }
 
+function isProcedureStartWord(word: PowerScribeOcrWord): boolean {
+  return /^(?:CTA?|MRI?|MRA|XR|US|NM|PET|MAMMO|FL|IR)/.test(normalizedText(word.text));
+}
+
 function median(values: number[]): number | null {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -168,10 +172,19 @@ export function detectPowerScribeDatetimeLayout(
   const topPx = Math.max(0, Math.min(...modifiedBands.map((band) => band.y0)) - (bandPitch ?? medianHeight * 1.8) * 0.7);
   const bottomPx = Math.min(imageHeight, Math.max(...modifiedBands.map((band) => band.y1)) + (bandPitch ?? medianHeight * 1.8));
   const rowWords = words.filter((word) => centerY(word) >= topPx && centerY(word) <= bottomPx && word.bbox.x0 < examX);
-  const leftPx = Math.max(0, Math.min(...rowWords.map((word) => word.bbox.x0), examX - imageWidth * 0.45));
-  const modifiedRight = Math.max(...words
-    .filter((word) => centerY(word) >= topPx && centerY(word) <= bottomPx && word.bbox.x0 >= modifiedX)
-    .map((word) => word.bbox.x1), modifiedX + imageWidth * 0.12);
+  const procedureStarts = rowWords.filter(isProcedureStartWord);
+  const inferredProcedureWidth = Math.min(
+    imageWidth * 0.34,
+    Math.max(imageWidth * 0.18, (modifiedX - examX) * 3.2),
+  );
+  const leftPx = procedureStarts.length > 0
+    ? Math.max(0, Math.min(...procedureStarts.map((word) => word.bbox.x0)) - imageWidth * 0.006)
+    : Math.max(0, examX - inferredProcedureWidth);
+  const modifiedRowWords = words
+    .filter((word) => centerY(word) >= topPx && centerY(word) <= bottomPx && word.bbox.x0 >= modifiedX);
+  const modifiedRight = modifiedRowWords.length > 0
+    ? Math.max(...modifiedRowWords.map((word) => word.bbox.x1))
+    : modifiedX + imageWidth * 0.12;
   const rightPx = Math.min(imageWidth, modifiedRight + imageWidth * 0.015);
   if (bottomPx - topPx < imageHeight * 0.1 || rightPx - leftPx < imageWidth * 0.3) return null;
 
