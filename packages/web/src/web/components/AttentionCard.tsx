@@ -18,12 +18,13 @@ function shortTime(iso: string | null | undefined): string | null {
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onUpdateExisting, recommendedDuplicateAction, expandRequest }: {
+export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onSplit, onUpdateExisting, recommendedDuplicateAction, expandRequest }: {
   row: PipelineReviewRow;
   active: boolean;
   onAccept: () => void;
   onSkip: () => void;
   onOpenPicker: () => void;
+  onSplit: () => void;
   onUpdateExisting: () => void;
   /** null = today's default: "Same study — skip" stays the primary/recommended verb. */
   recommendedDuplicateAction: 'update_existing' | null;
@@ -122,6 +123,7 @@ export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onU
               ✓ Accept <KeyHint>↵</KeyHint>
             </button>
             <button type="button" onClick={onOpenPicker} className="min-h-11 px-2 text-[15px] text-rd-label-primary">Change code <KeyHint>E</KeyHint></button>
+            {chips.length > 1 && <button type="button" onClick={onSplit} className="min-h-11 px-2 text-[15px] font-medium text-rd-caution">Split exams</button>}
             <button type="button" onClick={onSkip} className="min-h-11 px-2 text-[15px] text-rd-label-secondary">Skip <KeyHint>S</KeyHint></button>
           </>
         )}

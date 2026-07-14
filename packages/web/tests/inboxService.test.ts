@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { approveInboxRow, buildExistingStudyTouchPatch, confidencePhrase, formatInboxAccounting, mergeInboxCandidateSelection, summarizeInboxAccounting } from '../src/web/services/inboxService';
+import { approveInboxRow, buildExistingStudyTouchPatch, confidencePhrase, formatInboxAccounting, mergeInboxCandidateSelection, splitInboxRowByCandidates, summarizeInboxAccounting } from '../src/web/services/inboxService';
 import { selectedCandidatesForRow, type PipelineReviewRow } from '../src/web/pipeline/importPipeline';
 import type { MatchCandidate, StudyLog } from '../src/web/types';
 
@@ -37,6 +37,20 @@ describe('Inbox confidence language', () => {
       needsReview: true,
     } as PipelineReviewRow;
     expect(approveInboxRow(row)).toMatchObject({ needsReview: false, approvalStatus: 'approved_as_new' });
+  });
+
+  test('approval preserves every explicitly selected CPT for a legitimate combined exam', () => {
+    const row = {
+      ...pendingRow(null, true),
+      candidates: [
+        { cptCode: '70496', modifier: '26', description: 'CTA head', workRvu: 1.75, modality: 'CT', confidence: 1, method: 'manual_cpt' },
+        { cptCode: '70498', modifier: '26', description: 'CTA neck', workRvu: 1.75, modality: 'CT', confidence: 1, method: 'manual_cpt' },
+      ],
+      selectedCandidateIndex: 0,
+      selectedCandidateIndices: [0, 1],
+    } as PipelineReviewRow;
+
+    expect(approveInboxRow(row)?.selectedCandidateIndices).toEqual([0, 1]);
   });
 });
 
@@ -112,6 +126,46 @@ describe('mergeInboxCandidateSelection — the Change code picker\'s commit path
     mergeInboxCandidateSelection(row, [candidate('71046', 0.4)]);
     expect(row.candidates).toBe(originalCandidates);
     expect(row.candidates).toHaveLength(1);
+  });
+
+  test('splits a merged OCR row into one pending study per selected CPT', () => {
+    const ids = ['split-a', 'split-b'];
+    const a = candidate('71260', 1.16);
+    const b = candidate('74177', 3.15);
+    const row = {
+      ...pendingRow(null, false),
+      tempId: 'merged-row',
+      source: {
+        examTitle: 'CT CHEST CT ABDOMEN PELVIS',
+        procedureName: 'CT CHEST CT ABDOMEN PELVIS',
+        canonicalExam: null,
+        cpt: null,
+        workRvu: null,
+        studyDate: '2026-07-14',
+        examDateTime: '2026-07-14T08:15:00',
+        studyTime: '2026-07-14T08:29:00',
+        modifiedDateTime: '2026-07-14T08:29:00',
+        modality: 'CT',
+        accessionNumber: 'AMBIGUOUS',
+        patientMRN: null,
+        rowIndex: '17',
+        source: 'ocr',
+        importedAt: '2026-07-14T08:30:00',
+        dateTimeConfidence: 0.9,
+        dateTimeSource: 'ocr_exact',
+      },
+    } as PipelineReviewRow;
+
+    const split = splitInboxRowByCandidates(row, [a, b], () => ids.shift() ?? 'unexpected');
+
+    expect(split.map((child) => child.tempId)).toEqual(['split-a', 'split-b']);
+    expect(split.map((child) => child.selectedCandidateIndices)).toEqual([[0], [0]]);
+    expect(split.map((child) => child.candidates[0].cptCode)).toEqual(['71260', '74177']);
+    expect(split.map((child) => child.source.procedureName)).toEqual(['Desc 71260', 'Desc 74177']);
+    expect(split.every((child) => child.needsReview && child.approvalStatus === 'pending')).toBe(true);
+    expect(split.every((child) => child.source.examDateTime === row.source.examDateTime)).toBe(true);
+    expect(split.every((child) => child.source.accessionNumber === null && child.source.rowIndex === null)).toBe(true);
+    expect(split.every((child) => child.source.parserRawLine === 'CT CHEST CT ABDOMEN PELVIS')).toBe(true);
   });
 });
 

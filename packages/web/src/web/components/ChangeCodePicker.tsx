@@ -8,8 +8,9 @@
  * pickProfessionalRow functions -- not a reimplementation, so results can't
  * drift from those surfaces). Chosen codes render as removable chips with a
  * live wRVU sum; committing feeds the existing selection path, which is
- * already multi-CPT-aware (commitPipelineResults and learnAlias both
- * iterate the full candidate set, not a single index).
+ * already multi-CPT-aware. When multiple codes are chosen, the user
+ * explicitly decides whether they belong to one combined exam or should
+ * become separate Inbox studies after merged OCR.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -27,11 +28,12 @@ interface PickerRow {
   confidencePercent?: number;
 }
 
-export function ChangeCodePicker({ open, row, onClose, onCommit }: {
+export function ChangeCodePicker({ open, row, onClose, onCommit, onSplit }: {
   open: boolean;
   row: PipelineReviewRow | null;
   onClose: () => void;
   onCommit: (candidates: MatchCandidate[]) => void;
+  onSplit: (candidates: MatchCandidate[]) => void;
 }) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<MatchCandidate[]>([]);
@@ -90,6 +92,12 @@ export function ChangeCodePicker({ open, row, onClose, onCommit }: {
   function commit() {
     if (selected.length === 0) return;
     onCommit(selected);
+    onClose();
+  }
+
+  function split() {
+    if (selected.length < 2) return;
+    onSplit(selected);
     onClose();
   }
 
@@ -185,16 +193,23 @@ export function ChangeCodePicker({ open, row, onClose, onCommit }: {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-rd-separator pt-3">
+        <div className="flex flex-col gap-3 border-t border-rd-separator pt-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[12px] text-rd-label-secondary">↵ toggle · ⌘↵ done · Esc cancel</p>
-          <button
-            type="button"
-            onClick={commit}
-            disabled={selected.length === 0}
-            className="min-h-11 rounded-[10px] bg-rd-label-primary px-4 text-[14px] font-semibold text-rd-bg disabled:opacity-40"
-          >
-            Done{selected.length > 0 ? ` (${selected.length})` : ''}
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {selected.length > 1 && (
+              <button type="button" onClick={split} className="min-h-11 rounded-[10px] border border-rd-caution px-3 text-[14px] font-semibold text-rd-caution">
+                Split into {selected.length} studies
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={commit}
+              disabled={selected.length === 0}
+              className="min-h-11 rounded-[10px] bg-rd-label-primary px-4 text-[14px] font-semibold text-rd-bg disabled:opacity-40"
+            >
+              {selected.length > 1 ? 'Keep together' : `Done${selected.length > 0 ? ` (${selected.length})` : ''}`}
+            </button>
+          </div>
         </div>
       </div>
     </Sheet>
