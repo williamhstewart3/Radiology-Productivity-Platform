@@ -405,7 +405,7 @@ function CapturePreview({ file, inspection }: { file: File; inspection: PowerScr
       <p className="text-[12px] text-rd-label-secondary">
         {inspection.width} × {inspection.height} · {inspection.detected
           ? 'This looks like a PowerScribe worklist; the outlined region is the candidate table.'
-          : "This doesn't look like a PowerScribe worklist."}
+          : 'No table outline was detected. If this is the PowerScribe worklist, you can still process it for review.'}
       </p>
     </div>
   );
@@ -693,7 +693,7 @@ export function Import({ onReviewReady }: ImportProps) {
     setClipboardFile(file);
     pushToast(
       preview.detected ? 'success' : 'warning',
-      preview.detected ? 'PowerScribe reports table detected' : "This doesn't look like the PowerScribe reports window",
+      preview.detected ? 'PowerScribe reports table detected' : 'PowerScribe table outline not detected',
       'Review the image, then press Enter to process or Esc to discard.',
     );
   }

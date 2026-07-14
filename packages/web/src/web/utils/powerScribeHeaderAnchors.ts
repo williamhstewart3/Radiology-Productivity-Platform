@@ -38,7 +38,12 @@ function median(values: number[]): number | null {
 }
 
 function findHeaderWord(words: PowerScribeOcrWord[], name: string): PowerScribeOcrWord | null {
-  return words.find((word) => normalizedText(word.text) === name) ?? null;
+  return words.find((word) => {
+    const normalized = normalizedText(word.text);
+    return normalized === name ||
+      normalized === `${name}DATE` ||
+      (name === 'PROCEDURE' && (normalized === 'PROCEDURENAME' || normalized === 'PROCEDURETITLE'));
+  }) ?? null;
 }
 
 function findExamDateHeader(words: PowerScribeOcrWord[]): PowerScribeOcrWord | null {
@@ -134,7 +139,7 @@ export function detectPowerScribeHeaderLayout(
   };
 }
 
-function groupDateWordsByX(words: PowerScribeOcrWord[]): [PowerScribeOcrWord[], PowerScribeOcrWord[]] | null {
+function groupDateWordsByX(words: PowerScribeOcrWord[], imageWidth: number): [PowerScribeOcrWord[], PowerScribeOcrWord[]] | null {
   if (words.length < 4) return null;
   const sorted = [...words].sort((a, b) => a.bbox.x0 - b.bbox.x0);
   let splitIndex = -1;
@@ -146,7 +151,7 @@ function groupDateWordsByX(words: PowerScribeOcrWord[]): [PowerScribeOcrWord[], 
       splitIndex = index;
     }
   }
-  if (splitIndex < 2 || sorted.length - splitIndex < 2 || largestGap < 40) return null;
+  if (splitIndex < 2 || sorted.length - splitIndex < 2 || largestGap < Math.max(14, imageWidth * 0.025)) return null;
   return [sorted.slice(0, splitIndex), sorted.slice(splitIndex)];
 }
 
@@ -155,8 +160,8 @@ export function detectPowerScribeDatetimeLayout(
   imageWidth: number,
   imageHeight: number,
 ): PowerScribeStructuralLayout | null {
-  const dateWords = words.filter((word) => /^\d{1,2}[/.]\d{1,2}[/.]\d{2,4}$/.test(word.text.trim()));
-  const groups = groupDateWordsByX(dateWords);
+  const dateWords = words.filter((word) => /(?:^|\s)\d{1,2}[/.]\d{1,2}[/.]\d{2,4}(?:\s|$)/.test(word.text.trim()));
+  const groups = groupDateWordsByX(dateWords, imageWidth);
   if (!groups) return null;
   const [examWords, modifiedWords] = groups;
   const examX = median(examWords.map((word) => word.bbox.x0));

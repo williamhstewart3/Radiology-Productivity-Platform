@@ -63,9 +63,33 @@ export async function inspectPowerScribeCapture(
     engine.extractText(source, { pageSegMode: PSM.AUTO, userDefinedDpi: 300 }),
     getDimensions(source),
   ]);
-  const words = result.positionedWords
+  const positionedRegions = result.positionedWords.length > 0
+    ? result.positionedWords
+    : result.positionedLines;
+  const words = positionedRegions
     .filter((word) => word.bbox != null)
-    .map((word) => ({ text: word.text, confidence: word.confidence, bbox: word.bbox! }));
+    .flatMap((word) => {
+      const matches = Array.from(word.text.matchAll(/\S+/g));
+      if (matches.length <= 1) return [{ text: word.text, confidence: word.confidence, bbox: word.bbox! }];
+
+      const bbox = word.bbox!;
+      const width = Math.max(1, bbox.x1 - bbox.x0);
+      const textLength = Math.max(1, word.text.length);
+      return matches.map((match) => {
+        const start = match.index ?? 0;
+        const end = start + match[0].length;
+        return {
+          text: match[0],
+          confidence: word.confidence,
+          bbox: {
+            x0: bbox.x0 + width * (start / textLength),
+            y0: bbox.y0,
+            x1: bbox.x0 + width * (end / textLength),
+            y1: bbox.y1,
+          },
+        };
+      });
+    });
   const headerLayout = detectPowerScribeHeaderLayout(words, dimensions.width, dimensions.height);
   if (headerLayout) {
     return { detected: true, method: 'headerAnchors', width: dimensions.width, height: dimensions.height, tableRect: headerLayout.tableRect };

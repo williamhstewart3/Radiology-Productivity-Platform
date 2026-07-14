@@ -66,6 +66,28 @@ describe('browser and Windows PowerScribe OCR grammar parity', () => {
     expect(inspected.tableRect).not.toBeNull();
   });
 
+  test('recognizes scaled worklists when browser OCR returns whole text regions', async () => {
+    const compositeResult: OcrResult = {
+      ...result([]),
+      positionedWords: [
+        { text: 'Procedure       Exam Date       Modified Date', confidence: 1, bbox: { x0: 80, y0: 30, x1: 420, y1: 46 } },
+        { text: 'US ABDOMEN COMPLETE       7/14/2026 8:15 AM       7/14/2026 8:29 AM', confidence: 1, bbox: { x0: 80, y0: 70, x1: 430, y1: 86 } },
+        { text: 'CT HEAD WO CONTRAST       7/14/2026 9:00 AM       7/14/2026 9:22 AM', confidence: 1, bbox: { x0: 80, y0: 140, x1: 430, y1: 156 } },
+        { text: 'XR CHEST 2 VIEWS       7/14/2026 10:00 AM       7/14/2026 10:18 AM', confidence: 1, bbox: { x0: 80, y0: 210, x1: 430, y1: 226 } },
+      ],
+    };
+    const mockEngine: OcrEngine = { name: 'text-detector', async extractText() { return compositeResult; } };
+
+    const inspected = await inspectPowerScribeCapture(
+      new Blob(['scaled fixture']),
+      mockEngine,
+      async () => ({ width: 450, height: 352 }),
+    );
+
+    expect(inspected.detected).toBe(true);
+    expect(inspected.tableRect).not.toBeNull();
+  });
+
   test('feature-detects TextDetector and gracefully falls back to Tesseract', () => {
     expect(getTextDetectorConstructor({} as typeof globalThis)).toBeNull();
     expect(getDefaultOcrEngine({} as typeof globalThis).name).toBe('tesseract.js');
