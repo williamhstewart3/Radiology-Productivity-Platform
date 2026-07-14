@@ -8,7 +8,7 @@
  *   powerscribe → PowerScribeImportProvider (disabled, "Coming Soon")
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { cn } from '@/lib/utils';
 import { Card } from '../components/ui/Card';
 import { useProfile } from '../hooks/useProfile';
@@ -392,6 +392,8 @@ function CapturePreview({
   onManualGuidesChange: (guides: PowerScribeManualColumnGuides | null) => void;
 }) {
   const [url, setUrl] = useState('');
+  const [draggingGuide, setDraggingGuide] = useState<keyof PowerScribeManualColumnGuides | null>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const next = URL.createObjectURL(file);
     setUrl(next);
@@ -419,16 +421,42 @@ function CapturePreview({
     onManualGuidesChange(next);
   }
 
-  const guideControls: Array<{ name: keyof PowerScribeManualColumnGuides; label: string; min: number; max: number }> = manualGuides
+  const guideHandles: Array<{
+    name: keyof PowerScribeManualColumnGuides;
+    label: string;
+    orientation: 'vertical' | 'horizontal';
+    color: string;
+  }> = manualGuides
     ? [
-        { name: 'top', label: 'Top of rows', min: 0, max: manualGuides.bottom - 0.1 },
-        { name: 'bottom', label: 'Bottom of rows', min: manualGuides.top + 0.1, max: 1 },
-        { name: 'left', label: 'Procedure left edge', min: 0, max: manualGuides.procedureEnd - 0.05 },
-        { name: 'procedureEnd', label: 'Procedure / Exam divider', min: manualGuides.left + 0.05, max: manualGuides.examEnd - 0.05 },
-        { name: 'examEnd', label: 'Exam / Modified divider', min: manualGuides.procedureEnd + 0.05, max: manualGuides.right - 0.05 },
-        { name: 'right', label: 'Modified right edge', min: manualGuides.examEnd + 0.05, max: 1 },
+        { name: 'top', label: 'Top of rows', orientation: 'horizontal', color: '#e11d48' },
+        { name: 'bottom', label: 'Bottom of rows', orientation: 'horizontal', color: '#e11d48' },
+        { name: 'left', label: 'Procedure left edge', orientation: 'vertical', color: '#2563eb' },
+        { name: 'procedureEnd', label: 'Procedure / Exam divider', orientation: 'vertical', color: '#d97706' },
+        { name: 'examEnd', label: 'Exam / Modified divider', orientation: 'vertical', color: '#059669' },
+        { name: 'right', label: 'Modified right edge', orientation: 'vertical', color: '#059669' },
       ]
     : [];
+
+  function updateGuideFromPointer(name: keyof PowerScribeManualColumnGuides, event: ReactPointerEvent<HTMLButtonElement>) {
+    const bounds = previewRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const horizontalGuide = name === 'top' || name === 'bottom';
+    const nextValue = horizontalGuide
+      ? (event.clientY - bounds.top) / bounds.height
+      : (event.clientX - bounds.left) / bounds.width;
+    updateGuide(name, nextValue);
+  }
+
+  function handleGuideKeyDown(name: keyof PowerScribeManualColumnGuides, event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (!manualGuides) return;
+    const horizontalGuide = name === 'top' || name === 'bottom';
+    const decreaseKey = horizontalGuide ? 'ArrowUp' : 'ArrowLeft';
+    const increaseKey = horizontalGuide ? 'ArrowDown' : 'ArrowRight';
+    if (event.key !== decreaseKey && event.key !== increaseKey) return;
+    event.preventDefault();
+    const direction = event.key === increaseKey ? 1 : -1;
+    updateGuide(name, manualGuides[name] + direction * (event.shiftKey ? 0.01 : 0.0025));
+  }
   const previewWidth = manualGuides
     ? 'min(100%, 960px)'
     : `min(100%, ${(320 * inspection.width) / inspection.height}px)`;
@@ -436,10 +464,11 @@ function CapturePreview({
   return (
     <div className="space-y-3">
       <div
+        ref={previewRef}
         className="relative mx-auto overflow-hidden rounded-[10px] border border-rd-separator bg-black/5"
         style={{ aspectRatio: `${inspection.width} / ${inspection.height}`, width: previewWidth }}
       >
-        {url && <img src={url} alt="Capture waiting for review" className="absolute inset-0 size-full object-contain" />}
+        {url && <img src={url} alt="Capture waiting for review" draggable={false} className="absolute inset-0 size-full select-none object-contain" />}
         {!manualColumns && inspection.tableRect && (
           <span
             aria-label="Detected table region"
@@ -474,10 +503,71 @@ function CapturePreview({
             </span>
           );
         })}
+        {manualGuides && guideHandles.map((handle) => {
+          const vertical = handle.orientation === 'vertical';
+          const active = draggingGuide === handle.name;
+          return (
+            <button
+              key={handle.name}
+              type="button"
+              aria-label={`${handle.label}, ${Math.round(manualGuides[handle.name] * 100)} percent. Drag to adjust.`}
+              title={`${handle.label} · drag to adjust`}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                setDraggingGuide(handle.name);
+                updateGuideFromPointer(handle.name, event);
+              }}
+              onPointerMove={(event) => {
+                if (draggingGuide === handle.name) updateGuideFromPointer(handle.name, event);
+              }}
+              onPointerUp={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                setDraggingGuide(null);
+              }}
+              onPointerCancel={() => setDraggingGuide(null)}
+              onKeyDown={(event) => handleGuideKeyDown(handle.name, event)}
+              className="absolute z-20 rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              style={vertical
+                ? {
+                    left: `${manualGuides[handle.name] * 100}%`,
+                    top: `${manualGuides.top * 100}%`,
+                    width: '24px',
+                    height: `${(manualGuides.bottom - manualGuides.top) * 100}%`,
+                    transform: 'translateX(-50%)',
+                    cursor: 'col-resize',
+                    touchAction: 'none',
+                  }
+                : {
+                    left: `${manualGuides.left * 100}%`,
+                    top: `${manualGuides[handle.name] * 100}%`,
+                    width: `${(manualGuides.right - manualGuides.left) * 100}%`,
+                    height: '24px',
+                    transform: 'translateY(-50%)',
+                    cursor: 'row-resize',
+                    touchAction: 'none',
+                  }}
+            >
+              <span
+                className="pointer-events-none absolute rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.7)]"
+                style={vertical
+                  ? { left: '10px', top: 0, width: '4px', height: '100%', backgroundColor: handle.color }
+                  : { left: 0, top: '10px', width: '100%', height: '4px', backgroundColor: handle.color }}
+              />
+              <span
+                className="pointer-events-none absolute rounded border-2 border-white shadow-[0_1px_3px_rgba(0,0,0,0.65)]"
+                style={vertical
+                  ? { left: '5px', top: '50%', width: '14px', height: '28px', transform: 'translateY(-50%)', backgroundColor: handle.color }
+                  : { left: '50%', top: '5px', width: '28px', height: '14px', transform: 'translateX(-50%)', backgroundColor: handle.color }}
+              />
+              <span className="sr-only">{active ? `Adjusting ${handle.label}` : handle.label}</span>
+            </button>
+          );
+        })}
       </div>
       <p className="text-[12px] text-rd-label-secondary">
         {inspection.width} × {inspection.height} · {manualColumns
-          ? 'Automatic detection was uncertain. Adjust the guides so each colored band contains only its named column.'
+          ? 'Drag the crop edges so each colored band contains only its named column.'
           : inspection.detected
           ? 'This looks like a PowerScribe worklist; the outlined region is the candidate table.'
           : 'No table outline was detected. If this is the PowerScribe worklist, you can still process it for review.'}
@@ -496,25 +586,18 @@ function CapturePreview({
         </button>
       )}
       {manualGuides && (
-        <div className="grid gap-2 sm:grid-cols-2" aria-label="Manual PowerScribe column crop controls">
-          {guideControls.map((control) => (
-            <label key={control.name} className="rounded-[8px] border border-rd-separator bg-rd-surface px-2 py-1.5 text-[11px] text-rd-label-secondary">
-              <span className="flex items-center justify-between gap-2">
-                <span>{control.label}</span>
-                <span className="font-mono">{Math.round(manualGuides[control.name] * 100)}%</span>
+        <div className="space-y-2" aria-label="Manual PowerScribe column crop controls">
+          <p className="text-[12px] font-medium text-rd-label-primary">
+            Drag the colored edges on the image. Use arrow keys for fine adjustment.
+          </p>
+          <div className="flex flex-wrap gap-1.5 text-[10px] text-rd-label-secondary">
+            {guideHandles.map((handle) => (
+              <span key={handle.name} className="rounded-full border border-rd-separator bg-rd-surface px-2 py-1">
+                <span className="mr-1 inline-block size-2 rounded-full" style={{ backgroundColor: handle.color }} />
+                {handle.label} {Math.round(manualGuides[handle.name] * 100)}%
               </span>
-              <input
-                aria-label={control.label}
-                type="range"
-                min={control.min}
-                max={control.max}
-                step={0.005}
-                value={manualGuides[control.name]}
-                onChange={(event) => updateGuide(control.name, Number(event.target.value))}
-                className="mt-1 w-full"
-              />
-            </label>
-          ))}
+            ))}
+          </div>
         </div>
       )}
     </div>
