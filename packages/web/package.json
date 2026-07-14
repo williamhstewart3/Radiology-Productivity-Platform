@@ -11,6 +11,8 @@
     "start": "bun src/server.ts",
     "typecheck": "tsc -b",
     "lint": "cd ../.. && oxlint packages/web --deny-warnings --no-error-on-unmatched-pattern",
+    "test:visual": "playwright test",
+    "test:visual:update": "playwright test --update-snapshots",
     "preview": "bun run build && vite preview",
     "db:generate": "bun --env-file=../../.env drizzle-kit generate",
     "db:migrate": "bun --env-file=../../.env drizzle-kit migrate",
@@ -43,6 +45,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@tailwindcss/vite": "^4.2.1",
     "@types/bun": "latest",
     "@types/jsdom": "^28.0.1",

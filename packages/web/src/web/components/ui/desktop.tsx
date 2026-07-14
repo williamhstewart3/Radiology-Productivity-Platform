@@ -15,18 +15,18 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={cn('flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between', className)}>
+    <header className={cn('flex flex-col gap-3 pb-1 lg:flex-row lg:items-end lg:justify-between', className)}>
       <div className="min-w-0">
         {eyebrow && <p className="section-label mb-1.5">{eyebrow}</p>}
-        <h1 className="text-[1.35rem] font-semibold tracking-tight text-[var(--theme-text-primary)]">
+        <h1 className="text-[1.7rem] font-semibold leading-tight tracking-[-0.025em] text-[var(--text-primary)]">
           {title}
         </h1>
         {description && (
-          <p className="mt-1 text-sm leading-6 text-[var(--theme-text-muted)]">{description}</p>
+          <p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">{description}</p>
         )}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
-    </div>
+    </header>
   );
 }
 
@@ -40,7 +40,7 @@ export function GlassCard({
   interactive?: boolean;
 }) {
   return (
-    <section className={cn('desk-card', interactive && 'desk-card-interactive', className)}>
+    <section className={cn('surface', interactive && 'interactive-surface', className)}>
       {children}
     </section>
   );
@@ -95,7 +95,7 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="desk-card flex min-h-52 flex-col items-center justify-center gap-3 p-8 text-center">
+    <div className="surface flex min-h-52 flex-col items-center justify-center gap-3 rounded-[14px] p-8 text-center">
       {icon && <div className="desk-empty-icon">{icon}</div>}
       <div>
         <p className="text-sm font-medium text-[var(--theme-text-primary)]">{title}</p>

@@ -11,7 +11,7 @@ export function SegmentedControl<T extends string>({ options, value, onChange, c
   return (
     <div
       role="tablist"
-      className={cn('inline-flex w-full gap-0.5 rounded-[10px] bg-rd-bg p-0.5', className)}
+      className={cn('inline-flex w-full gap-0.5 rounded-[10px] border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-0.5', className)}
     >
       {options.map((option) => {
         const active = option.value === value;
@@ -24,7 +24,7 @@ export function SegmentedControl<T extends string>({ options, value, onChange, c
             onClick={() => onChange(option.value)}
             className={cn(
               'min-h-8 flex-1 rounded-[8px] px-3 py-1.5 text-[13px] font-medium transition-colors',
-              active ? 'bg-rd-surface text-rd-label-primary shadow-sm' : 'text-rd-label-secondary',
+              active ? 'bg-[var(--surface-default)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
             )}
           >
             {option.label}

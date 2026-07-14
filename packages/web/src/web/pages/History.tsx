@@ -1,6 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
-import { theme } from '../lib/theme';
 import { db } from '../db/database';
 import { supabasePersistence } from '../services/supabasePersistence';
 import { useProfile } from '../hooks/useProfile';
@@ -233,8 +232,8 @@ export function LegacyHistory() {
   return (
     <div className="space-y-5 animate-in fade-in duration-300">
       <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">Daily History</h1>
-        <p className="text-slate-400 text-sm mt-0.5">
+        <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">Daily History</h1>
+        <p className="text-[var(--text-secondary)] text-sm mt-0.5">
           {filtered.length} exams · {totals.totalWorkRvu.toFixed(1)} modifier 26 wRVU
         </p>
       </div>
@@ -245,15 +244,14 @@ export function LegacyHistory() {
             <button
               key={r.value}
               onClick={() => setRange(r.value)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${range === r.value ? 'border' : 'bg-white/5 text-slate-400 hover:text-white border border-transparent'}`}
-              style={range === r.value ? { background: 'rgba(37,99,168,0.2)', borderColor: 'rgba(37,99,168,0.4)', color: theme.colors.accent } : {}}
+              className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${range === r.value ? 'border-[var(--border-strong)] bg-[var(--surface-selected)] text-[var(--text-primary)]' : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]'}`}
             >
               {r.label}
             </button>
           ))}
           <button
             onClick={() => setShowReviewOnly(!showReviewOnly)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${showReviewOnly ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300' : 'bg-white/5 text-slate-400 hover:text-white border border-transparent'}`}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${showReviewOnly ? 'bg-amber-500/12 border border-amber-500/30 text-rd-caution' : 'border border-transparent text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]'}`}
           >
             Needs Review
           </button>
@@ -261,8 +259,8 @@ export function LegacyHistory() {
 
         {range === 'custom' && (
           <div className="flex gap-3">
-            <div className="flex-1"><label className="block text-xs text-slate-400 mb-1">From</label><input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="input w-full" /></div>
-            <div className="flex-1"><label className="block text-xs text-slate-400 mb-1">To</label><input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="input w-full" /></div>
+            <div className="flex-1"><label className="block text-xs text-[var(--text-secondary)] mb-1">From</label><input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="input w-full" /></div>
+            <div className="flex-1"><label className="block text-xs text-[var(--text-secondary)] mb-1">To</label><input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="input w-full" /></div>
           </div>
         )}
 
@@ -270,10 +268,10 @@ export function LegacyHistory() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="card text-center"><p className="text-xs text-slate-400">Daily</p><p className="text-xl font-bold text-white mt-0.5">{trends.latestDay.toFixed(1)}</p></div>
-        <div className="card text-center"><p className="text-xs text-slate-400">Weekly</p><p className="text-xl font-bold text-white mt-0.5">{trends.latestWeek.toFixed(1)}</p></div>
-        <div className="card text-center"><p className="text-xs text-slate-400">Monthly</p><p className="text-xl font-bold text-white mt-0.5">{trends.latestMonth.toFixed(1)}</p></div>
-        <div className="card text-center"><p className="text-xs text-slate-400">7-day Avg</p><p className="text-xl font-bold text-white mt-0.5">{trends.rollingAvg.toFixed(1)}</p></div>
+        <div className="card text-center"><p className="text-xs text-[var(--text-secondary)]">Daily</p><p className="text-xl font-bold tabular-nums text-[var(--text-primary)] mt-0.5">{trends.latestDay.toFixed(1)}</p></div>
+        <div className="card text-center"><p className="text-xs text-[var(--text-secondary)]">Weekly</p><p className="text-xl font-bold tabular-nums text-[var(--text-primary)] mt-0.5">{trends.latestWeek.toFixed(1)}</p></div>
+        <div className="card text-center"><p className="text-xs text-[var(--text-secondary)]">Monthly</p><p className="text-xl font-bold tabular-nums text-[var(--text-primary)] mt-0.5">{trends.latestMonth.toFixed(1)}</p></div>
+        <div className="card text-center"><p className="text-xs text-[var(--text-secondary)]">7-day Avg</p><p className="text-xl font-bold tabular-nums text-[var(--text-primary)] mt-0.5">{trends.rollingAvg.toFixed(1)}</p></div>
       </div>
 
       <div className="card flex flex-wrap items-center gap-2">
@@ -283,11 +281,11 @@ export function LegacyHistory() {
         <button onClick={() => softDelete(Array.from(selectedIds))} disabled={deleting || selectedCount === 0} className="btn-danger ml-auto">
           {deleting ? 'Deleting…' : `Delete selected exams (${selectedCount})`}
         </button>
-        {selectedTodayCount > 0 && <span className="text-xs text-slate-500">{selectedTodayCount} selected from today</span>}
+        {selectedTodayCount > 0 && <span className="text-xs text-[var(--text-tertiary)]">{selectedTodayCount} selected from today</span>}
       </div>
 
       {groupedByDate.length === 0 ? (
-        <div className="card text-center py-12"><p className="text-slate-400 text-sm">{showReviewOnly ? 'No exams need review' : 'No exams in this range'}</p></div>
+        <div className="card text-center py-12"><p className="text-[var(--text-secondary)] text-sm">{showReviewOnly ? 'No exams need review' : 'No exams in this range'}</p></div>
       ) : (
         <div className="space-y-4">
           {groupedByDate.map(([date, dayLogs]) => {
@@ -295,12 +293,12 @@ export function LegacyHistory() {
             return (
               <div key={date}>
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="flex-1 h-px bg-white/5" />
-                  <span className="text-xs text-slate-400 font-medium">
+                  <div className="flex-1 h-px bg-[var(--divider)]" />
+                  <span className="text-xs text-[var(--text-secondary)] font-medium">
                     {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                   </span>
-                  <span className="text-xs text-white font-semibold">{dayRvu.toFixed(1)} wRVU</span>
-                  <div className="flex-1 h-px bg-white/5" />
+                  <span className="text-xs tabular-nums text-[var(--text-primary)] font-semibold">{dayRvu.toFixed(1)} wRVU</span>
+                  <div className="flex-1 h-px bg-[var(--divider)]" />
                 </div>
 
                 <div className="space-y-2">
@@ -315,14 +313,14 @@ export function LegacyHistory() {
                           type="checkbox"
                           checked={selectedIds.has(log.id)}
                           onChange={() => toggleSelected(log.id)}
-                          className="mt-1 h-4 w-4 shrink-0 rounded border-white/20 bg-white/5"
+                          className="mt-1 h-4 w-4 shrink-0 rounded border-[var(--border-strong)] bg-[var(--input-background)]"
                           aria-label={`Select ${title}`}
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono text-xs font-bold text-slate-300">{log.cptCode ? `${log.cptCode}-26` : 'Unmatched'}</span>
-                            {log.modality && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/8 text-slate-400">{MODALITY_LABELS[log.modality as Modality]}</span>}
-                            {log.studyDateTime && <span className="text-[10px] font-mono text-slate-500">{new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>}
+                            <span className="font-mono text-xs font-bold text-[var(--text-secondary)]">{log.cptCode ? `${log.cptCode}-26` : 'Unmatched'}</span>
+                            {log.modality && <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--surface-inset)] text-[var(--text-secondary)]">{MODALITY_LABELS[log.modality as Modality]}</span>}
+                            {log.studyDateTime && <span className="text-[10px] font-mono text-[var(--text-tertiary)]">{new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>}
                             {notRelevant && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">not productivity-relevant</span>}
                             {log.needsReview && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">Review</span>}
                           </div>
@@ -342,22 +340,22 @@ export function LegacyHistory() {
                                 autoFocus
                               />
                               <button onClick={() => saveRename(log)} className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">Save</button>
-                              <button onClick={() => { setEditingLogId(null); setEditingTitle(''); }} className="text-[10px] px-2 py-1 rounded-lg border border-white/12 text-slate-400">Cancel</button>
+                              <button onClick={() => { setEditingLogId(null); setEditingTitle(''); }} className="text-[10px] px-2 py-1 rounded-lg border border-[var(--border-subtle)] text-[var(--text-secondary)]">Cancel</button>
                             </div>
                           ) : (
-                            <p className="text-sm text-white mt-0.5 line-clamp-1">{title}</p>
+                            <p className="text-sm text-[var(--text-primary)] mt-0.5 line-clamp-1">{title}</p>
                           )}
-                          {cmsDescription && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">CMS: {cmsDescription}</p>}
-                          {log.examNameRaw !== title && <p className="text-xs text-slate-600 mt-0.5 line-clamp-1">OCR: {log.examNameRaw}</p>}
-                          {log.notes && <p className="text-xs text-slate-500 mt-0.5">{log.notes}</p>}
+                          {cmsDescription && <p className="text-xs text-[var(--text-tertiary)] mt-0.5 line-clamp-1">CMS: {cmsDescription}</p>}
+                          {log.examNameRaw !== title && <p className="text-xs text-[var(--text-disabled)] mt-0.5 line-clamp-1">OCR: {log.examNameRaw}</p>}
+                          {log.notes && <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{log.notes}</p>}
                         </div>
                         <div className="text-right shrink-0">
-                          <p className="text-sm font-bold text-white">{notRelevant ? '0.00' : (log.workRvu?.toFixed(2) ?? '—')}</p>
-                          <p className="text-[10px] text-slate-400">wRVU</p>
+                          <p className="text-sm font-bold tabular-nums text-[var(--text-primary)]">{notRelevant ? '0.00' : (log.workRvu?.toFixed(2) ?? '—')}</p>
+                          <p className="text-[10px] text-[var(--text-secondary)]">wRVU</p>
                         </div>
                         <div className="flex flex-col gap-1.5 shrink-0">
                           {!isEditing && (
-                            <button onClick={() => startRename(log)} className="text-[10px] px-2 py-1 rounded-lg border border-white/12 text-slate-400 hover:border-white/25 hover:text-white transition-colors">Rename</button>
+                            <button onClick={() => startRename(log)} className="text-[10px] px-2 py-1 rounded-lg border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors">Rename</button>
                           )}
                           {log.needsReview && (
                             <button onClick={() => markReviewed(log)} className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-colors whitespace-nowrap">OK</button>

@@ -4,19 +4,19 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] text-sm font-medium tracking-normal transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-[var(--theme-accent)] focus-visible:ring-[3px] focus-visible:ring-cyan-300/20 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[9px] text-sm font-medium tracking-normal transition-colors disabled:pointer-events-none disabled:opacity-45 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--focus-ring)] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
   {
     variants: {
       variant: {
-        default: "border border-cyan-300/20 bg-gradient-to-br from-[var(--theme-primary)] to-[var(--theme-primary-light)] text-white shadow-[0_10px_28px_rgba(37,99,168,0.28)] hover:brightness-110",
+        default: "border border-[var(--theme-primary)] bg-[var(--theme-primary)] text-white shadow-none hover:bg-[var(--theme-primary-light)]",
         destructive:
-          "border border-red-400/25 bg-red-500/15 text-red-200 hover:bg-red-500/25 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
+          "border border-red-500/25 bg-red-500/10 text-red-700 hover:bg-red-500/16 dark:text-red-300 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
         outline:
-          "border border-cyan-300/15 bg-white/[0.035] text-[var(--theme-text-secondary)] shadow-xs hover:border-cyan-300/30 hover:bg-cyan-300/10 hover:text-[var(--theme-text-primary)]",
+          "border border-[var(--border-subtle)] bg-[var(--surface-default)] text-[var(--text-secondary)] shadow-none hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
         secondary:
-          "border border-cyan-300/12 bg-white/[0.055] text-[var(--theme-text-primary)] hover:bg-white/[0.085]",
+          "border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--text-primary)] hover:bg-[var(--surface-hover)]",
         ghost:
-          "text-[var(--theme-text-muted)] hover:bg-cyan-300/10 hover:text-[var(--theme-text-primary)]",
+          "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
         link: "text-[var(--theme-accent)] underline-offset-4 hover:underline",
       },
       size: {

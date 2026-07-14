@@ -844,6 +844,215 @@
   }
 }
 
+/* ── Semantic application theme ───────────────────────────────────────────
+   These tokens are the only source of surface hierarchy. Legacy --rd-* and
+   --theme-* names below are compatibility aliases while remaining screens
+   move to the semantic names. */
+:root,
+:root.rd-light {
+  color-scheme: light;
+  --app-canvas: #f7f8fa;
+  --app-glow-primary: rgba(37, 99, 168, 0.065);
+  --app-glow-secondary: rgba(107, 114, 168, 0.045);
+  --surface-default: #ffffff;
+  --surface-raised: #fcfdff;
+  --surface-inset: #f2f4f7;
+  --surface-hover: #f4f7fb;
+  --surface-selected: #eaf2fb;
+  --surface-floating: rgba(255, 255, 255, 0.94);
+  --text-primary: #172033;
+  --text-secondary: #536078;
+  --text-tertiary: #748095;
+  --text-disabled: #9ca5b4;
+  --border-subtle: #e3e7ed;
+  --border-strong: #c8d0db;
+  --focus-ring: rgba(37, 99, 168, 0.24);
+  --divider: #e7eaf0;
+  --table-header: #f4f6f9;
+  --input-background: #ffffff;
+  --sidebar-background: #f2f5f8;
+  --topbar-background: rgba(255, 255, 255, 0.9);
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.055);
+  --shadow-floating: 0 18px 48px rgba(16, 24, 40, 0.14), 0 2px 8px rgba(16, 24, 40, 0.06);
+  --edge-highlight: rgba(255, 255, 255, 0.9);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.rd-light) {
+    color-scheme: dark;
+    --app-canvas: #090f19;
+    --app-glow-primary: rgba(47, 118, 190, 0.11);
+    --app-glow-secondary: rgba(91, 75, 150, 0.055);
+    --surface-default: #111a28;
+    --surface-raised: #152132;
+    --surface-inset: #0c1420;
+    --surface-hover: #182538;
+    --surface-selected: #192e46;
+    --surface-floating: rgba(17, 27, 42, 0.94);
+    --text-primary: #e7edf6;
+    --text-secondary: #a7b1c1;
+    --text-tertiary: #7f8a9d;
+    --text-disabled: #596477;
+    --border-subtle: #233044;
+    --border-strong: #34445b;
+    --focus-ring: rgba(91, 184, 212, 0.26);
+    --divider: #1f2b3d;
+    --table-header: #0e1825;
+    --input-background: #0d1724;
+    --sidebar-background: #0b1421;
+    --topbar-background: rgba(9, 16, 27, 0.88);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.18), 0 12px 30px rgba(0, 0, 0, 0.16);
+    --shadow-floating: 0 22px 58px rgba(0, 0, 0, 0.38), 0 2px 10px rgba(0, 0, 0, 0.22);
+    --edge-highlight: rgba(255, 255, 255, 0.045);
+  }
+}
+
+:root.rd-dark {
+  color-scheme: dark;
+  --app-canvas: #090f19;
+  --app-glow-primary: rgba(47, 118, 190, 0.11);
+  --app-glow-secondary: rgba(91, 75, 150, 0.055);
+  --surface-default: #111a28;
+  --surface-raised: #152132;
+  --surface-inset: #0c1420;
+  --surface-hover: #182538;
+  --surface-selected: #192e46;
+  --surface-floating: rgba(17, 27, 42, 0.94);
+  --text-primary: #e7edf6;
+  --text-secondary: #a7b1c1;
+  --text-tertiary: #7f8a9d;
+  --text-disabled: #596477;
+  --border-subtle: #233044;
+  --border-strong: #34445b;
+  --focus-ring: rgba(91, 184, 212, 0.26);
+  --divider: #1f2b3d;
+  --table-header: #0e1825;
+  --input-background: #0d1724;
+  --sidebar-background: #0b1421;
+  --topbar-background: rgba(9, 16, 27, 0.88);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.18), 0 12px 30px rgba(0, 0, 0, 0.16);
+  --shadow-floating: 0 22px 58px rgba(0, 0, 0, 0.38), 0 2px 10px rgba(0, 0, 0, 0.22);
+  --edge-highlight: rgba(255, 255, 255, 0.045);
+}
+
+:root,
+:root.rd-light,
+:root.rd-dark {
+  --rd-bg: var(--app-canvas);
+  --rd-surface: var(--surface-default);
+  --rd-surface-2: var(--surface-inset);
+  --rd-label-primary: var(--text-primary);
+  --rd-label-secondary: var(--text-secondary);
+  --rd-separator: var(--divider);
+  --rd-shadow-card: var(--shadow-card);
+  --theme-bg-base: var(--app-canvas);
+  --theme-bg-card: var(--surface-default);
+  --theme-bg-deep: var(--surface-inset);
+  --theme-border: var(--border-subtle);
+  --theme-border-active: var(--border-strong);
+  --theme-text-primary: var(--text-primary);
+  --theme-text-secondary: var(--text-secondary);
+  --theme-text-muted: var(--text-tertiary);
+  --theme-text-disabled: var(--text-disabled);
+  --desk-surface: var(--surface-default);
+  --desk-surface-strong: var(--surface-raised);
+  --desk-border: var(--border-subtle);
+  --desk-border-strong: var(--border-strong);
+  --desk-shadow: var(--shadow-card);
+}
+
+@layer base {
+  body {
+    background:
+      radial-gradient(circle at 10% -10%, var(--app-glow-primary), transparent 38rem),
+      radial-gradient(circle at 92% 86%, var(--app-glow-secondary), transparent 42rem),
+      var(--app-canvas);
+    color: var(--text-primary);
+  }
+
+  :where(button, a, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  :where(input, select, textarea) {
+    color-scheme: inherit;
+  }
+}
+
+@layer components {
+  .app-shell {
+    background:
+      radial-gradient(circle at 8% -8%, var(--app-glow-primary), transparent 36rem),
+      radial-gradient(circle at 92% 88%, var(--app-glow-secondary), transparent 40rem),
+      var(--app-canvas);
+  }
+
+  .desktop-sidebar { background: var(--sidebar-background); border-color: var(--border-subtle); box-shadow: none; }
+  .desktop-topbar { background: var(--topbar-background); border-color: var(--border-subtle); box-shadow: none; }
+
+  .surface,
+  .card,
+  .premium-card,
+  .desk-card {
+    background: var(--surface-default);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-card), inset 0 1px 0 var(--edge-highlight);
+    backdrop-filter: none;
+  }
+
+  .surface-raised,
+  .card-elevated {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-card), inset 0 1px 0 var(--edge-highlight);
+  }
+
+  .surface-inset { background: var(--surface-inset); border: 1px solid var(--border-subtle); box-shadow: none; }
+  .surface-floating { background: var(--surface-floating); border: 1px solid var(--border-strong); box-shadow: var(--shadow-floating); backdrop-filter: blur(18px); }
+
+  .interactive-surface,
+  .desk-card-interactive { transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease; }
+  .interactive-surface:hover,
+  .desk-card-interactive:hover { background: var(--surface-hover); border-color: var(--border-strong); box-shadow: var(--shadow-card); }
+  .interactive-surface[aria-selected="true"] { background: var(--surface-selected); border-color: var(--border-strong); box-shadow: inset 3px 0 0 var(--theme-primary); }
+
+  .card:hover,
+  .premium-card-hover:hover { background: var(--surface-hover); border-color: var(--border-strong); box-shadow: var(--shadow-card); transform: none; }
+
+  .input,
+  .theme-input,
+  .theme-select,
+  .theme-textarea {
+    min-height: 2.5rem;
+    background: var(--input-background);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    box-shadow: none;
+  }
+  .input::placeholder,
+  .theme-input::placeholder,
+  .theme-textarea::placeholder { color: var(--text-disabled); }
+  .input:hover,
+  .theme-input:hover,
+  .theme-select:hover,
+  .theme-textarea:hover { background: var(--input-background); border-color: var(--border-strong); }
+  .input:focus,
+  .theme-input:focus,
+  .theme-select:focus,
+  .theme-textarea:focus { background: var(--input-background); border-color: var(--theme-primary); box-shadow: 0 0 0 3px var(--focus-ring); }
+
+  .desk-table th { background: var(--table-header); color: var(--text-tertiary); }
+  .desk-table th,
+  .desk-table td { border-color: var(--divider); }
+  .desk-table tr:hover td { background: var(--surface-hover); }
+
+  .btn-primary { box-shadow: none; }
+  .btn-primary:hover { box-shadow: 0 4px 12px rgba(37, 99, 168, 0.16); transform: none; }
+  .btn-ghost { background: transparent; border-color: var(--border-subtle); color: var(--text-secondary); }
+  .btn-ghost:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--text-primary); }
+}
+
 /* ── Baptist logo mark SVG ───────────────────────────────────────────── */
 /* The arch/chapel icon used in header */
 .bmg-logo-mark {
@@ -936,4 +1145,38 @@
     letter-spacing: 0;
     min-height: 2.5rem;
   }
+}
+
+/* Keep compatibility adapters last while legacy component definitions are
+   still present above. This can be removed when those definitions disappear. */
+@layer components {
+  .card,
+  .premium-card,
+  .desk-card {
+    background: var(--surface-default);
+    border-color: var(--border-subtle);
+    box-shadow: var(--shadow-card), inset 0 1px 0 var(--edge-highlight);
+    backdrop-filter: none;
+  }
+  .card:hover,
+  .premium-card-hover:hover,
+  .desk-card-interactive:hover {
+    background: var(--surface-hover);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-card);
+  }
+  .card-elevated {
+    background: var(--surface-raised);
+    border-color: var(--border-subtle);
+    box-shadow: var(--shadow-card), inset 0 1px 0 var(--edge-highlight);
+  }
+  .input,
+  .input:hover,
+  .input:focus {
+    background: var(--input-background);
+    color: var(--text-primary);
+  }
+  .input { border-color: var(--border-subtle); }
+  .input:hover { border-color: var(--border-strong); }
+  .input:focus { border-color: var(--theme-primary); box-shadow: 0 0 0 3px var(--focus-ring); }
 }

@@ -89,7 +89,7 @@ function AppLoadingOverlay() {
   return (
     <motion.div
       className="fixed inset-0 z-[9999] flex items-center justify-center"
-      style={{ backgroundColor: '#0A0E1A' }}
+      style={{ backgroundColor: 'var(--app-canvas)' }}
       initial={{ opacity: 1 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -280,7 +280,7 @@ function MainApp() {
     <div className={isDark ? 'dark' : ''}>
       {isReady && (
       <div className="app-shell flex min-h-screen bg-rd-bg">
-        <aside className={`sticky top-0 hidden h-screen shrink-0 flex-col gap-4 px-3 py-4 transition-[width] duration-200 md:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[248px]'}`}>
+        <aside className={`desktop-sidebar sticky top-0 hidden h-screen shrink-0 flex-col gap-4 px-3 py-4 transition-[width] duration-200 md:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[248px]'}`}>
           <div className="flex items-center justify-between gap-2 px-1">
             {sidebarCollapsed ? <BaptistLogoMark size={34} /> : <BaptistLogoLockup size="sm" showTagline />}
             <button
@@ -306,7 +306,7 @@ function MainApp() {
         <div className="flex min-w-0 flex-1 flex-col">
           <DisclaimerBanner />
 
-          <header className="sticky top-0 z-30 border-b border-rd-separator bg-rd-surface">
+          <header className="desktop-topbar sticky top-0 z-30">
             <div className="flex h-14 items-center justify-between gap-3 px-4 md:px-6">
               <div className="flex min-w-0 items-center gap-3">
                 <BaptistLogoMark size={28} className="md:hidden" />

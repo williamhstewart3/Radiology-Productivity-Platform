@@ -156,23 +156,17 @@ export const theme: OrgTheme = baptistTheme;
 
 export function injectTheme(t: OrgTheme = theme) {
   const r = document.documentElement.style;
-  r.setProperty('--theme-bg-base',         t.colors.bgBase);
-  r.setProperty('--theme-bg-card',         t.colors.bgCard);
-  r.setProperty('--theme-bg-deep',         t.colors.bgDeep);
+  // Surface, border and text values are owned by the light/dark semantic
+  // token sets in styles.css. Keeping those out of inline styles prevents a
+  // dark organization palette from overriding Light mode.
   r.setProperty('--theme-primary',         t.colors.primary);
   r.setProperty('--theme-primary-light',   t.colors.primaryLight);
   r.setProperty('--theme-accent',          t.colors.accent);
-  r.setProperty('--theme-border',          t.colors.border);
-  r.setProperty('--theme-border-active',   t.colors.borderActive);
   r.setProperty('--theme-ahead',           t.colors.ahead);
   r.setProperty('--theme-on-track',        t.colors.onTrack);
   r.setProperty('--theme-caution',         t.colors.caution);
   r.setProperty('--theme-behind',          t.colors.behind);
   r.setProperty('--theme-goal-gold',       t.colors.goalGold);
-  r.setProperty('--theme-text-primary',    t.colors.textPrimary);
-  r.setProperty('--theme-text-secondary',  t.colors.textSecondary);
-  r.setProperty('--theme-text-muted',      t.colors.textMuted);
-  r.setProperty('--theme-text-disabled',   t.colors.textDisabled);
   r.setProperty('--theme-radius-sm',       t.radius.sm);
   r.setProperty('--theme-radius-md',       t.radius.md);
   r.setProperty('--theme-radius-lg',       t.radius.lg);
