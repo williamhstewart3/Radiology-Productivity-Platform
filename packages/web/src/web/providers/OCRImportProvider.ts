@@ -19,6 +19,7 @@ import { PSM } from 'tesseract.js';
 import { maybeEnhanceOcrWithLlm } from '../services/llmOcrExtractionService';
 import { parseDateTimeFromOcr, parseVisibleTimeWithFallbackDate } from '../utils/studyDateParser';
 import { normalizeOcrExamTextForMatching } from '../utils/ocrExamTextNormalization';
+import { findOrbitCmeSeedMapping } from '../data/orbitCmeSeedMappings';
 import {
   DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
   preprocessPowerScribeColumnsForOcr,
@@ -115,10 +116,12 @@ export function __testColumnOcrParams() {
   return COLUMN_OCR_PARAMS;
 }
 
+const RADIOLOGY_PROCEDURE_SIGNAL = /\b(?:CT|CTA|MRI|MR|MRA|XR|X RAY|US|ULTRASOUND|SONOGRAM|NM|PET|MAMMO|FLUORO|IR|OB|ABDOMEN|PELVIS|CHEST|HEAD|NECK|BRAIN|SPINE|CERVICAL|THORACIC|LUMBAR|SACRUM|COCCYX|SHOULDER|CLAVICLE|SCAPULA|HUMERUS|ELBOW|FOREARM|WRIST|HAND|FINGER|HIP|FEMUR|KNEE|TIBIA|FIBULA|ANKLE|FOOT|TOE|CALCANEUS|HEEL|RENAL|KIDNEY|THYROID|BREAST|SCROTUM|TRANSVAGINAL|TRANSRECTAL|CAROTID|ARTERIAL|VENOUS|DUPLEX|DOPPLER|AORTA|IVC|ILIAC|DIALYSIS|FETAL|BIOPHYSICAL|MAMMOGRAM|BONE|SPECT|VQ|HIDA|GASTRIC|ESOPHAGRAM|BARIUM)\b/;
+
 export function powerScribeRowGrammarFailure(row: Pick<ParsedLine, 'procedureName' | 'examDateTime' | 'modifiedDateTime'>): string | null {
   const procedure = row.procedureName.trim();
   if (/\d/.test(procedure)) return 'Procedure contains numeric date or row spillover';
-  if (!/^(?:CT|CTA|MRI|MR|MRA|XR|US|NM|PET|MAMMO|FL|IR)\b[A-Z /+&()\-.]{2,}$/.test(procedure)) {
+  if (!/^[A-Z][A-Z /+&()\-.]{2,}$/.test(procedure) || !RADIOLOGY_PROCEDURE_SIGNAL.test(procedure)) {
     return 'Procedure is not a plausible all-caps RIS title';
   }
   if (!row.examDateTime) return 'Missing or unclear Exam Date';
@@ -138,7 +141,9 @@ export function recoverPowerScribeProcedureName(
     const firstDigit = candidate.search(/\d/);
     const withoutDateSpill = (firstDigit >= 0 ? candidate.slice(0, firstDigit) : candidate).trim();
     const normalized = normalizeOcrExamTextForMatching(withoutDateSpill);
-    if (/^(?:CT|CTA|MRI|MR|MRA|XR|US|NM|PET|MAMMO|FL|IR)\b[A-Z /+&()\-.]{2,}$/.test(normalized)) {
+    const orbitMapping = findOrbitCmeSeedMapping(normalized);
+    if (orbitMapping) return normalizeOcrExamTextForMatching(orbitMapping.studyName).toUpperCase();
+    if (/^[A-Z][A-Z /+&()\-.]{2,}$/.test(normalized) && RADIOLOGY_PROCEDURE_SIGNAL.test(normalized)) {
       return normalized;
     }
   }

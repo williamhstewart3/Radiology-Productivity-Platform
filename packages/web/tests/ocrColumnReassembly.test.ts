@@ -102,6 +102,14 @@ describe('PowerScribe strict row grammar', () => {
     expect(__testShouldUseUnreadablePowerScribeFallback(row)).toBe(false);
   });
 
+  test('uses the Orbit modality/anatomy table when OCR drops the modality prefix', () => {
+    const [row] = parseOcrLines(['ABDOMEN COMPLETE 7/14/2026 8:15 AM 7/14/2026 8:29 AM']);
+
+    expect(row.procedureName).toBe('ABDOMEN COMPLETE');
+    expect(recoverPowerScribeProcedureName(row)).toBe('US ABDOMEN COMPLETE');
+    expect(__testShouldUseUnreadablePowerScribeFallback(row)).toBe(false);
+  });
+
   test('recovers the title before numeric date spillover instead of replacing the row', () => {
     const [base] = parseOcrLines(['CT CHEST ABDOMEN PELVIS W CONTRAST']);
     const row = {

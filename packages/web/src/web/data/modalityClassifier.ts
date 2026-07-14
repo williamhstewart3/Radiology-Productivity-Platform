@@ -66,7 +66,10 @@ export function classifyModality(cptCode: string): Modality {
   }
 
   // Ultrasound ranges
-  if (num >= 76506 && num <= 76999) {
+  if (
+    (num >= 76506 && num <= 76999) ||
+    (num >= 93800 && num <= 93999)
+  ) {
     return 'US';
   }
 

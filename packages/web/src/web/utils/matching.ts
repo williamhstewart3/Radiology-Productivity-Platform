@@ -10,6 +10,7 @@ import {
 import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
 import { detectMultipleModalityStarts } from './powerScribeParser';
 import { findOrbitCmeSeedMapping } from '../data/orbitCmeSeedMappings';
+import { classifyModality } from '../data/modalityClassifier';
 import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from '../data/acrRadiologyActiveCptSet';
 
 const CPT_CODE_PATTERN = /^\d{5}$/;
@@ -111,7 +112,10 @@ function stripLeadingOcrJunk(rawInput: string): string {
 
   const modalityStart = text.search(FIRST_MODALITY_PATTERN);
   if (modalityStart > 0) {
-    text = text.slice(modalityStart).trim();
+    const prefix = text.slice(0, modalityStart).trim();
+    const prefixLooksLikeOcrGutter = /\d|[+@#*|\\_\-.:;()[\]{}<>!?~$]/.test(prefix) ||
+      /^(?:SIGNED|FINAL|COMPLETE(?:D)?|NORMAL|ABNORMAL|NEW|OLD|READ|UNREAD|WARNING|ALERT|CHECK)\b/i.test(prefix);
+    if (prefixLooksLikeOcrGutter) text = text.slice(modalityStart).trim();
   }
 
   let previous = '';
@@ -140,6 +144,23 @@ function detectModalityLane(rawInput: string): ModalityLane | null {
   if (/^(?:MAMMO|MAMMOGRAM|MAMMOGRAPHY)(?:\b|\s)/.test(normalized)) return 'MAMMO';
   if (/^(?:DXA|DEXA)(?:\b|\s)/.test(normalized)) return 'DXA';
   if (/^(?:FLUORO|FLUOROSCOPY)(?:\b|\s)/.test(normalized)) return 'FLUORO';
+  const orbitMapping = findOrbitCmeSeedMapping(normalized);
+  if (orbitMapping) {
+    const orbitModality = classifyModality(orbitMapping.cptCode);
+    if (orbitModality === 'CT' || orbitModality === 'MRI' || orbitModality === 'XR' || orbitModality === 'US' || orbitModality === 'NM_PET' || orbitModality === 'MAMMO' || orbitModality === 'FLUORO') {
+      return orbitModality;
+    }
+    return null;
+  }
+  if (/\b(?:CTA|CT ANGIO(?:GRAM|GRAPHY)?)\b/.test(normalized)) return 'CTA';
+  if (/\b(?:MRA|MR ANGIO(?:GRAM|GRAPHY)?)\b/.test(normalized)) return 'MRA';
+  if (/\bCT\b/.test(normalized)) return 'CT';
+  if (/\b(?:MRI|MR)\b/.test(normalized)) return 'MRI';
+  if (/\b(?:XR|X RAY|X-RAY|RADIOGRAPH)\b/.test(normalized)) return 'XR';
+  if (/\b(?:US|U\/S|ULTRASOUND|SONOGRAM)\b/.test(normalized)) return 'US';
+  if (/\bPET\b/.test(normalized)) return 'PET';
+  if (/\b(?:NM|NUCLEAR)\b/.test(normalized)) return 'NM_PET';
+  if (/\b(?:MAMMO|MAMMOGRAM|MAMMOGRAPHY)\b/.test(normalized)) return 'MAMMO';
   return null;
 }
 
@@ -226,6 +247,7 @@ function candidateRespectsOrBypassesModalityLane(candidate: MatchCandidate, lane
   if (
     candidate.method === 'alias_match' ||
     source === 'exam dictionary' ||
+    source === 'Orbit CME seed mapping' ||
     source === INSTITUTION_PROCEDURE_DICTIONARY_SOURCE ||
     source === 'Institution mapping' ||
     source === 'OCR learning table'
@@ -659,6 +681,8 @@ function hasNormalizedPhrase(normalized: string, phrase: string): boolean {
 function deterministicCptCodesFor(parsed: ModalityFirstParse): string[] {
   const normalized = normalizeRadiologyDescription(parsed.cleanedProcedure);
   const upper = parsed.cleanedProcedure.toUpperCase();
+  const orbitMapping = findOrbitCmeSeedMapping(parsed.cleanedProcedure);
+  if (orbitMapping) return [orbitMapping.cptCode];
 
   if (parsed.lane === 'XR') {
     if (parsed.keywords.has('CHEST_PORTABLE') || hasNormalizedPhrase(normalized, 'XR CHEST PORTABLE')) return ['71045'];

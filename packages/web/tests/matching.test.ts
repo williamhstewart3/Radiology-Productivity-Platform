@@ -74,6 +74,27 @@ describe('modality-first CPT matching', () => {
       .toBe('XR WRIST RIGHT 3 VIEWS');
   });
 
+  test('keeps anatomy and protocol words that legitimately precede the modality token', () => {
+    expect(__testParseModalityFirst('CAROTID DUPLEX US BILATERAL')).toMatchObject({
+      lane: 'US',
+      cleanedProcedure: 'CAROTID DUPLEX US BILATERAL',
+    });
+    expect(__testParseModalityFirst('OB US LIMITED')).toMatchObject({
+      lane: 'US',
+      cleanedProcedure: 'OB US LIMITED',
+    });
+    expect(__testParseModalityFirst('SPECT/CT SINGLE AREA')).toMatchObject({
+      lane: 'NM_PET',
+      cleanedProcedure: 'SPECT/CT SINGLE AREA',
+    });
+  });
+
+  test('routes exact and uniquely modality-omitted Orbit titles deterministically', () => {
+    expect(__testDeterministicCptCodesFor('CAROTID DUPLEX US BILATERAL')).toEqual(['93880']);
+    expect(__testDeterministicCptCodesFor('OB US LIMITED')).toEqual(['76815']);
+    expect(__testDeterministicCptCodesFor('ABDOMEN COMPLETE')).toEqual(['76700']);
+  });
+
   test('normalizes XR views and deterministic plain film aliases', () => {
     expect(__testParseModalityFirst('XR CHEST PA AND LATERAL').cleanedProcedure).toBe('XR CHEST 2 VIEWS');
     expect(__testDeterministicCptCodesFor('XR CHEST PORTABLE')).toEqual(['71045']);
