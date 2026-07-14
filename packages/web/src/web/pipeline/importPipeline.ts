@@ -110,6 +110,7 @@ function reviewReasonFor(top: MatchCandidate | undefined, candidates: MatchCandi
   const plausible = candidates.filter((candidate) => productivityRelevant(candidate) && candidate.confidence >= 0.65);
   if (plausible.length > 1 && plausible.every(isExactInstitutionMappingCandidate)) return null;
   if (plausible.length > 1 && plausible.every(isDeterministicProtocolCandidate)) return null;
+  if (isDeterministicProtocolCandidate(top) && plausible.slice(1).every((candidate) => candidate.confidence < 0.99)) return null;
   if (plausible.length > 1 && top.method !== 'alias_match') return 'Multiple possible CPT matches';
   return null;
 }

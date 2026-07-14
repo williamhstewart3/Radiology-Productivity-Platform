@@ -429,12 +429,15 @@ function CapturePreview({
         { name: 'right', label: 'Modified right edge', min: manualGuides.examEnd + 0.05, max: 1 },
       ]
     : [];
+  const previewWidth = manualGuides
+    ? 'min(100%, 960px)'
+    : `min(100%, ${(320 * inspection.width) / inspection.height}px)`;
 
   return (
     <div className="space-y-3">
       <div
         className="relative mx-auto overflow-hidden rounded-[10px] border border-rd-separator bg-black/5"
-        style={{ aspectRatio: `${inspection.width} / ${inspection.height}`, width: `min(100%, ${(320 * inspection.width) / inspection.height}px)` }}
+        style={{ aspectRatio: `${inspection.width} / ${inspection.height}`, width: previewWidth }}
       >
         {url && <img src={url} alt="Capture waiting for review" className="absolute inset-0 size-full object-contain" />}
         {!manualColumns && inspection.tableRect && (

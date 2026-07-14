@@ -152,6 +152,15 @@ export function recoverPowerScribeProcedureName(
   return row.procedureName.trim();
 }
 
+function isAuthoritativeOrbitRecovery(row: Pick<ParsedLine, 'procedureName' | 'rawProcedureColumnText'>): boolean {
+  return [row.rawProcedureColumnText, row.procedureName].some((candidate) => {
+    if (!candidate?.trim()) return false;
+    const firstDigit = candidate.search(/\d/);
+    const withoutDateSpill = (firstDigit >= 0 ? candidate.slice(0, firstDigit) : candidate).trim();
+    return Boolean(findOrbitCmeSeedMapping(normalizeOcrExamTextForMatching(withoutDateSpill)));
+  });
+}
+
 export function __testShouldUseUnreadablePowerScribeFallback(row: ParsedLine): boolean {
   const procedureName = recoverPowerScribeProcedureName(row);
   return isProcedureGrammarFailure(powerScribeRowGrammarFailure({ ...row, procedureName }));
@@ -560,6 +569,7 @@ export class OCRImportProvider implements ImportProvider {
     const parsedStudies: ImportedStudy[] = parsed.map((p, index): ImportedStudy => {
       const procedureName = recoverPowerScribeProcedureName(p);
       const recoveredProcedure = procedureName !== p.procedureName;
+      const recoveryNeedsReview = recoveredProcedure && !isAuthoritativeOrbitRecovery(p);
       const productivityDate = p.modifiedDate ?? this.studyDate;
       const missingModifiedDate = !p.modifiedDateTime;
       const powerScribeStatus = detectedStatuses[index] ?? 'unknown';
@@ -621,12 +631,12 @@ export class OCRImportProvider implements ImportProvider {
         cleanedExamName: procedureName,
         cleanedText: procedureName,
         extractionConfidence: p.extractionConfidence,
-        parserNeedsReview: p.needsReview || Boolean(grammarFailure) || recoveredProcedure || unsignedStatus,
+        parserNeedsReview: p.needsReview || Boolean(grammarFailure) || recoveryNeedsReview || unsignedStatus,
         parserReviewReason: unsignedStatus
-          ? [p.reviewReason, grammarFailure, recoveredProcedure ? 'Procedure title recovered before numeric date spillover' : null, 'Not signed yet — count it?'].filter(Boolean).join(' | ')
+          ? [p.reviewReason, grammarFailure, recoveryNeedsReview ? 'Procedure title recovered before numeric date spillover' : null, 'Not signed yet — count it?'].filter(Boolean).join(' | ')
           : missingModifiedDate
-          ? [p.reviewReason, grammarFailure, recoveredProcedure ? 'Procedure title recovered before numeric date spillover' : null, 'Productivity date will use selected log date unless corrected.'].filter(Boolean).join(' | ')
-          : [p.reviewReason, grammarFailure, recoveredProcedure ? 'Procedure title recovered before numeric date spillover' : null].filter(Boolean).join(' | ') || null,
+          ? [p.reviewReason, grammarFailure, recoveryNeedsReview ? 'Procedure title recovered before numeric date spillover' : null, 'Productivity date will use selected log date unless corrected.'].filter(Boolean).join(' | ')
+          : [p.reviewReason, grammarFailure, recoveryNeedsReview ? 'Procedure title recovered before numeric date spillover' : null].filter(Boolean).join(' | ') || null,
         parserRawLine: p.rawText,
         ocrConfidence,
         source: 'ocr' as const,

@@ -959,6 +959,13 @@ export async function findMatchCandidates(
     candidates.push(...await candidatesForInstitutionMappings(matchInput, maxResults));
   }
 
+  // Exact deterministic mappings (including the curated Orbit table) must be
+  // considered before lower-priority dictionary and fuzzy candidates.  When
+  // this ran after the candidate cap, an exact CPT could be omitted entirely;
+  // when it ran after the 0.93 Orbit candidate, CPT de-duplication retained the
+  // weaker copy and unnecessarily sent the row to review.
+  candidates.push(...await candidatesForDeterministicProtocol(matchInput, parsed));
+
   if (candidates.length < maxResults) {
     candidates.push(...await candidatesForDictionary(matchInput, maxResults));
   }
@@ -969,10 +976,6 @@ export async function findMatchCandidates(
 
   if (candidates.length < maxResults) {
     candidates.push(...await candidatesForOrbitCmeSeed(matchInput));
-  }
-
-  if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForDeterministicProtocol(matchInput, parsed));
   }
 
   if (candidates.length < maxResults) {

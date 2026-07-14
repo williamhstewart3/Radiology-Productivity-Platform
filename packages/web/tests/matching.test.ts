@@ -252,6 +252,33 @@ describe('modality-first CPT matching', () => {
     expect(__testInstitutionMappingReviewReason(exactWithExtra)).toBe('Multiple possible CPT matches');
   });
 
+  test('an exact deterministic reference match ignores weaker fuzzy alternatives', () => {
+    const candidates = [
+      {
+        cptCode: '73590',
+        modifier: '26',
+        description: 'XR tibia and fibula 2 views',
+        workRvu: 1,
+        modality: 'XR' as Modality,
+        confidence: 0.995,
+        method: 'radiology_match' as const,
+        explanation: { rawText: 'XR TIBIA FIBULA LEFT AP AND LATERAL', normalizedText: 'xr tibia fibula left ap and lateral', source: 'deterministic protocol mapping', detail: 'exact reference' },
+      },
+      {
+        cptCode: '73650',
+        modifier: '26',
+        description: 'XR heel',
+        workRvu: 1,
+        modality: 'XR' as Modality,
+        confidence: 0.84,
+        method: 'radiology_match' as const,
+        explanation: { rawText: 'XR TIBIA FIBULA LEFT AP AND LATERAL', normalizedText: 'xr tibia fibula left ap and lateral', source: 'ACR-active CMS fuzzy match', detail: 'weaker fuzzy result' },
+      },
+    ];
+
+    expect(__testInstitutionMappingReviewReason(candidates)).toBeNull();
+  });
+
   test('institution dictionary OCR corrections allow spelling and spacing repairs', () => {
     expect(__testHasClinicallyMeaningfulInstitutionDifference('XRCHESTPORTABLE', 'XR CHEST PORTABLE')).toBe(false);
     expect(__testHasClinicallyMeaningfulInstitutionDifference('XRCHESTFORTABLE', 'XR CHEST PORTABLE')).toBe(false);
