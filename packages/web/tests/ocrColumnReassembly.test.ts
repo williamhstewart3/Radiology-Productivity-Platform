@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { __testApplyColumnDateOverrides, __testReassembleColumnRows, classifyPowerScribeStatusText, powerScribeRowGrammarFailure } from '../src/web/providers/OCRImportProvider';
+import { __testApplyColumnDateOverrides, __testReassembleColumnRows, __testShouldUseUnreadablePowerScribeFallback, classifyPowerScribeStatusText, powerScribeRowGrammarFailure, recoverPowerScribeProcedureName } from '../src/web/providers/OCRImportProvider';
 import { parseOcrLines } from '../src/web/utils/powerScribeParser';
 
 function ocrResult(lines: Array<{ text: string; y0: number; y1: number; x0?: number; x1?: number }>) {
@@ -95,6 +95,32 @@ describe('PowerScribe column OCR row reassembly', () => {
 });
 
 describe('PowerScribe strict row grammar', () => {
+  test('keeps a readable procedure title when only its dates are missing', () => {
+    const [row] = parseOcrLines(['CT CHEST ABDOMEN PELVIS W CONTRAST']);
+
+    expect(powerScribeRowGrammarFailure(row)).toBe('Missing or unclear Exam Date');
+    expect(__testShouldUseUnreadablePowerScribeFallback(row)).toBe(false);
+  });
+
+  test('recovers the title before numeric date spillover instead of replacing the row', () => {
+    const [base] = parseOcrLines(['CT CHEST ABDOMEN PELVIS W CONTRAST']);
+    const row = {
+      ...base,
+      procedureName: 'CT CHEST ABDOMEN PELVIS W CONTRAST 17',
+      rawProcedureColumnText: 'CTCHEST ABDOMEN PELVIS W CONTRAST 17 7/14/2026',
+    };
+
+    expect(recoverPowerScribeProcedureName(row)).toBe('CT CHEST ABDOMEN PELVIS W CONTRAST');
+    expect(__testShouldUseUnreadablePowerScribeFallback(row)).toBe(false);
+  });
+
+  test('reserves the unreadable fallback for a genuinely unusable procedure', () => {
+    const [base] = parseOcrLines(['CT CHEST ABDOMEN PELVIS W CONTRAST']);
+    const row = { ...base, procedureName: 'TEND Adult Slice', rawProcedureColumnText: '' };
+
+    expect(__testShouldUseUnreadablePowerScribeFallback(row)).toBe(true);
+  });
+
   test('accepts only a plausible RIS title with both datetimes', () => {
     expect(powerScribeRowGrammarFailure({
       procedureName: 'CT HEAD WO CONTRAST',

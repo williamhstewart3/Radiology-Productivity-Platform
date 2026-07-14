@@ -18,6 +18,7 @@ import { getDefaultOcrEngine } from '../utils/ocrProvider';
 import { PSM } from 'tesseract.js';
 import { maybeEnhanceOcrWithLlm } from '../services/llmOcrExtractionService';
 import { parseDateTimeFromOcr, parseVisibleTimeWithFallbackDate } from '../utils/studyDateParser';
+import { normalizeOcrExamTextForMatching } from '../utils/ocrExamTextNormalization';
 import {
   DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
   preprocessPowerScribeColumnsForOcr,
@@ -123,6 +124,30 @@ export function powerScribeRowGrammarFailure(row: Pick<ParsedLine, 'procedureNam
   if (!row.examDateTime) return 'Missing or unclear Exam Date';
   if (!row.modifiedDateTime) return 'Missing or unclear Modified date';
   return null;
+}
+
+function isProcedureGrammarFailure(failure: string | null): boolean {
+  return failure?.startsWith('Procedure ') ?? false;
+}
+
+export function recoverPowerScribeProcedureName(
+  row: Pick<ParsedLine, 'procedureName' | 'rawProcedureColumnText'>,
+): string {
+  for (const candidate of [row.rawProcedureColumnText, row.procedureName]) {
+    if (!candidate?.trim()) continue;
+    const firstDigit = candidate.search(/\d/);
+    const withoutDateSpill = (firstDigit >= 0 ? candidate.slice(0, firstDigit) : candidate).trim();
+    const normalized = normalizeOcrExamTextForMatching(withoutDateSpill);
+    if (/^(?:CT|CTA|MRI|MR|MRA|XR|US|NM|PET|MAMMO|FL|IR)\b[A-Z /+&()\-.]{2,}$/.test(normalized)) {
+      return normalized;
+    }
+  }
+  return row.procedureName.trim();
+}
+
+export function __testShouldUseUnreadablePowerScribeFallback(row: ParsedLine): boolean {
+  const procedureName = recoverPowerScribeProcedureName(row);
+  return isProcedureGrammarFailure(powerScribeRowGrammarFailure({ ...row, procedureName }));
 }
 
 export function classifyPowerScribeStatusText(text: string): 'check' | 'arrow' | 'unknown' {
@@ -525,12 +550,14 @@ export class OCRImportProvider implements ImportProvider {
     };
 
     const parsedStudies: ImportedStudy[] = parsed.map((p, index): ImportedStudy => {
+      const procedureName = recoverPowerScribeProcedureName(p);
+      const recoveredProcedure = procedureName !== p.procedureName;
       const productivityDate = p.modifiedDate ?? this.studyDate;
       const missingModifiedDate = !p.modifiedDateTime;
       const powerScribeStatus = detectedStatuses[index] ?? 'unknown';
       const unsignedStatus = powerScribeStatus === 'arrow';
-      const grammarFailure = powerScribeRowGrammarFailure(p);
-      if (grammarFailure) {
+      const grammarFailure = powerScribeRowGrammarFailure({ ...p, procedureName });
+      if (isProcedureGrammarFailure(grammarFailure)) {
         return {
           examTitle: "COULDN'T READ POWERSCRIBE ROW",
           procedureName: "COULDN'T READ POWERSCRIBE ROW",
@@ -565,8 +592,8 @@ export class OCRImportProvider implements ImportProvider {
       }
 
       return {
-        examTitle: p.procedureName,
-        procedureName: p.procedureName,
+        examTitle: procedureName,
+        procedureName,
         canonicalExam: null,
         cpt: null,
         workRvu: null,
@@ -583,15 +610,15 @@ export class OCRImportProvider implements ImportProvider {
         patientMRN: null,
         rowIndex: p.rowIndex,
         powerScribeStatus,
-        cleanedExamName: p.cleanedExamName,
-        cleanedText: p.cleanedText,
+        cleanedExamName: procedureName,
+        cleanedText: procedureName,
         extractionConfidence: p.extractionConfidence,
-        parserNeedsReview: p.needsReview || missingModifiedDate || unsignedStatus,
+        parserNeedsReview: p.needsReview || Boolean(grammarFailure) || recoveredProcedure || unsignedStatus,
         parserReviewReason: unsignedStatus
-          ? [p.reviewReason, 'Not signed yet — count it?'].filter(Boolean).join(' | ')
+          ? [p.reviewReason, grammarFailure, recoveredProcedure ? 'Procedure title recovered before numeric date spillover' : null, 'Not signed yet — count it?'].filter(Boolean).join(' | ')
           : missingModifiedDate
-          ? [p.reviewReason, 'Missing Modified time/date - productivity date will use selected log date unless corrected.'].filter(Boolean).join(' | ')
-          : p.reviewReason,
+          ? [p.reviewReason, grammarFailure, recoveredProcedure ? 'Procedure title recovered before numeric date spillover' : null, 'Productivity date will use selected log date unless corrected.'].filter(Boolean).join(' | ')
+          : [p.reviewReason, grammarFailure, recoveredProcedure ? 'Procedure title recovered before numeric date spillover' : null].filter(Boolean).join(' | ') || null,
         parserRawLine: p.rawText,
         ocrConfidence,
         source: 'ocr' as const,
