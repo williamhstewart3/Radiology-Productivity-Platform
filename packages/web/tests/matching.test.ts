@@ -80,6 +80,17 @@ describe('modality-first CPT matching', () => {
     expect(__testDeterministicCptCodesFor('XR CHEST PA AND LATERAL')).toEqual(['71046']);
     expect(__testDeterministicCptCodesFor('XR ABDOMEN AP')).toEqual(['74018']);
     expect(__testDeterministicCptCodesFor('XR WRIST RIGHT PA LATERAL AND OBLIQUE')).toEqual(['73110']);
+    expect(__testDeterministicCptCodesFor('XR TIBIA FIBULA LEFT AP AND LATERAL')).toEqual(['73590']);
+  });
+
+  test('keeps tibia/fibula out of the heel X-ray lane', () => {
+    const rows = [
+      cptRow('73590', 'Radiologic examination, tibia and fibula; 2 views', 'XR'),
+      cptRow('73650', 'Radiologic examination, calcaneus; minimum 2 views', 'XR'),
+    ];
+
+    const candidates = __testAutoMatchRowsFor('XR TIBIA FIBULA LEFT AP AND LATERAL', rows);
+    expect(candidates.map((row) => row.cptCode)).toEqual(['73590']);
   });
 
   test.each([

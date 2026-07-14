@@ -60,6 +60,7 @@ type BodyProtocolKeyword =
   | 'HIP'
   | 'WRIST'
   | 'HAND'
+  | 'TIBIA_FIBULA'
   | 'CHEST_PORTABLE'
   | 'PROSTATE'
   | 'RENAL_STONE'
@@ -159,6 +160,7 @@ function extractBodyProtocolKeywords(text: string): Set<BodyProtocolKeyword> {
   if (/\bHIP\b/.test(upper)) keywords.add('HIP');
   if (/\bWRIST\b/.test(upper)) keywords.add('WRIST');
   if (/\bHAND\b/.test(upper)) keywords.add('HAND');
+  if (/\bTIBIA\s+(?:AND\s+)?FIBULA\b|\bTIB\s*[/ -]?\s*FIB\b/.test(upper)) keywords.add('TIBIA_FIBULA');
   if (/\bCHEST\b.*\bPORTABLE\b|\bPORTABLE\b.*\bCHEST\b/.test(upper)) keywords.add('CHEST_PORTABLE');
   if (/\bPROSTATE\b/.test(upper)) keywords.add('PROSTATE');
   if (/\bRENAL\b.*\bSTONE\b|\bSTONE\b.*\bPROTOCOL\b/.test(upper)) keywords.add('RENAL_STONE');
@@ -321,7 +323,7 @@ async function candidatesForDictionary(rawInput: string, maxResults: number): Pr
   for (const serialized of exactEntry.cptCodes) {
     const { cptCode } = parseAliasCode(serialized);
     const rows = await getModifier26Rows(cptCode);
-    for (const row of rows) candidates.push(rowToCandidate(rawInput, row, 0.94, 'radiology_match', 'exam dictionary'));
+    for (const row of rows) candidates.push(rowToCandidate(rawInput, row, 0.985, 'radiology_match', 'exam dictionary'));
     if (dedupeCandidates(candidates).length >= maxResults) break;
   }
   return candidates;
@@ -662,6 +664,7 @@ function deterministicCptCodesFor(parsed: ModalityFirstParse): string[] {
     if (parsed.keywords.has('CHEST_PORTABLE') || hasNormalizedPhrase(normalized, 'XR CHEST PORTABLE')) return ['71045'];
     if (hasNormalizedPhrase(normalized, 'XR CHEST PA AND LATERAL') || hasNormalizedPhrase(normalized, 'XR CHEST 2 VIEWS')) return ['71046'];
     if (hasNormalizedPhrase(normalized, 'XR ABDOMEN AP') || hasNormalizedPhrase(normalized, 'XR ABDOMEN 1 VIEW')) return ['74018'];
+    if (parsed.keywords.has('TIBIA_FIBULA')) return ['73590'];
     if (/\bXR\b.*\bWRIST\b.*\b(?:PA|LATERAL|OBLIQUE|3 VIEWS)\b/i.test(upper)) return ['73110'];
     if (/\bXR\b.*\bHAND\b.*\b(?:PA|LATERAL|OBLIQUE)\b/i.test(upper)) return ['73130'];
     if (/\bXR\b.*\bHIP\b.*\bPELVIS\b.*\b(?:AP|LATERAL)\b/i.test(upper) || /\bXR\b.*\bPELVIS\b.*\bHIP\b.*\b(?:AP|LATERAL)\b/i.test(upper)) return ['73502'];
@@ -764,6 +767,8 @@ function rowMatchesKeyword(row: CptRvuRow, keyword: BodyProtocolKeyword): boolea
       return /\bWRIST\b/.test(description);
     case 'HAND':
       return /\bHAND\b/.test(description);
+    case 'TIBIA_FIBULA':
+      return row.cptCode === '73590' || (/\bTIBIA\b/.test(description) && /\bFIBULA\b/.test(description));
     case 'CHEST_PORTABLE':
       return /\bCHEST\b/.test(description) && /\b(?:1 VIEW|PORTABLE)\b/.test(description);
     case 'PROSTATE':
@@ -799,7 +804,7 @@ function keywordScopedRows(rows: CptRvuRow[], parsed: ModalityFirstParse): CptRv
   const priorityGroups: BodyProtocolKeyword[][] = [
     ['CARDIAC_SCORE', 'RENAL_STONE', 'APPENDIX', 'LUNG_CANCER_SCREENING', 'MRCP', 'MAMMO_BIOPSY', 'STEREOTACTIC'],
     ['PROSTATE', 'CAROTID', 'CHEST_PORTABLE'],
-    ['C_SPINE', 'T_SPINE', 'L_SPINE', 'SPINE', 'HIP', 'WRIST', 'HAND', 'HEAD', 'NECK', 'BRAIN', 'CHEST', 'ABDOMEN', 'PELVIS', 'LOWER_EXTREMITY', 'UPPER_EXTREMITY'],
+    ['C_SPINE', 'T_SPINE', 'L_SPINE', 'SPINE', 'HIP', 'WRIST', 'HAND', 'TIBIA_FIBULA', 'HEAD', 'NECK', 'BRAIN', 'CHEST', 'ABDOMEN', 'PELVIS', 'LOWER_EXTREMITY', 'UPPER_EXTREMITY'],
   ];
 
   let scoped = rows;
@@ -1002,7 +1007,7 @@ export async function findMatchCandidates(
         const radioScore = scoreRadiologyMatch(radiologyNorm, row.description);
         const normalizedTextScore = combinedSimilarity(radiologyDescriptionKey, normalizedDescription);
         const keywordBoost = Array.from(parsed.keywords).some((keyword) => rowMatchesKeyword(row, keyword)) ? 0.08 : 0;
-        return { row, score: Math.min(1, Math.max(exactNormalizedScore, radioScore, normalizedTextScore * 0.92) + keywordBoost) };
+        return { row, score: Math.min(0.89, Math.max(exactNormalizedScore, radioScore, normalizedTextScore * 0.92) + keywordBoost) };
       })
       .filter((x) => x.score >= 0.35)
       .sort((a, b) => b.score - a.score)
