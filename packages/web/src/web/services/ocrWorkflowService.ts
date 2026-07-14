@@ -4,9 +4,14 @@ import { StructuredPowerScribeOcrImportProvider } from '../providers/StructuredP
 import { runImportPipeline, type PipelineResult, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
 import { ensureUserSettings } from '../db/database';
+import { db } from '../db/database';
 import { buildFingerprint } from '../utils/duplicateDetection';
 import type { ImportProvider } from '../types/importProvider';
 import type { PowerScribeStructuredOcrRow } from '../types/structuredOcr';
+import { getDefaultOcrEngine, type OcrEngine } from '../utils/ocrProvider';
+import { PSM } from 'tesseract.js';
+import { detectPowerScribeDatetimeLayout, detectPowerScribeHeaderLayout } from '../utils/powerScribeHeaderAnchors';
+import type { RelativeCropRect } from '../utils/imageCrop';
 
 interface WorkflowContext {
   profileId: string | null;
@@ -20,6 +25,56 @@ export interface ProcessedImportResult {
   extractedCount: number;
   timelineLabel: string;
   ocrDebug?: OCRImportDebugInfo | null;
+}
+
+export interface PowerScribeCapturePrecheck {
+  detected: boolean;
+  method: 'headerAnchors' | 'datetimeColumns' | 'none';
+  width: number;
+  height: number;
+  tableRect: RelativeCropRect | null;
+}
+
+type SavedPowerScribeCrop = NonNullable<Awaited<ReturnType<typeof ensureUserSettings>>['savedPowerScribeCropRegions'][string]>;
+
+export function isSavedPowerScribeCropCompatible(
+  crop: SavedPowerScribeCrop | null | undefined,
+  imageWidth: number,
+  imageHeight: number,
+): boolean {
+  return Boolean(crop && crop.imageWidth === imageWidth && crop.imageHeight === imageHeight);
+}
+
+async function imageDimensions(source: Blob): Promise<{ width: number; height: number }> {
+  const bitmap = await createImageBitmap(source);
+  try {
+    return { width: bitmap.width, height: bitmap.height };
+  } finally {
+    bitmap.close();
+  }
+}
+
+export async function inspectPowerScribeCapture(
+  source: Blob,
+  engine: OcrEngine = getDefaultOcrEngine(),
+  getDimensions: (source: Blob) => Promise<{ width: number; height: number }> = imageDimensions,
+): Promise<PowerScribeCapturePrecheck> {
+  const [result, dimensions] = await Promise.all([
+    engine.extractText(source, { pageSegMode: PSM.AUTO, userDefinedDpi: 300 }),
+    getDimensions(source),
+  ]);
+  const words = result.positionedWords
+    .filter((word) => word.bbox != null)
+    .map((word) => ({ text: word.text, confidence: word.confidence, bbox: word.bbox! }));
+  const headerLayout = detectPowerScribeHeaderLayout(words, dimensions.width, dimensions.height);
+  if (headerLayout) {
+    return { detected: true, method: 'headerAnchors', width: dimensions.width, height: dimensions.height, tableRect: headerLayout.tableRect };
+  }
+  const datetimeLayout = detectPowerScribeDatetimeLayout(words, dimensions.width, dimensions.height);
+  if (datetimeLayout) {
+    return { detected: true, method: 'datetimeColumns', width: dimensions.width, height: dimensions.height, tableRect: datetimeLayout.tableRect };
+  }
+  return { detected: false, method: 'none', width: dimensions.width, height: dimensions.height, tableRect: null };
 }
 
 async function processProvider(
@@ -129,7 +184,12 @@ export async function processOcrImport(
   metadata?: { filename?: string; size?: number | null; cropAlreadyApplied?: boolean },
 ): Promise<ProcessedImportResult> {
   const settings = await ensureUserSettings();
-  const savedCrop = settings.savedPowerScribeCropRegions?.default ?? null;
+  const cropKey = context.profileId ?? 'default';
+  const savedCrop = settings.savedPowerScribeCropRegions?.[cropKey] ?? null;
+  const dimensions = await imageDimensions(source);
+  const compatibleSavedCrop = isSavedPowerScribeCropCompatible(savedCrop, dimensions.width, dimensions.height)
+    ? savedCrop
+    : null;
   if (metadata?.filename) {
     await recordAuditEvent({
       profileId: context.profileId,
@@ -144,12 +204,12 @@ export async function processOcrImport(
 
   const provider = new OCRImportProvider(source, context.logDate, {
       cropBeforeOcr: !metadata?.cropAlreadyApplied && settings.requireCropBeforeOcr !== false,
-      cropRegion: savedCrop
+      savedCropRegion: compatibleSavedCrop
         ? {
-            x: savedCrop.x,
-            y: savedCrop.y,
-            width: savedCrop.width,
-            height: savedCrop.height,
+            x: compatibleSavedCrop.x,
+            y: compatibleSavedCrop.y,
+            width: compatibleSavedCrop.width,
+            height: compatibleSavedCrop.height,
           }
         : null,
     });
@@ -158,6 +218,21 @@ export async function processOcrImport(
     context,
     (count) => `Screenshot OCR completed (${count} extracted)`,
   );
+  const debug = attachOcrMatchDebug(provider.getDebugInfo(), processed.result);
+  if (debug?.crop?.method === 'headerAnchors' && debug.accounting) {
+    await db.userSettings.put({
+      ...settings,
+      savedPowerScribeCropRegions: {
+        ...settings.savedPowerScribeCropRegions,
+        [cropKey]: {
+          ...debug.crop.rect,
+          imageWidth: debug.accounting.imageWidth,
+          imageHeight: debug.accounting.imageHeight,
+        },
+      },
+      updatedAt: new Date().toISOString(),
+    });
+  }
   await recordAuditEvent({
     profileId: context.profileId,
     siteId: context.siteId,
@@ -168,9 +243,10 @@ export async function processOcrImport(
     detailsJson: JSON.stringify({
       reviewRows: processed.result.reviewRows.length,
       skippedRows: processed.result.skippedRows.length,
+      accounting: debug?.accounting ?? null,
     }),
   });
-  return { ...processed, ocrDebug: attachOcrMatchDebug(provider.getDebugInfo(), processed.result) };
+  return { ...processed, ocrDebug: debug };
 }
 
 export async function processStructuredPowerScribeOcrImport(

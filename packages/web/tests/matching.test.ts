@@ -266,6 +266,39 @@ describe('modality-first CPT matching', () => {
     expect(result.candidates.length).toBeGreaterThan(1);
   });
 
+  test('resolves a unique ellipsis-truncated institutional title as exact', () => {
+    const entries = [
+      institutionEntry('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST LESION', ['19081'], 'MAMMO'),
+      institutionEntry('MAMMO DIAGNOSTIC BILATERAL', ['77066'], 'MAMMO'),
+    ];
+    const result = resolveInstitutionProcedure('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST…', entries);
+
+    expect(result.matchType).toBe('exact_institution_match');
+    expect(result.candidates[0]?.procedureType).toBe('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST LESION');
+    expect(result.candidates[0]?.truncatedPrefix).toBe(true);
+  });
+
+  test('keeps a shared truncated prefix ambiguous instead of fuzzy guessing', () => {
+    const entries = [
+      institutionEntry('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST LESION', ['19081'], 'MAMMO'),
+      institutionEntry('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST AND EACH ADDITIONAL LESION', ['19081'], 'MAMMO'),
+    ];
+    const result = resolveInstitutionProcedure('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST…', entries);
+
+    expect(result.matchType).toBe('ambiguous_institution_match');
+    expect(result.candidates).toHaveLength(2);
+  });
+
+  test('resolves an institutional display name even before it has a CPT mapping', () => {
+    const result = resolveInstitutionProcedure('CT ANGIOGRAM CORONARY', [
+      institutionEntry('CT ANGIOGRAM CORONARY', [], 'CT'),
+    ]);
+
+    expect(result.matchType).toBe('exact_institution_match');
+    expect(result.candidates[0]?.procedureType).toBe('CT ANGIOGRAM CORONARY');
+    expect(result.candidates[0]?.entry.cptCodes).toEqual([]);
+  });
+
   test('institution dictionary near matches do not cross clinical safety boundaries', () => {
     expect(__testHasClinicallyMeaningfulInstitutionDifference('CT CHEST W CONTRAST', 'CT CHEST WO CONTRAST')).toBe(true);
     expect(__testHasClinicallyMeaningfulInstitutionDifference('CT CHEST WO CONTRAST', 'CT CHEST W CONTRAST')).toBe(true);

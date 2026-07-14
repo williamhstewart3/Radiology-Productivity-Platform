@@ -121,6 +121,9 @@ export interface ImportedStudy {
   /** Optional visible row/index number from the source table, when OCR captures it. */
   rowIndex?: string | null;
 
+  /** PowerScribe row status when the capture engine can distinguish it. */
+  powerScribeStatus?: 'check' | 'arrow' | 'unknown';
+
   /** OCR/parser-cleaned exam name before CPT matching, when available. */
   cleanedExamName?: string | null;
 

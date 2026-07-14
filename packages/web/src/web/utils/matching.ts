@@ -407,6 +407,14 @@ export interface InstitutionResolverCandidate {
   exact: boolean;
   corrections: string[];
   hardConflicts: string[];
+  truncatedPrefix: boolean;
+}
+
+function truncatedInstitutionPrefix(rawInput: string): string | null {
+  const match = rawInput.trim().match(/^(.*?)(?:\u2026|\.{2,}|[·•]{2,})\s*$/u);
+  if (!match) return null;
+  const prefix = normalizeRadiologyDescription(match[1]).trim();
+  return prefix.length >= 8 ? prefix : null;
 }
 
 export interface InstitutionResolverResult {
@@ -462,6 +470,7 @@ function institutionHardConflicts(rawInput: string, procedureType: string): stri
 
 function scoreInstitutionEntry(rawInput: string, entry: ExamDictionaryEntry): InstitutionResolverCandidate {
   const inputKeys = institutionNameKeys(rawInput);
+  const truncatedPrefix = truncatedInstitutionPrefix(rawInput);
   const inputLane = detectModalityLane(rawInput);
   const knownNames = dictionaryKnownNames(entry);
   let best = {
@@ -471,11 +480,13 @@ function scoreInstitutionEntry(rawInput: string, entry: ExamDictionaryEntry): In
     tolerantScore: 0,
     tokenScore: 0,
     exact: false,
+    truncatedPrefix: false,
   };
 
   for (const name of knownNames) {
     const keys = institutionNameKeys(name);
-    const exact = keys.normalized === inputKeys.normalized || keys.spaceless === inputKeys.spaceless || keys.tolerantSpaceless === inputKeys.tolerantSpaceless;
+    const prefixMatch = Boolean(truncatedPrefix && keys.normalized.startsWith(truncatedPrefix));
+    const exact = prefixMatch || keys.normalized === inputKeys.normalized || keys.spaceless === inputKeys.spaceless || keys.tolerantSpaceless === inputKeys.tolerantSpaceless;
     const normalizedScore = stringSimilarity(inputKeys.normalized, keys.normalized);
     const spacelessScore = stringSimilarity(inputKeys.spaceless, keys.spaceless);
     const tolerantScore = stringSimilarity(inputKeys.tolerantSpaceless, keys.tolerantSpaceless);
@@ -483,7 +494,7 @@ function scoreInstitutionEntry(rawInput: string, entry: ExamDictionaryEntry): In
     const score = exact ? 1 : Math.max(normalizedScore * 0.78, spacelessScore * 0.95, tolerantScore * 0.98, tokenScore * 0.82);
     const current = best.exact ? 1 : Math.max(best.normalizedScore * 0.78, best.spacelessScore * 0.95, best.tolerantScore * 0.98, best.tokenScore * 0.82);
     if (score > current) {
-      best = { procedureType: name, normalizedScore, spacelessScore, tolerantScore, tokenScore, exact };
+      best = { procedureType: name, normalizedScore, spacelessScore, tolerantScore, tokenScore, exact, truncatedPrefix: prefixMatch };
     }
   }
 
@@ -506,11 +517,12 @@ function scoreInstitutionEntry(rawInput: string, entry: ExamDictionaryEntry): In
     exact: best.exact,
     corrections: institutionCorrections(rawInput, best.procedureType),
     hardConflicts,
+    truncatedPrefix: best.truncatedPrefix,
   };
 }
 
 export function resolveInstitutionProcedure(rawInput: string, entries: ExamDictionaryEntry[], maxResults = 5): InstitutionResolverResult {
-  const institutionEntries = entries.filter((entry) => entry.source === 'institution' && entry.cptCodes.length > 0);
+  const institutionEntries = entries.filter((entry) => entry.source === 'institution');
   if (!rawInput.trim() || institutionEntries.length === 0) {
     return { matchType: 'no_institution_match', candidates: [], alternatives: [] };
   }
@@ -523,7 +535,8 @@ export function resolveInstitutionProcedure(rawInput: string, entries: ExamDicti
 
   const top = scored[0];
   const close = scored.filter((candidate) => candidate.entry.id !== top.entry.id && top.score - candidate.score <= 0.10);
-  if (!top.exact && close.length > 0) {
+  const ambiguousTruncatedPrefix = top.truncatedPrefix && close.some((candidate) => candidate.exact && candidate.truncatedPrefix);
+  if ((!top.exact && close.length > 0) || ambiguousTruncatedPrefix) {
     return {
       matchType: 'ambiguous_institution_match',
       candidates: [top, ...close].slice(0, maxResults).map((candidate) => ({ ...candidate, matchType: 'ambiguous_institution_match' })),
@@ -536,6 +549,13 @@ export function resolveInstitutionProcedure(rawInput: string, entries: ExamDicti
     candidates: scored.slice(0, maxResults),
     alternatives: scored.slice(1, maxResults),
   };
+}
+
+export async function resolveInstitutionDisplayName(rawInput: string): Promise<string | null> {
+  const entries = (await db.examDictionary.toArray()).filter((entry) => entry.source === 'institution');
+  const resolution = resolveInstitutionProcedure(rawInput, entries, 5);
+  if (resolution.matchType === 'ambiguous_institution_match' || resolution.matchType === 'no_institution_match') return null;
+  return resolution.candidates[0]?.procedureType ?? null;
 }
 
 async function candidatesForInstitutionMappings(rawInput: string, maxResults: number): Promise<MatchCandidate[]> {

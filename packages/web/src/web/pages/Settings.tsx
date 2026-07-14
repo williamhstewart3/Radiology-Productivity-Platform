@@ -493,7 +493,7 @@ export function Settings({ onNavigate }: SettingsProps) {
           <div className="mt-3 space-y-3">
             {[
               ['autoImportClipboardScreenshots', 'Automatically import screenshots from clipboard', 'When this app is focused, pasted PowerScribe screenshots can go directly into Capture.'],
-              ['alwaysProcessPowerScribeClipboard', 'Automatically process detected captures', 'Skip the Process/Ignore confirmation for future pasted screenshots.'],
+              ['alwaysProcessPowerScribeClipboard', 'Process PowerScribe captures automatically', 'Default off. Recognized PowerScribe captures process immediately; anything that fails the table check still stops at preview.'],
               ['clearClipboardAfterImport', 'Clear clipboard after import', 'Requested for desktop wrapper support; browsers may block clipboard clearing.'],
             ].map(([key, label, description]) => (
               <label key={key} className="flex items-center justify-between gap-3">

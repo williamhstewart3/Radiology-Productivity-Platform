@@ -14,14 +14,16 @@
  */
 
 import { parseOcrLinesWithDebug, type OcrParseDebugInfo } from '../utils/powerScribeParser';
-import { getDefaultOcrProvider } from '../utils/ocrProvider';
+import { getDefaultOcrEngine } from '../utils/ocrProvider';
 import { PSM } from 'tesseract.js';
 import { maybeEnhanceOcrWithLlm } from '../services/llmOcrExtractionService';
 import { parseDateTimeFromOcr } from '../utils/studyDateParser';
 import {
   DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
   preprocessPowerScribeColumnsForOcr,
+  PowerScribeTableNotFoundError,
   type DetectedCrop,
+  type PowerScribeCropAccounting,
   type PowerScribeColumnName,
   type RelativeCropRect,
 } from '../utils/imageCrop';
@@ -32,6 +34,7 @@ import type { OcrPositionedLine, OcrResult } from '../utils/ocrProvider';
 export interface OCRImportOptions {
   cropBeforeOcr?: boolean;
   cropRegion?: RelativeCropRect | null;
+  savedCropRegion?: RelativeCropRect | null;
   autoDetectPowerScribeTable?: boolean;
 }
 
@@ -71,6 +74,7 @@ export interface OCRImportDebugInfo {
   columnText?: Record<PowerScribeColumnName, string>;
   detectedRows: OCRImportDebugRow[];
   ocrConfidence: number;
+  accounting?: PowerScribeCropAccounting;
 }
 
 type ColumnOcrResults = Record<PowerScribeColumnName, OcrResult>;
@@ -82,20 +86,49 @@ interface ReassembledColumnRow {
   rawModifiedDateColumnText: string;
 }
 
-const COLUMN_OCR_PARAMS: Record<PowerScribeColumnName, { pageSegMode: PSM; charWhitelist: string }> = {
+const COLUMN_OCR_PARAMS = {
   procedure: {
     pageSegMode: PSM.SINGLE_BLOCK,
-    charWhitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /&-.',
+    charWhitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /+&()-.',
+    preserveInterwordSpaces: true,
+    dictionaryCorrection: false,
+    userDefinedDpi: 300,
   },
   examDate: {
     pageSegMode: PSM.SINGLE_BLOCK,
-    charWhitelist: '0123456789/: -TAPMapm',
+    charWhitelist: '0123456789/: APM',
+    preserveInterwordSpaces: true,
+    dictionaryCorrection: false,
+    userDefinedDpi: 300,
   },
   modifiedDate: {
     pageSegMode: PSM.SINGLE_BLOCK,
-    charWhitelist: '0123456789/: -TAPMapm',
+    charWhitelist: '0123456789/: APM',
+    preserveInterwordSpaces: true,
+    dictionaryCorrection: false,
+    userDefinedDpi: 300,
   },
-};
+} satisfies Record<PowerScribeColumnName, Parameters<ReturnType<typeof getDefaultOcrEngine>['extractText']>[1]>;
+
+export function __testColumnOcrParams() {
+  return COLUMN_OCR_PARAMS;
+}
+
+export function powerScribeRowGrammarFailure(row: Pick<ParsedLine, 'procedureName' | 'examDateTime' | 'modifiedDateTime'>): string | null {
+  const procedure = row.procedureName.trim();
+  if (!/^(?:CT|CTA|MRI|MR|MRA|XR|US|NM|PET|MAMMO|FL|IR)\b[A-Z0-9 /+&()\-.]{2,}$/.test(procedure)) {
+    return 'Procedure is not a plausible all-caps RIS title';
+  }
+  if (!row.examDateTime) return 'Missing or unclear Exam Date';
+  if (!row.modifiedDateTime) return 'Missing or unclear Modified date';
+  return null;
+}
+
+export function classifyPowerScribeStatusText(text: string): 'check' | 'arrow' | 'unknown' {
+  if (/[✓✔☑]/u.test(text) || /^CHECK(?:ED)?$/i.test(text.trim())) return 'check';
+  if (/[➜➡→]/u.test(text) || /^ARROW$/i.test(text.trim())) return 'arrow';
+  return 'unknown';
+}
 
 function lineCenterY(line: OcrPositionedLine): number | null {
   if (!line.bbox) return null;
@@ -159,7 +192,29 @@ function reassembleColumnRowsWithDebug(results: ColumnOcrResults): ReassembledCo
     ...examLines,
     ...modifiedLines,
   ].map(lineHeight).filter((height): height is number => height != null));
-  const tolerance = Math.max(22, Math.min(42, Math.round((medianHeight ?? 16) * 1.8)));
+  const modifiedCentersForPitch = modifiedLines
+    .map(lineCenterY)
+    .filter((y): y is number => y != null)
+    .sort((a, b) => a - b);
+  const heightTolerance = Math.max(12, Math.min(36, Math.round((medianHeight ?? 16) * 1.25)));
+  const preliminaryModifiedCenters: number[] = [];
+  for (const center of modifiedCentersForPitch) {
+    const previous = preliminaryModifiedCenters.at(-1);
+    if (previous != null && center - previous <= heightTolerance) {
+      preliminaryModifiedCenters[preliminaryModifiedCenters.length - 1] = (previous + center) / 2;
+    } else {
+      preliminaryModifiedCenters.push(center);
+    }
+  }
+  const modifiedPitch = preliminaryModifiedCenters.length >= 3
+    ? median(preliminaryModifiedCenters
+        .slice(1)
+        .map((center, index) => center - preliminaryModifiedCenters[index])
+        .filter((pitch) => pitch > 4))
+    : null;
+  const tolerance = modifiedPitch == null
+    ? heightTolerance
+    : Math.min(heightTolerance, Math.max(8, Math.floor(modifiedPitch * 0.45)));
   const allCenters = [
     ...procedureLines,
     ...examLines,
@@ -168,9 +223,14 @@ function reassembleColumnRowsWithDebug(results: ColumnOcrResults): ReassembledCo
     .map(lineCenterY)
     .filter((y): y is number => y != null)
     .sort((a, b) => a - b);
+  const modifiedCenters = modifiedLines
+    .map(lineCenterY)
+    .filter((y): y is number => y != null)
+    .sort((a, b) => a - b);
+  const anchorCenters = modifiedCenters.length > 0 ? modifiedCenters : allCenters;
 
   const rowCenters: number[] = [];
-  for (const center of allCenters) {
+  for (const center of anchorCenters) {
     const existingIndex = rowCenters.findIndex((existing) => Math.abs(existing - center) <= tolerance);
     if (existingIndex >= 0) {
       rowCenters[existingIndex] = (rowCenters[existingIndex] + center) / 2;
@@ -272,15 +332,77 @@ export class OCRImportProvider implements ImportProvider {
   }
 
   async importStudies(): Promise<ImportedStudy[]> {
-    const provider = getDefaultOcrProvider();
-    const preprocessed = this.options.cropBeforeOcr === false
+    const provider = getDefaultOcrEngine();
+    const passOne = this.options.cropBeforeOcr === false
       ? null
-      : await preprocessPowerScribeColumnsForOcr(
-          this.file,
-          this.options.autoDetectPowerScribeTable === false
-            ? this.options.cropRegion ?? DEFAULT_POWERSCRIBE_STUDY_LIST_CROP
-            : this.options.cropRegion ?? null,
-        );
+      : await provider.extractText(this.file, { pageSegMode: PSM.AUTO, userDefinedDpi: 300 });
+    const detectedStatuses = (passOne?.positionedWords ?? [])
+      .map((word) => ({ status: classifyPowerScribeStatusText(word.text), y: word.bbox?.y0 ?? Number.POSITIVE_INFINITY }))
+      .filter((item) => item.status !== 'unknown')
+      .sort((a, b) => a.y - b.y)
+      .map((item) => item.status);
+    let preprocessed = null;
+    try {
+      preprocessed = this.options.cropBeforeOcr === false
+        ? null
+        : await preprocessPowerScribeColumnsForOcr(this.file, {
+            manualCrop: this.options.autoDetectPowerScribeTable === false
+              ? this.options.cropRegion ?? DEFAULT_POWERSCRIBE_STUDY_LIST_CROP
+              : this.options.cropRegion ?? null,
+            savedCrop: this.options.savedCropRegion ?? null,
+            headerWords: (passOne?.positionedWords ?? [])
+              .filter((word) => word.bbox != null)
+              .map((word) => ({ text: word.text, confidence: word.confidence, bbox: word.bbox! })),
+          });
+    } catch (error) {
+      if (!(error instanceof PowerScribeTableNotFoundError)) throw error;
+      const now = new Date().toISOString();
+      this.debugInfo = {
+        crop: null,
+        ocrProvider: provider.name,
+        ocrText: passOne?.rawText ?? '',
+        ocrLines: [],
+        rawLineCount: passOne?.lines.length ?? 0,
+        cleanedLineCount: 0,
+        reconstructedRowCount: 1,
+        parsedRowCount: 1,
+        rejectedRowCount: 0,
+        rejectedRows: [],
+        detectedRows: [],
+        ocrConfidence: passOne?.confidence ?? 0,
+      };
+      return [{
+        examTitle: "COULDN'T FIND POWERSCRIBE TABLE",
+        procedureName: "COULDN'T FIND POWERSCRIBE TABLE",
+        canonicalExam: null,
+        cpt: null,
+        workRvu: null,
+        studyDate: this.studyDate,
+        examDate: null,
+        examTime: null,
+        examDateTime: null,
+        studyTime: null,
+        modifiedDate: null,
+        modifiedDateTime: null,
+        modifiedTime: null,
+        modality: null,
+        accessionNumber: null,
+        patientMRN: null,
+        rowIndex: null,
+        powerScribeStatus: 'unknown',
+        cleanedExamName: "COULDN'T FIND POWERSCRIBE TABLE",
+        cleanedText: "COULDN'T FIND POWERSCRIBE TABLE",
+        extractionConfidence: 0,
+        parserNeedsReview: true,
+        parserReviewReason: error.message,
+        parserRawLine: '',
+        ocrConfidence: passOne?.confidence ?? 0,
+        source: 'ocr',
+        importedAt: now,
+        dateTimeConfidence: 0,
+        dateTimeSource: 'import_default',
+      }];
+    }
     const result = preprocessed
       ? null
       : await provider.extractText(this.file);
@@ -330,7 +452,7 @@ export class OCRImportProvider implements ImportProvider {
       lines: ocrLines,
       regexParsed,
       fallbackStudyDate: this.studyDate,
-      ocrProviderName: provider.constructor.name,
+      ocrProviderName: provider.name,
       ocrConfidence,
       enabled: false,
     });
@@ -339,7 +461,7 @@ export class OCRImportProvider implements ImportProvider {
       crop: preprocessed?.tableCrop ?? null,
       threeColumnCrop: preprocessed?.threeColumnCrop ?? null,
       columnCrops: preprocessed?.columns.map((column) => ({ name: column.name, rect: column.rect })),
-      ocrProvider: provider.constructor.name,
+      ocrProvider: provider.name,
       ocrText,
       ocrLines,
       rawLineCount: parsedWithDebug.debug.rawLineCount,
@@ -364,11 +486,55 @@ export class OCRImportProvider implements ImportProvider {
         : undefined,
       detectedRows: parsed,
       ocrConfidence,
+      accounting: preprocessed
+          ? {
+            ...preprocessed.accounting,
+            engine: provider.name,
+            inputRowCount: rowLines.length,
+            outputRowCount: parsed.length + parsedWithDebug.debug.rejectedRows.length,
+          }
+        : undefined,
     };
 
-    return parsed.map((p) => {
+    const parsedStudies: ImportedStudy[] = parsed.map((p, index): ImportedStudy => {
       const productivityDate = p.modifiedDate ?? this.studyDate;
       const missingModifiedDate = !p.modifiedDateTime;
+      const powerScribeStatus = detectedStatuses[index] ?? 'unknown';
+      const unsignedStatus = powerScribeStatus === 'arrow';
+      const grammarFailure = powerScribeRowGrammarFailure(p);
+      if (grammarFailure) {
+        return {
+          examTitle: "COULDN'T READ POWERSCRIBE ROW",
+          procedureName: "COULDN'T READ POWERSCRIBE ROW",
+          canonicalExam: null,
+          cpt: null,
+          workRvu: null,
+          studyDate: this.studyDate,
+          examDate: p.examDate,
+          examTime: p.examTime,
+          examDateTime: p.examDateTime,
+          studyTime: p.modifiedDateTime,
+          modifiedDate: p.modifiedDate,
+          modifiedDateTime: p.modifiedDateTime,
+          modifiedTime: p.modifiedTime,
+          modality: null,
+          accessionNumber: null,
+          patientMRN: null,
+          rowIndex: p.rowIndex,
+          powerScribeStatus,
+          cleanedExamName: "COULDN'T READ POWERSCRIBE ROW",
+          cleanedText: "COULDN'T READ POWERSCRIBE ROW",
+          extractionConfidence: 0,
+          parserNeedsReview: true,
+          parserReviewReason: `${grammarFailure}. Review the captured row before counting it.`,
+          parserRawLine: p.rawText,
+          ocrConfidence,
+          source: 'ocr' as const,
+          importedAt: now,
+          dateTimeConfidence: p.dateTimeConfidence,
+          dateTimeSource: 'ocr' as const,
+        };
+      }
 
       return {
         examTitle: p.procedureName,
@@ -388,11 +554,14 @@ export class OCRImportProvider implements ImportProvider {
         accessionNumber: null,
         patientMRN: null,
         rowIndex: p.rowIndex,
+        powerScribeStatus,
         cleanedExamName: p.cleanedExamName,
         cleanedText: p.cleanedText,
         extractionConfidence: p.extractionConfidence,
-        parserNeedsReview: p.needsReview || missingModifiedDate,
-        parserReviewReason: missingModifiedDate
+        parserNeedsReview: p.needsReview || missingModifiedDate || unsignedStatus,
+        parserReviewReason: unsignedStatus
+          ? [p.reviewReason, 'Not signed yet — count it?'].filter(Boolean).join(' | ')
+          : missingModifiedDate
           ? [p.reviewReason, 'Missing Modified time/date - productivity date will use selected log date unless corrected.'].filter(Boolean).join(' | ')
           : p.reviewReason,
         parserRawLine: p.rawText,
@@ -403,6 +572,38 @@ export class OCRImportProvider implements ImportProvider {
         dateTimeSource: p.modifiedDateTime ? 'ocr' : 'import_default',
       };
     });
+    const rejectedStudies: ImportedStudy[] = parsedWithDebug.debug.rejectedRows.map((rejected) => ({
+      examTitle: "COULDN'T READ POWERSCRIBE ROW",
+      procedureName: "COULDN'T READ POWERSCRIBE ROW",
+      canonicalExam: null,
+      cpt: null,
+      workRvu: null,
+      studyDate: this.studyDate,
+      examDate: null,
+      examTime: null,
+      examDateTime: null,
+      studyTime: null,
+      modifiedDate: null,
+      modifiedDateTime: null,
+      modifiedTime: null,
+      modality: null,
+      accessionNumber: null,
+      patientMRN: null,
+      rowIndex: null,
+      powerScribeStatus: 'unknown',
+      cleanedExamName: "COULDN'T READ POWERSCRIBE ROW",
+      cleanedText: "COULDN'T READ POWERSCRIBE ROW",
+      extractionConfidence: 0,
+      parserNeedsReview: true,
+      parserReviewReason: `${rejected.reason}. Review the captured row before counting it.`,
+      parserRawLine: rejected.rawText,
+      ocrConfidence,
+      source: 'ocr',
+      importedAt: now,
+      dateTimeConfidence: 0,
+      dateTimeSource: 'ocr',
+    }));
+    return [...parsedStudies, ...rejectedStudies];
   }
 
   getDebugInfo(): OCRImportDebugInfo | null {

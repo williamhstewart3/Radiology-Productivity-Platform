@@ -1,4 +1,4 @@
-import { findMatchCandidates, learnAlias } from '../utils/matching';
+import { findMatchCandidates, learnAlias, resolveInstitutionDisplayName } from '../utils/matching';
 import { checkBatchDuplicates, buildFingerprint, isStrongDuplicateFingerprint } from '../utils/duplicateDetection';
 import { db } from '../db/database';
 import { supabasePersistence } from '../services/supabasePersistence';
@@ -155,7 +155,12 @@ export async function runImportPipeline(
   const autoCommitThreshold = effectiveAutoCommitThreshold(userSettings?.lowConfidenceThreshold);
   const matched: Array<{ study: ImportedStudy; candidates: MatchCandidate[] }> = [];
 
-  for (const study of studies) {
+  for (const originalStudy of studies) {
+    const originalProcedureName = procedureNameFor(originalStudy);
+    const resolvedDisplayName = await resolveInstitutionDisplayName(originalProcedureName);
+    const study: ImportedStudy = resolvedDisplayName
+      ? { ...originalStudy, procedureName: resolvedDisplayName, canonicalExam: resolvedDisplayName }
+      : originalStudy;
     const procedureName = procedureNameFor(study);
     const query = study.cpt ?? procedureName;
     const candidates = (await findMatchCandidates(query, 6, profileId, {
@@ -368,7 +373,7 @@ export async function commitPipelineResults(
 
     if (rowCommitted) {
       await learnAlias({
-        rawText: procedureName,
+        rawText: study.source === 'ocr' ? study.examTitle : procedureName,
         canonicalExamName: displayTitle,
         candidates: selectedCandidates.map((candidate) => ({
           cptCode: candidate.cptCode,

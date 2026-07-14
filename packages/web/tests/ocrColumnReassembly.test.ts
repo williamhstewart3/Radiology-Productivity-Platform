@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { __testReassembleColumnRows } from '../src/web/providers/OCRImportProvider';
+import { __testReassembleColumnRows, classifyPowerScribeStatusText, powerScribeRowGrammarFailure } from '../src/web/providers/OCRImportProvider';
 
 function ocrResult(lines: Array<{ text: string; y0: number; y1: number; x0?: number; x1?: number }>) {
   return {
@@ -15,6 +15,7 @@ function ocrResult(lines: Array<{ text: string; y0: number; y1: number; x0?: num
         y1: line.y1,
       },
     })),
+    positionedWords: [],
     confidence: 0.95,
   };
 }
@@ -39,5 +40,50 @@ describe('PowerScribe column OCR row reassembly', () => {
     expect(rows[0]).toContain('XR CHEST PORTABLE');
     expect(rows[0]).toContain('7/8/26 8:19 AM');
     expect(rows[0]).toContain('7/8/26 9:05 PM');
+  });
+});
+
+describe('PowerScribe strict row grammar', () => {
+  test('accepts only a plausible RIS title with both datetimes', () => {
+    expect(powerScribeRowGrammarFailure({
+      procedureName: 'CT HEAD WO CONTRAST',
+      examDateTime: '2026-07-11T08:15:00',
+      modifiedDateTime: '2026-07-11T08:29:00',
+    })).toBeNull();
+    expect(powerScribeRowGrammarFailure({
+      procedureName: 'TEND Adult Slice 6.00',
+      examDateTime: '2026-07-11T08:15:00',
+      modifiedDateTime: '2026-07-11T08:29:00',
+    })).toContain('RIS title');
+    expect(powerScribeRowGrammarFailure({
+      procedureName: 'CT HEAD WO CONTRAST',
+      examDateTime: '2026-07-11T08:15:00',
+      modifiedDateTime: null,
+    })).toContain('Modified');
+  });
+
+  test('bands a 68-row Browse-density capture from Modified anchors without merging rows', () => {
+    const rows = Array.from({ length: 68 }, (_, index) => ({
+      procedure: `CT HEAD WO CONTRAST ${index + 1}`,
+      exam: `7/11/2026 8:${String(index % 60).padStart(2, '0')} AM`,
+      modified: `7/11/2026 9:${String(index % 60).padStart(2, '0')} AM`,
+      y0: 20 + index * 42,
+      y1: 44 + index * 42,
+    }));
+    const reconstructed = __testReassembleColumnRows({
+      procedure: ocrResult(rows.map((row) => ({ text: row.procedure, y0: row.y0, y1: row.y1 }))),
+      examDate: ocrResult(rows.map((row) => ({ text: row.exam, y0: row.y0, y1: row.y1 }))),
+      modifiedDate: ocrResult(rows.map((row) => ({ text: row.modified, y0: row.y0, y1: row.y1 }))),
+    });
+
+    expect(reconstructed).toHaveLength(68);
+    expect(reconstructed[0]).toContain('CT HEAD WO CONTRAST 1');
+    expect(reconstructed[67]).toContain('CT HEAD WO CONTRAST 68');
+  });
+
+  test('classifies signed and in-progress glyphs conservatively', () => {
+    expect(classifyPowerScribeStatusText('✓')).toBe('check');
+    expect(classifyPowerScribeStatusText('➡')).toBe('arrow');
+    expect(classifyPowerScribeStatusText('?')).toBe('unknown');
   });
 });

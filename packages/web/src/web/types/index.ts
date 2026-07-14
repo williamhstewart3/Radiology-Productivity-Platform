@@ -458,7 +458,14 @@ export interface UserSettings {
   autoImportClipboardScreenshots: boolean;
   alwaysProcessPowerScribeClipboard: boolean;
   clearClipboardAfterImport: boolean;
-  savedPowerScribeCropRegions: Record<string, { x: number; y: number; width: number; height: number }>;
+  savedPowerScribeCropRegions: Record<string, {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    imageWidth?: number;
+    imageHeight?: number;
+  }>;
 }
 
 /** Color accent for a radiologist profile, practice, or org. */

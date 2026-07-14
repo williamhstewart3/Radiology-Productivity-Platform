@@ -3,10 +3,11 @@ import {
   DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
   __testBoundToStudyListArea,
   __testDetectPowerScribeColumnLayoutFromProjection,
+  selectPowerScribeCropTier,
 } from '../src/web/utils/imageCrop';
 
 function syntheticThreeColumnProjection(width = 1000): number[] {
-  const projection = new Array<number>(width).fill(0.002);
+  const projection = Array.from({ length: width }, () => 0.002);
   const addTextBlock = (start: number, end: number, strength: number) => {
     for (let i = start; i <= end; i++) {
       projection[i] = strength + ((i % 17) / 17) * 0.008;
@@ -58,7 +59,7 @@ describe('PowerScribe column crop detection', () => {
   });
 
   test('falls back to configured ratios when gutters are not reliable', () => {
-    const layout = __testDetectPowerScribeColumnLayoutFromProjection(new Array<number>(60).fill(0.02));
+    const layout = __testDetectPowerScribeColumnLayoutFromProjection(Array.from({ length: 60 }, () => 0.02));
 
     expect(layout.method).toBe('fallback');
     expect(layout.columns.procedure.x).toBe(0.13);
@@ -66,5 +67,24 @@ describe('PowerScribe column crop detection', () => {
     expect(layout.columns.modifiedDate.x).toBe(0.76);
     expect(layout.columns.examDate.width).toBeGreaterThanOrEqual(0.22);
     expect(layout.columns.modifiedDate.width).toBeGreaterThanOrEqual(0.235);
+  });
+
+  test('enforces header > datetime > valley > saved tier order', () => {
+    const base = { manual: false, headerAnchors: true, datetimeColumns: true, pixelValley: true, savedCrop: true, hasPowerScribeSignal: true };
+    expect(selectPowerScribeCropTier(base)).toBe('headerAnchors');
+    expect(selectPowerScribeCropTier({ ...base, headerAnchors: false })).toBe('datetimeColumns');
+    expect(selectPowerScribeCropTier({ ...base, headerAnchors: false, datetimeColumns: false })).toBe('pixelValley');
+    expect(selectPowerScribeCropTier({ ...base, headerAnchors: false, datetimeColumns: false, pixelValley: false })).toBe('savedCrop');
+  });
+
+  test('fails closed for a wrong-window capture with no PowerScribe signal', () => {
+    expect(selectPowerScribeCropTier({
+      manual: false,
+      headerAnchors: false,
+      datetimeColumns: false,
+      pixelValley: true,
+      savedCrop: true,
+      hasPowerScribeSignal: false,
+    })).toBeNull();
   });
 });

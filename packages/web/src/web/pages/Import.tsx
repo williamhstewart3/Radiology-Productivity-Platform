@@ -14,7 +14,7 @@ import { Card } from '../components/ui/Card';
 import { useProfile } from '../hooks/useProfile';
 import { getDesktopAPI } from '../lib/desktop';
 import { todayDateString } from '../utils/calculations';
-import { db, ensureUserSettings } from '../db/database';
+import { db } from '../db/database';
 import {
   createTimelineEvent,
   getSelectedCandidateIndices,
@@ -25,7 +25,7 @@ import {
   persistActiveReviewSession,
   type TimelineEvent,
 } from '../services/reviewSessionService';
-import { processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { inspectPowerScribeCapture, processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
 import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
@@ -46,6 +46,10 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
   if (!debug) return null;
   const debugStats = [
     ['Provider', debug.ocrProvider],
+    ['Engine', debug.accounting?.engine ?? debug.ocrProvider],
+    ['Crop tier', debug.accounting?.cropMethod ?? debug.crop?.method ?? 'none'],
+    ['OCR scale', debug.accounting ? `${debug.accounting.preprocessScale.toFixed(2)}x` : 'n/a'],
+    ['Header/valley drift', debug.accounting?.headerValleyDrift == null ? 'n/a' : debug.accounting.headerValleyDrift.toFixed(3)],
     ['Raw lines', debug.rawLineCount ?? debug.ocrLines.length],
     ['Cleaned lines', debug.cleanedLineCount ?? debug.ocrLines.length],
     ['Procedure OCR lines', debug.columnLineCounts?.procedure ?? 'n/a'],
@@ -314,6 +318,13 @@ export function shouldAutoProcessPowerScribeCaptures(settings: Pick<UserSettings
   return Boolean(settings?.alwaysProcessPowerScribeClipboard);
 }
 
+export function shouldAutoProcessRecognizedCapture(
+  detected: boolean,
+  settings: Pick<UserSettings, 'alwaysProcessPowerScribeClipboard'> | null | undefined,
+): boolean {
+  return detected && shouldAutoProcessPowerScribeCaptures(settings);
+}
+
 interface ImportToast {
   id: string;
   tone: ImportToastTone;
@@ -363,6 +374,43 @@ function CaptureProcessingState() {
   );
 }
 
+function CapturePreview({ file, inspection }: { file: File; inspection: PowerScribeCapturePrecheck }) {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    const next = URL.createObjectURL(file);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [file]);
+
+  return (
+    <div className="space-y-3">
+      <div
+        className="relative mx-auto overflow-hidden rounded-[10px] border border-rd-separator bg-black/5"
+        style={{ aspectRatio: `${inspection.width} / ${inspection.height}`, width: `min(100%, ${(320 * inspection.width) / inspection.height}px)` }}
+      >
+        {url && <img src={url} alt="Capture waiting for review" className="absolute inset-0 size-full object-contain" />}
+        {inspection.tableRect && (
+          <span
+            aria-label="Detected table region"
+            className="pointer-events-none absolute border-2 border-rd-positive bg-rd-positive/10"
+            style={{
+              left: `${inspection.tableRect.x * 100}%`,
+              top: `${inspection.tableRect.y * 100}%`,
+              width: `${inspection.tableRect.width * 100}%`,
+              height: `${inspection.tableRect.height * 100}%`,
+            }}
+          />
+        )}
+      </div>
+      <p className="text-[12px] text-rd-label-secondary">
+        {inspection.width} × {inspection.height} · {inspection.detected
+          ? 'This looks like a PowerScribe worklist; the outlined region is the candidate table.'
+          : "This doesn't look like a PowerScribe worklist."}
+      </p>
+    </div>
+  );
+}
+
 export function Import({ onReviewReady }: ImportProps) {
   const { activeProfile, activePractice } = useProfile();
   const [mode, setMode]           = useState<Mode>('ocr');
@@ -375,6 +423,7 @@ export function Import({ onReviewReady }: ImportProps) {
   const [logDate, setLogDate]     = useState(todayDateString());
   const [error, setError]         = useState<string | null>(null);
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
+  const [capturePreview, setCapturePreview] = useState<PowerScribeCapturePrecheck | null>(null);
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   // Eagerly generated (not lazily inside the persist effect below) so that
   // effect only ever runs once per actual state change instead of twice per
@@ -434,6 +483,23 @@ export function Import({ onReviewReady }: ImportProps) {
   useEffect(() => {
     processingRef.current = processing;
   }, [processing]);
+
+  useEffect(() => {
+    if (!clipboardFile || processing) return;
+    function handlePreviewKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setClipboardFile(null);
+        setCapturePreview(null);
+        lastClipboardImageHashRef.current = null;
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        void processPowerScribeCapture(clipboardFile!, 'confirmed preview');
+      }
+    }
+    window.addEventListener('keydown', handlePreviewKey);
+    return () => window.removeEventListener('keydown', handlePreviewKey);
+  }, [clipboardFile, processing]);
 
   useEffect(() => {
     if (mode !== 'ocr') return;
@@ -599,6 +665,7 @@ export function Import({ onReviewReady }: ImportProps) {
     setError(null);
     setOcrFile(file);
     setClipboardFile(null);
+    setCapturePreview(null);
     pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
     try {
       const usedStructuredHelper = await processWindowsClipboardCapture(file, timelineSource);
@@ -615,12 +682,20 @@ export function Import({ onReviewReady }: ImportProps) {
     if (hash === lastClipboardImageHashRef.current) return;
     lastClipboardImageHashRef.current = hash;
     pushToast('info', 'Screenshot captured', `PowerScribe image received from ${timelineSource}.`);
-    const settings = await ensureUserSettings();
-    if (shouldAutoProcessPowerScribeCaptures(settings)) {
-      await processPowerScribeCapture(file, timelineSource);
+    const preview = await inspectPowerScribeCapture(file);
+    const settings = await db.userSettings.get('default');
+    if (shouldAutoProcessRecognizedCapture(preview.detected, settings)) {
+      pushToast('success', 'PowerScribe table detected — processing automatically', `${preview.width} × ${preview.height} · outlined table region accepted.`);
+      await processPowerScribeCapture(file, `${timelineSource} (auto-process)`);
       return;
     }
+    setCapturePreview(preview);
     setClipboardFile(file);
+    pushToast(
+      preview.detected ? 'success' : 'warning',
+      preview.detected ? 'PowerScribe reports table detected' : "This doesn't look like the PowerScribe reports window",
+      'Review the image, then press Enter to process or Esc to discard.',
+    );
   }
 
   async function handlePasteProcess() {
@@ -642,23 +717,6 @@ export function Import({ onReviewReady }: ImportProps) {
     } finally {
       setProcessing(false);
     }
-  }
-
-  async function handleOcrProcess() {
-    if (!ocrFile) return;
-    await processOcrFile(ocrFile, 'manual file');
-  }
-
-  async function alwaysProcessClipboard(file: File) {
-    const settings = await ensureUserSettings();
-    await db.userSettings.put({
-      ...settings,
-      autoImportClipboardScreenshots: true,
-      alwaysProcessPowerScribeClipboard: true,
-      updatedAt: new Date().toISOString(),
-    });
-    pushToast('success', 'PowerScribe captures will be processed automatically.');
-    await processPowerScribeCapture(file, 'trusted clipboard');
   }
 
   if (step === 'review') {
@@ -767,34 +825,31 @@ export function Import({ onReviewReady }: ImportProps) {
         <Card className="space-y-4">
           {clipboardFile && !processing && (
             <div className="space-y-3 rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
-              <p className="text-[13px] font-semibold text-rd-label-primary">{CAPTURE_PROMPT_TITLE}</p>
+              <p className="text-[13px] font-semibold text-rd-label-primary">Review capture before processing</p>
               <p className="text-[12px] text-rd-label-secondary">
-                This looks like a PowerScribe worklist screenshot. {CAPTURE_PRIVACY_COPY}
+                Only the local table pre-check has run—no import pipeline or saved data yet. {CAPTURE_PRIVACY_COPY}
               </p>
+              {capturePreview && <CapturePreview file={clipboardFile} inspection={capturePreview} />}
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => processPowerScribeCapture(clipboardFile, 'confirmed clipboard')}
+                  onClick={() => processPowerScribeCapture(clipboardFile, 'confirmed preview')}
                   disabled={processing}
                   className="min-h-11 rounded-[10px] bg-rd-label-primary px-3 text-[13px] font-semibold text-rd-bg disabled:opacity-40"
                 >
-                  Process this capture
+                  Process <span className="ml-1 opacity-70">Enter</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setClipboardFile(null)}
+                  onClick={() => {
+                    setClipboardFile(null);
+                    setCapturePreview(null);
+                    lastClipboardImageHashRef.current = null;
+                  }}
                   disabled={processing}
                   className="min-h-11 px-2 text-[13px] text-rd-label-secondary disabled:opacity-40"
                 >
-                  Ignore this capture
-                </button>
-                <button
-                  type="button"
-                  onClick={() => alwaysProcessClipboard(clipboardFile)}
-                  disabled={processing}
-                  className="min-h-11 px-2 text-[13px] text-rd-label-primary disabled:opacity-40"
-                >
-                  Always process PowerScribe captures
+                  Discard <span className="ml-1 opacity-70">Esc</span>
                 </button>
               </div>
             </div>
@@ -811,21 +866,25 @@ export function Import({ onReviewReady }: ImportProps) {
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={(e) => setOcrFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void queueClipboardImage(file, 'file upload');
+                e.target.value = '';
+              }}
             />
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
               className={cn(
                 'w-full cursor-pointer rounded-[16px] border-2 border-dashed p-8 text-center transition-colors',
-                ocrFile ? 'border-rd-label-primary bg-rd-surface-2' : 'border-rd-separator hover:bg-rd-surface-2',
+                clipboardFile ? 'border-rd-label-primary bg-rd-surface-2' : 'border-rd-separator hover:bg-rd-surface-2',
               )}
             >
-              {ocrFile ? (
+              {clipboardFile ? (
                 <div>
-                  <p className="font-medium text-rd-label-primary">{ocrFile.name}</p>
+                  <p className="font-medium text-rd-label-primary">{clipboardFile.name}</p>
                   <p className="mt-1 text-[12px] text-rd-label-secondary">
-                    {(ocrFile.size / 1024).toFixed(0)} KB · Click to change
+                    {(clipboardFile.size / 1024).toFixed(0)} KB · Waiting for review
                   </p>
                 </div>
               ) : (
@@ -859,14 +918,6 @@ export function Import({ onReviewReady }: ImportProps) {
           </div>
           <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
           {error && <p className="text-[13px] text-rd-negative">{error}</p>}
-          <button
-            type="button"
-            onClick={handleOcrProcess}
-            disabled={!ocrFile || processing}
-            className="min-h-11 w-full rounded-[10px] bg-rd-label-primary px-5 text-[15px] font-semibold text-rd-bg disabled:opacity-40"
-          >
-            {processing ? CAPTURE_PROCESSING_LABEL : 'Extract & Match'}
-          </button>
         </Card>
       )}
 

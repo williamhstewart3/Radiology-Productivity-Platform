@@ -1,3 +1,5 @@
+import { detectPowerScribeDatetimeLayout, detectPowerScribeHeaderLayout, type PowerScribeOcrWord } from './powerScribeHeaderAnchors';
+
 export interface RelativeCropRect {
   x: number;
   y: number;
@@ -15,7 +17,7 @@ export const DEFAULT_POWERSCRIBE_STUDY_LIST_CROP: RelativeCropRect = {
 export interface DetectedCrop {
   rect: RelativeCropRect;
   confidence: number;
-  method: 'detected' | 'fallback';
+  method: 'headerAnchors' | 'datetimeColumns' | 'pixelValley' | 'savedCrop' | 'manual' | 'fallback';
 }
 
 export interface CroppedImageResult {
@@ -35,6 +37,49 @@ export interface PowerScribeColumnPreprocessResult {
   tableCrop: DetectedCrop;
   threeColumnCrop: DetectedCrop;
   columns: PowerScribeColumnCrop[];
+  accounting: PowerScribeCropAccounting;
+}
+
+export interface PowerScribeCropAccounting {
+  engine: 'tesseract.js' | 'text-detector';
+  cropMethod: DetectedCrop['method'];
+  imageWidth: number;
+  imageHeight: number;
+  modifiedAnchorCount: number;
+  bandPitch: number | null;
+  preprocessScale: number;
+  headerValleyDrift: number | null;
+  inputRowCount: number;
+  outputRowCount: number;
+}
+
+export interface PowerScribePreprocessOptions {
+  manualCrop?: RelativeCropRect | null;
+  savedCrop?: RelativeCropRect | null;
+  headerWords?: PowerScribeOcrWord[];
+}
+
+export class PowerScribeTableNotFoundError extends Error {
+  constructor() {
+    super("Couldn't find the PowerScribe table. Capture the full PowerScribe worklist and try again.");
+    this.name = 'PowerScribeTableNotFoundError';
+  }
+}
+
+export function selectPowerScribeCropTier(input: {
+  manual: boolean;
+  headerAnchors: boolean;
+  datetimeColumns: boolean;
+  pixelValley: boolean;
+  savedCrop: boolean;
+  hasPowerScribeSignal: boolean;
+}): DetectedCrop['method'] | null {
+  if (input.manual) return 'manual';
+  if (input.headerAnchors) return 'headerAnchors';
+  if (input.datetimeColumns) return 'datetimeColumns';
+  if (input.hasPowerScribeSignal && input.pixelValley) return 'pixelValley';
+  if (input.hasPowerScribeSignal && input.savedCrop) return 'savedCrop';
+  return null;
 }
 
 function clamp01(value: number): number {
@@ -134,8 +179,8 @@ function detectPowerScribeStudyListCropFromBitmap(bitmap: ImageBitmap): Detected
   }
 
   const { data, width, height } = image;
-  const rowSignal = new Array<number>(height).fill(0);
-  const colSignal = new Array<number>(width).fill(0);
+  const rowSignal = Array.from({ length: height }, () => 0);
+  const colSignal = Array.from({ length: width }, () => 0);
 
   const xMin = Math.floor(width * 0.18);
   const xMax = Math.floor(width * 0.98);
@@ -185,7 +230,7 @@ function detectPowerScribeStudyListCropFromBitmap(bitmap: ImageBitmap): Detected
     return { rect: DEFAULT_POWERSCRIBE_STUDY_LIST_CROP, confidence, method: 'fallback' };
   }
 
-  return { rect: detected, confidence, method: 'detected' };
+  return { rect: detected, confidence, method: 'pixelValley' };
 }
 
 async function blobFromBitmapCrop(bitmap: ImageBitmap, cropRect: RelativeCropRect, outputType: string): Promise<Blob> {
@@ -385,7 +430,7 @@ function detectPowerScribeColumnLayoutFromBitmap(bitmap: ImageBitmap, tableRect:
   if (!ctx) return fallbackColumnLayout();
   ctx.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, width, height);
   const imageData = ctx.getImageData(0, 0, width, height).data;
-  const projection = new Array<number>(width).fill(0);
+  const projection = Array.from({ length: width }, () => 0);
   const yMin = Math.floor(height * 0.06);
   const yMax = Math.floor(height * 0.98);
 
@@ -453,12 +498,11 @@ function adaptiveThreshold(imageData: ImageData, width: number, height: number):
   return output;
 }
 
-async function preprocessedBlobFromBitmapCrop(bitmap: ImageBitmap, cropRect: RelativeCropRect, outputType: string): Promise<Blob> {
+async function preprocessedBlobFromBitmapCrop(bitmap: ImageBitmap, cropRect: RelativeCropRect, outputType: string, scale: number): Promise<Blob> {
   const source = absoluteRectFromRelative(cropRect, bitmap.width, bitmap.height);
-  const scale = 2;
   const canvas = document.createElement('canvas');
-  canvas.width = source.width * scale;
-  canvas.height = source.height * scale;
+  canvas.width = Math.max(1, Math.round(source.width * scale));
+  canvas.height = Math.max(1, Math.round(source.height * scale));
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('Canvas is not available for OCR preprocessing');
 
@@ -494,34 +538,101 @@ export async function cropPowerScribeScreenshotWithDebug(
 
 export async function preprocessPowerScribeColumnsForOcr(
   image: File | Blob,
-  cropRect?: RelativeCropRect | null,
+  options: PowerScribePreprocessOptions = {},
   outputType = 'image/png',
 ): Promise<PowerScribeColumnPreprocessResult> {
   const bitmap = await createImageBitmap(image);
   try {
-    const tableCrop: DetectedCrop = cropRect
-      ? { rect: normalizeCrop(cropRect), confidence: 1, method: 'fallback' }
-      : detectPowerScribeStudyListCropFromBitmap(bitmap);
-    const columnLayout = detectPowerScribeColumnLayoutFromBitmap(bitmap, tableCrop.rect);
+    const headerLayout = detectPowerScribeHeaderLayout(options.headerWords ?? [], bitmap.width, bitmap.height);
+    const datetimeLayout = headerLayout
+      ? null
+      : detectPowerScribeDatetimeLayout(options.headerWords ?? [], bitmap.width, bitmap.height);
+    const structuralLayout = headerLayout ?? datetimeLayout;
+    const signalWords = new Set((options.headerWords ?? []).map((word) => word.text.toUpperCase().replace(/[^A-Z]/g, '')));
+    const hasPowerScribeSignal = ['PROCEDURE', 'EXAM', 'EXAMDATE', 'MODIFIED', 'MYREPORTS']
+      .some((signal) => signalWords.has(signal));
+    const pixelCrop = detectPowerScribeStudyListCropFromBitmap(bitmap);
+    const selectedTier = selectPowerScribeCropTier({
+      manual: Boolean(options.manualCrop),
+      headerAnchors: Boolean(headerLayout),
+      datetimeColumns: Boolean(datetimeLayout),
+      pixelValley: pixelCrop.method === 'pixelValley',
+      savedCrop: Boolean(options.savedCrop),
+      hasPowerScribeSignal,
+    });
+    let tableCrop: DetectedCrop;
+    if (selectedTier === 'manual' && options.manualCrop) {
+      tableCrop = { rect: normalizeCrop(options.manualCrop), confidence: 1, method: 'manual' };
+    } else if (selectedTier === 'headerAnchors' && headerLayout) {
+      tableCrop = { rect: normalizeCrop(headerLayout.tableRect), confidence: 1, method: 'headerAnchors' };
+    } else if (selectedTier === 'datetimeColumns' && datetimeLayout) {
+      tableCrop = { rect: normalizeCrop(datetimeLayout.tableRect), confidence: 0.9, method: 'datetimeColumns' };
+    } else if (selectedTier === 'pixelValley' && pixelCrop.method === 'pixelValley') {
+      tableCrop = pixelCrop;
+    } else if (selectedTier === 'savedCrop' && options.savedCrop) {
+      tableCrop = { rect: normalizeCrop(options.savedCrop), confidence: 0.8, method: 'savedCrop' };
+    } else {
+      throw new PowerScribeTableNotFoundError();
+    }
+    const valleyLayout = detectPowerScribeColumnLayoutFromBitmap(bitmap, tableCrop.rect);
+    const columnLayout: PowerScribeColumnLayout = structuralLayout && (tableCrop.method === 'headerAnchors' || tableCrop.method === 'datetimeColumns')
+      ? {
+          threeColumnRect: {
+            x: structuralLayout.columns.procedure.x,
+            y: 0,
+            width: 1 - structuralLayout.columns.procedure.x,
+            height: 1,
+          },
+          columns: structuralLayout.columns,
+          confidence: 1,
+          method: 'detected',
+        }
+      : valleyLayout;
     const threeColumnCrop: DetectedCrop = {
       rect: childRect(tableCrop.rect, columnLayout.threeColumnRect),
       confidence: columnLayout.confidence,
-      method: columnLayout.method,
+      method: tableCrop.method === 'headerAnchors' || tableCrop.method === 'datetimeColumns'
+        ? tableCrop.method
+        : columnLayout.method === 'detected' ? 'pixelValley' : tableCrop.method,
     };
     const columnDefinitions: Array<{ name: PowerScribeColumnName; rect: RelativeCropRect }> = [
       { name: 'procedure', rect: childRect(tableCrop.rect, columnLayout.columns.procedure) },
       { name: 'examDate', rect: childRect(tableCrop.rect, columnLayout.columns.examDate) },
       { name: 'modifiedDate', rect: childRect(tableCrop.rect, columnLayout.columns.modifiedDate) },
     ];
+    const pitch = structuralLayout?.bandPitch ?? null;
+    const preprocessScale = pitch == null ? 3 : Math.max(1.5, Math.min(4, 36 / Math.max(9, pitch * 0.55)));
     const columns: PowerScribeColumnCrop[] = [];
     for (const column of columnDefinitions) {
       columns.push({
         name: column.name,
         rect: column.rect,
-        blob: await preprocessedBlobFromBitmapCrop(bitmap, column.rect, outputType),
+        blob: await preprocessedBlobFromBitmapCrop(bitmap, column.rect, outputType, preprocessScale),
       });
     }
-    return { tableCrop, threeColumnCrop, columns };
+    const headerValleyDrift = structuralLayout && valleyLayout.method === 'detected'
+      ? Math.max(
+          Math.abs(structuralLayout.columns.examDate.x - valleyLayout.columns.examDate.x),
+          Math.abs(structuralLayout.columns.modifiedDate.x - valleyLayout.columns.modifiedDate.x),
+        )
+      : null;
+    return {
+      tableCrop,
+      threeColumnCrop,
+      columns,
+      accounting: {
+        engine: 'tesseract.js',
+        cropMethod: tableCrop.method,
+        imageWidth: bitmap.width,
+        imageHeight: bitmap.height,
+        modifiedAnchorCount: structuralLayout?.modifiedAnchorCount ?? 0,
+        bandPitch: pitch,
+        preprocessScale,
+        headerValleyDrift,
+        inputRowCount: 0,
+        outputRowCount: 0,
+      },
+    };
   } finally {
     bitmap.close();
   }
