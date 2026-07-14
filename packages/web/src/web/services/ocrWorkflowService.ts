@@ -11,7 +11,7 @@ import type { PowerScribeStructuredOcrRow } from '../types/structuredOcr';
 import { getDefaultOcrEngine, type OcrEngine } from '../utils/ocrProvider';
 import { PSM } from 'tesseract.js';
 import { detectPowerScribeDatetimeLayout, detectPowerScribeHeaderLayout } from '../utils/powerScribeHeaderAnchors';
-import type { PowerScribeManualColumnCrops, RelativeCropRect } from '../utils/imageCrop';
+import type { PowerScribeManualColumnCrops, PowerScribeManualColumnGuides, RelativeCropRect } from '../utils/imageCrop';
 
 interface WorkflowContext {
   profileId: string | null;
@@ -33,6 +33,7 @@ export interface PowerScribeCapturePrecheck {
   width: number;
   height: number;
   tableRect: RelativeCropRect | null;
+  suggestedManualGuides: PowerScribeManualColumnGuides | null;
 }
 
 type SavedPowerScribeCrop = NonNullable<Awaited<ReturnType<typeof ensureUserSettings>>['savedPowerScribeCropRegions'][string]>;
@@ -52,6 +53,25 @@ async function imageDimensions(source: Blob): Promise<{ width: number; height: n
   } finally {
     bitmap.close();
   }
+}
+
+function manualGuidesFromDetectedLayout(
+  tableRect: RelativeCropRect,
+  columns: {
+    procedure: RelativeCropRect;
+    examDate: RelativeCropRect;
+    modifiedDate: RelativeCropRect;
+  },
+): PowerScribeManualColumnGuides {
+  const absoluteX = (relativeX: number) => tableRect.x + tableRect.width * relativeX;
+  return {
+    left: absoluteX(columns.procedure.x),
+    procedureEnd: absoluteX(columns.procedure.x + columns.procedure.width),
+    examEnd: absoluteX(columns.examDate.x + columns.examDate.width),
+    right: absoluteX(columns.modifiedDate.x + columns.modifiedDate.width),
+    top: tableRect.y,
+    bottom: tableRect.y + tableRect.height,
+  };
 }
 
 export async function inspectPowerScribeCapture(
@@ -92,13 +112,34 @@ export async function inspectPowerScribeCapture(
     });
   const headerLayout = detectPowerScribeHeaderLayout(words, dimensions.width, dimensions.height);
   if (headerLayout) {
-    return { detected: true, method: 'headerAnchors', width: dimensions.width, height: dimensions.height, tableRect: headerLayout.tableRect };
+    return {
+      detected: true,
+      method: 'headerAnchors',
+      width: dimensions.width,
+      height: dimensions.height,
+      tableRect: headerLayout.tableRect,
+      suggestedManualGuides: manualGuidesFromDetectedLayout(headerLayout.tableRect, headerLayout.columns),
+    };
   }
   const datetimeLayout = detectPowerScribeDatetimeLayout(words, dimensions.width, dimensions.height);
   if (datetimeLayout) {
-    return { detected: true, method: 'datetimeColumns', width: dimensions.width, height: dimensions.height, tableRect: datetimeLayout.tableRect };
+    return {
+      detected: true,
+      method: 'datetimeColumns',
+      width: dimensions.width,
+      height: dimensions.height,
+      tableRect: datetimeLayout.tableRect,
+      suggestedManualGuides: manualGuidesFromDetectedLayout(datetimeLayout.tableRect, datetimeLayout.columns),
+    };
   }
-  return { detected: false, method: 'none', width: dimensions.width, height: dimensions.height, tableRect: null };
+  return {
+    detected: false,
+    method: 'none',
+    width: dimensions.width,
+    height: dimensions.height,
+    tableRect: null,
+    suggestedManualGuides: null,
+  };
 }
 
 async function processProvider(

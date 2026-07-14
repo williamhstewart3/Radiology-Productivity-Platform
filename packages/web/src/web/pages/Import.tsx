@@ -389,7 +389,7 @@ function CapturePreview({
   file: File;
   inspection: PowerScribeCapturePrecheck;
   manualGuides: PowerScribeManualColumnGuides | null;
-  onManualGuidesChange: (guides: PowerScribeManualColumnGuides) => void;
+  onManualGuidesChange: (guides: PowerScribeManualColumnGuides | null) => void;
 }) {
   const [url, setUrl] = useState('');
   useEffect(() => {
@@ -479,6 +479,19 @@ function CapturePreview({
           ? 'This looks like a PowerScribe worklist; the outlined region is the candidate table.'
           : 'No table outline was detected. If this is the PowerScribe worklist, you can still process it for review.'}
       </p>
+      {inspection.detected && (
+        <button
+          type="button"
+          onClick={() => onManualGuidesChange(
+            manualGuides
+              ? null
+              : { ...(inspection.suggestedManualGuides ?? DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES) },
+          )}
+          className="min-h-9 rounded-[8px] border border-rd-separator bg-rd-surface px-3 text-[12px] font-medium text-rd-label-primary"
+        >
+          {manualGuides ? 'Use detected crop' : 'Adjust crop'}
+        </button>
+      )}
       {manualGuides && (
         <div className="grid gap-2 sm:grid-cols-2" aria-label="Manual PowerScribe column crop controls">
           {guideControls.map((control) => (

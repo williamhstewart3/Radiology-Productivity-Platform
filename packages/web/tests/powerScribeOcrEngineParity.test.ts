@@ -64,6 +64,10 @@ describe('browser and Windows PowerScribe OCR grammar parity', () => {
     );
     expect(inspected).toMatchObject({ detected: true, method: 'headerAnchors', width: 1800, height: 1000 });
     expect(inspected.tableRect).not.toBeNull();
+    expect(inspected.suggestedManualGuides).not.toBeNull();
+    expect(inspected.suggestedManualGuides!.left).toBeLessThan(inspected.suggestedManualGuides!.procedureEnd);
+    expect(inspected.suggestedManualGuides!.procedureEnd).toBeLessThan(inspected.suggestedManualGuides!.examEnd);
+    expect(inspected.suggestedManualGuides!.examEnd).toBeLessThan(inspected.suggestedManualGuides!.right);
   });
 
   test('recognizes scaled worklists when browser OCR returns whole text regions', async () => {
@@ -86,6 +90,7 @@ describe('browser and Windows PowerScribe OCR grammar parity', () => {
 
     expect(inspected.detected).toBe(true);
     expect(inspected.tableRect).not.toBeNull();
+    expect(inspected.suggestedManualGuides).not.toBeNull();
   });
 
   test('feature-detects TextDetector and gracefully falls back to Tesseract', () => {
