@@ -27,6 +27,7 @@ import {
   type DetectedCrop,
   type PowerScribeCropAccounting,
   type PowerScribeColumnName,
+  type PowerScribeManualColumnCrops,
   type RelativeCropRect,
 } from '../utils/imageCrop';
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
@@ -36,6 +37,7 @@ import type { OcrPositionedLine, OcrResult } from '../utils/ocrProvider';
 export interface OCRImportOptions {
   cropBeforeOcr?: boolean;
   cropRegion?: RelativeCropRect | null;
+  manualColumnCrops?: PowerScribeManualColumnCrops | null;
   savedCropRegion?: RelativeCropRect | null;
   autoDetectPowerScribeTable?: boolean;
 }
@@ -404,6 +406,7 @@ export class OCRImportProvider implements ImportProvider {
       preprocessed = this.options.cropBeforeOcr === false
         ? null
         : await preprocessPowerScribeColumnsForOcr(this.file, {
+            manualColumns: this.options.manualColumnCrops ?? null,
             manualCrop: this.options.autoDetectPowerScribeTable === false
               ? this.options.cropRegion ?? DEFAULT_POWERSCRIBE_STUDY_LIST_CROP
               : this.options.cropRegion ?? null,

@@ -30,6 +30,12 @@ import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCa
 import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { MatchCandidate, UserSettings } from '../types';
+import {
+  DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES,
+  powerScribeManualColumnsFromGuides,
+  type PowerScribeManualColumnCrops,
+  type PowerScribeManualColumnGuides,
+} from '../utils/imageCrop';
 
 function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocrDebug']; imageFile?: File | Blob | null }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -374,13 +380,55 @@ function CaptureProcessingState() {
   );
 }
 
-function CapturePreview({ file, inspection }: { file: File; inspection: PowerScribeCapturePrecheck }) {
+function CapturePreview({
+  file,
+  inspection,
+  manualGuides,
+  onManualGuidesChange,
+}: {
+  file: File;
+  inspection: PowerScribeCapturePrecheck;
+  manualGuides: PowerScribeManualColumnGuides | null;
+  onManualGuidesChange: (guides: PowerScribeManualColumnGuides) => void;
+}) {
   const [url, setUrl] = useState('');
   useEffect(() => {
     const next = URL.createObjectURL(file);
     setUrl(next);
     return () => URL.revokeObjectURL(next);
   }, [file]);
+
+  const manualColumns = manualGuides ? powerScribeManualColumnsFromGuides(manualGuides) : null;
+  const overlays = manualColumns
+    ? [
+        { name: 'procedure' as const, label: 'Procedure', color: '#2563eb', fill: 'rgba(37, 99, 235, 0.12)' },
+        { name: 'examDate' as const, label: 'Exam Date', color: '#d97706', fill: 'rgba(217, 119, 6, 0.12)' },
+        { name: 'modifiedDate' as const, label: 'Modified', color: '#059669', fill: 'rgba(5, 150, 105, 0.12)' },
+      ]
+    : [];
+
+  function updateGuide(name: keyof PowerScribeManualColumnGuides, nextValue: number) {
+    if (!manualGuides) return;
+    const next = { ...manualGuides };
+    if (name === 'left') next.left = Math.max(0, Math.min(nextValue, next.procedureEnd - 0.05));
+    if (name === 'procedureEnd') next.procedureEnd = Math.max(next.left + 0.05, Math.min(nextValue, next.examEnd - 0.05));
+    if (name === 'examEnd') next.examEnd = Math.max(next.procedureEnd + 0.05, Math.min(nextValue, next.right - 0.05));
+    if (name === 'right') next.right = Math.max(next.examEnd + 0.05, Math.min(1, nextValue));
+    if (name === 'top') next.top = Math.max(0, Math.min(nextValue, next.bottom - 0.1));
+    if (name === 'bottom') next.bottom = Math.max(next.top + 0.1, Math.min(1, nextValue));
+    onManualGuidesChange(next);
+  }
+
+  const guideControls: Array<{ name: keyof PowerScribeManualColumnGuides; label: string; min: number; max: number }> = manualGuides
+    ? [
+        { name: 'top', label: 'Top of rows', min: 0, max: manualGuides.bottom - 0.1 },
+        { name: 'bottom', label: 'Bottom of rows', min: manualGuides.top + 0.1, max: 1 },
+        { name: 'left', label: 'Procedure left edge', min: 0, max: manualGuides.procedureEnd - 0.05 },
+        { name: 'procedureEnd', label: 'Procedure / Exam divider', min: manualGuides.left + 0.05, max: manualGuides.examEnd - 0.05 },
+        { name: 'examEnd', label: 'Exam / Modified divider', min: manualGuides.procedureEnd + 0.05, max: manualGuides.right - 0.05 },
+        { name: 'right', label: 'Modified right edge', min: manualGuides.examEnd + 0.05, max: 1 },
+      ]
+    : [];
 
   return (
     <div className="space-y-3">
@@ -389,7 +437,7 @@ function CapturePreview({ file, inspection }: { file: File; inspection: PowerScr
         style={{ aspectRatio: `${inspection.width} / ${inspection.height}`, width: `min(100%, ${(320 * inspection.width) / inspection.height}px)` }}
       >
         {url && <img src={url} alt="Capture waiting for review" className="absolute inset-0 size-full object-contain" />}
-        {inspection.tableRect && (
+        {!manualColumns && inspection.tableRect && (
           <span
             aria-label="Detected table region"
             className="pointer-events-none absolute border-2 border-rd-positive bg-rd-positive/10"
@@ -401,12 +449,58 @@ function CapturePreview({ file, inspection }: { file: File; inspection: PowerScr
             }}
           />
         )}
+        {overlays.map((overlay) => {
+          const rect = manualColumns![overlay.name];
+          return (
+            <span
+              key={overlay.name}
+              aria-label={`Manual ${overlay.label} crop`}
+              className="pointer-events-none absolute border-2"
+              style={{
+                left: `${rect.x * 100}%`,
+                top: `${rect.y * 100}%`,
+                width: `${rect.width * 100}%`,
+                height: `${rect.height * 100}%`,
+                borderColor: overlay.color,
+                backgroundColor: overlay.fill,
+              }}
+            >
+              <span className="absolute left-0 top-0 bg-black/70 px-1 py-0.5 text-[9px] font-semibold text-white">
+                {overlay.label}
+              </span>
+            </span>
+          );
+        })}
       </div>
       <p className="text-[12px] text-rd-label-secondary">
-        {inspection.width} × {inspection.height} · {inspection.detected
+        {inspection.width} × {inspection.height} · {manualColumns
+          ? 'Automatic detection was uncertain. Adjust the guides so each colored band contains only its named column.'
+          : inspection.detected
           ? 'This looks like a PowerScribe worklist; the outlined region is the candidate table.'
           : 'No table outline was detected. If this is the PowerScribe worklist, you can still process it for review.'}
       </p>
+      {manualGuides && (
+        <div className="grid gap-2 sm:grid-cols-2" aria-label="Manual PowerScribe column crop controls">
+          {guideControls.map((control) => (
+            <label key={control.name} className="rounded-[8px] border border-rd-separator bg-rd-surface px-2 py-1.5 text-[11px] text-rd-label-secondary">
+              <span className="flex items-center justify-between gap-2">
+                <span>{control.label}</span>
+                <span className="font-mono">{Math.round(manualGuides[control.name] * 100)}%</span>
+              </span>
+              <input
+                aria-label={control.label}
+                type="range"
+                min={control.min}
+                max={control.max}
+                step={0.005}
+                value={manualGuides[control.name]}
+                onChange={(event) => updateGuide(control.name, Number(event.target.value))}
+                className="mt-1 w-full"
+              />
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -424,6 +518,7 @@ export function Import({ onReviewReady }: ImportProps) {
   const [error, setError]         = useState<string | null>(null);
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
   const [capturePreview, setCapturePreview] = useState<PowerScribeCapturePrecheck | null>(null);
+  const [manualCropGuides, setManualCropGuides] = useState<PowerScribeManualColumnGuides | null>(null);
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   // Eagerly generated (not lazily inside the persist effect below) so that
   // effect only ever runs once per actual state change instead of twice per
@@ -491,15 +586,20 @@ export function Import({ onReviewReady }: ImportProps) {
         event.preventDefault();
         setClipboardFile(null);
         setCapturePreview(null);
+        setManualCropGuides(null);
         lastClipboardImageHashRef.current = null;
       } else if (event.key === 'Enter') {
         event.preventDefault();
-        void processPowerScribeCapture(clipboardFile!, 'confirmed preview');
+        void processPowerScribeCapture(
+          clipboardFile!,
+          'confirmed preview',
+          manualCropGuides ? powerScribeManualColumnsFromGuides(manualCropGuides) : null,
+        );
       }
     }
     window.addEventListener('keydown', handlePreviewKey);
     return () => window.removeEventListener('keydown', handlePreviewKey);
-  }, [clipboardFile, processing]);
+  }, [clipboardFile, processing, manualCropGuides]);
 
   useEffect(() => {
     if (mode !== 'ocr') return;
@@ -609,7 +709,11 @@ export function Import({ onReviewReady }: ImportProps) {
       .join('');
   }
 
-  async function processOcrFile(file: File, timelineSource: string) {
+  async function processOcrFile(
+    file: File,
+    timelineSource: string,
+    manualColumnCrops: PowerScribeManualColumnCrops | null = null,
+  ) {
     setProcessing(true);
     setError(null);
     setOcrFile(file);
@@ -620,7 +724,7 @@ export function Import({ onReviewReady }: ImportProps) {
         siteId: activePractice?.id ?? null,
         sessionId,
         logDate,
-      }, { filename: file.name, size: file.size });
+      }, { filename: file.name, size: file.size, manualColumnCrops });
       pushToast('info', 'Matching CPT codes...', 'Running aliases, active CPT filters, and review checks.');
       setOcrDebug(processed.ocrDebug ?? null);
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
@@ -659,18 +763,25 @@ export function Import({ onReviewReady }: ImportProps) {
     }
   }
 
-  async function processPowerScribeCapture(file: File, timelineSource: string) {
+  async function processPowerScribeCapture(
+    file: File,
+    timelineSource: string,
+    manualColumnCrops: PowerScribeManualColumnCrops | null = null,
+  ) {
     if (processingRef.current) return;
     setProcessing(true);
     setError(null);
     setOcrFile(file);
     setClipboardFile(null);
     setCapturePreview(null);
+    setManualCropGuides(null);
     pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
     try {
-      const usedStructuredHelper = await processWindowsClipboardCapture(file, timelineSource);
+      const usedStructuredHelper = manualColumnCrops
+        ? false
+        : await processWindowsClipboardCapture(file, timelineSource);
       if (!usedStructuredHelper) {
-        await processOcrFile(file, timelineSource);
+        await processOcrFile(file, timelineSource, manualColumnCrops);
       }
     } finally {
       setProcessing(false);
@@ -690,6 +801,7 @@ export function Import({ onReviewReady }: ImportProps) {
       return;
     }
     setCapturePreview(preview);
+    setManualCropGuides(preview.detected ? null : { ...DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES });
     setClipboardFile(file);
     pushToast(
       preview.detected ? 'success' : 'warning',
@@ -829,11 +941,22 @@ export function Import({ onReviewReady }: ImportProps) {
               <p className="text-[12px] text-rd-label-secondary">
                 Only the local table pre-check has run—no import pipeline or saved data yet. {CAPTURE_PRIVACY_COPY}
               </p>
-              {capturePreview && <CapturePreview file={clipboardFile} inspection={capturePreview} />}
+              {capturePreview && (
+                <CapturePreview
+                  file={clipboardFile}
+                  inspection={capturePreview}
+                  manualGuides={manualCropGuides}
+                  onManualGuidesChange={setManualCropGuides}
+                />
+              )}
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => processPowerScribeCapture(clipboardFile, 'confirmed preview')}
+                  onClick={() => processPowerScribeCapture(
+                    clipboardFile,
+                    'confirmed preview',
+                    manualCropGuides ? powerScribeManualColumnsFromGuides(manualCropGuides) : null,
+                  )}
                   disabled={processing}
                   className="min-h-11 rounded-[10px] bg-rd-label-primary px-3 text-[13px] font-semibold text-rd-bg disabled:opacity-40"
                 >
@@ -844,6 +967,7 @@ export function Import({ onReviewReady }: ImportProps) {
                   onClick={() => {
                     setClipboardFile(null);
                     setCapturePreview(null);
+                    setManualCropGuides(null);
                     lastClipboardImageHashRef.current = null;
                   }}
                   disabled={processing}

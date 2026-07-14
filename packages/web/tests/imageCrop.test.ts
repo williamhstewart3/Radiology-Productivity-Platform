@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
   DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
+  DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES,
   __testBoundToStudyListArea,
   __testDetectPowerScribeColumnLayoutFromProjection,
+  powerScribeManualColumnsFromGuides,
   selectPowerScribeCropTier,
 } from '../src/web/utils/imageCrop';
 
@@ -71,10 +73,27 @@ describe('PowerScribe column crop detection', () => {
 
   test('enforces header > datetime > valley > saved tier order', () => {
     const base = { manual: false, headerAnchors: true, datetimeColumns: true, pixelValley: true, savedCrop: true, hasPowerScribeSignal: true };
+    expect(selectPowerScribeCropTier({ ...base, manual: true })).toBe('manual');
     expect(selectPowerScribeCropTier(base)).toBe('headerAnchors');
     expect(selectPowerScribeCropTier({ ...base, headerAnchors: false })).toBe('datetimeColumns');
     expect(selectPowerScribeCropTier({ ...base, headerAnchors: false, datetimeColumns: false })).toBe('pixelValley');
     expect(selectPowerScribeCropTier({ ...base, headerAnchors: false, datetimeColumns: false, pixelValley: false })).toBe('savedCrop');
+  });
+
+  test('turns manual guides into three aligned, non-overlapping column crops', () => {
+    const columns = powerScribeManualColumnsFromGuides(DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES);
+
+    expect(columns.procedure.y).toBe(columns.examDate.y);
+    expect(columns.examDate.y).toBe(columns.modifiedDate.y);
+    expect(columns.procedure.height).toBe(columns.examDate.height);
+    expect(columns.examDate.height).toBe(columns.modifiedDate.height);
+    expect(columns.procedure.x + columns.procedure.width).toBe(columns.examDate.x);
+    expect(columns.examDate.x + columns.examDate.width).toBe(columns.modifiedDate.x);
+    expect(columns.procedure.width).toBeCloseTo(0.38);
+    expect(columns.examDate.width).toBeCloseTo(0.2);
+    expect(columns.modifiedDate.width).toBeCloseTo(0.2);
+    expect(columns.procedure.y).toBeCloseTo(0.1);
+    expect(columns.procedure.height).toBeCloseTo(0.85);
   });
 
   test('fails closed for a wrong-window capture with no PowerScribe signal', () => {

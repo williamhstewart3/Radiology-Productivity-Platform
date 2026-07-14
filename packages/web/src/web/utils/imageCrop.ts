@@ -27,6 +27,43 @@ export interface CroppedImageResult {
 
 export type PowerScribeColumnName = 'procedure' | 'examDate' | 'modifiedDate';
 
+export type PowerScribeManualColumnCrops = Record<PowerScribeColumnName, RelativeCropRect>;
+
+export interface PowerScribeManualColumnGuides {
+  left: number;
+  procedureEnd: number;
+  examEnd: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+export const DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES: PowerScribeManualColumnGuides = {
+  left: 0.2,
+  procedureEnd: 0.58,
+  examEnd: 0.78,
+  right: 0.98,
+  top: 0.1,
+  bottom: 0.95,
+};
+
+export function powerScribeManualColumnsFromGuides(
+  guides: PowerScribeManualColumnGuides,
+): PowerScribeManualColumnCrops {
+  const left = Math.min(0.85, clamp01(guides.left));
+  const right = Math.max(left + 0.15, clamp01(guides.right));
+  const procedureEnd = Math.max(left + 0.05, Math.min(right - 0.1, clamp01(guides.procedureEnd)));
+  const examEnd = Math.max(procedureEnd + 0.05, Math.min(right - 0.05, clamp01(guides.examEnd)));
+  const top = Math.min(0.95, clamp01(guides.top));
+  const bottom = Math.max(top + 0.05, clamp01(guides.bottom));
+  const height = Math.min(1, bottom) - top;
+  return {
+    procedure: normalizeCrop({ x: left, y: top, width: procedureEnd - left, height }),
+    examDate: normalizeCrop({ x: procedureEnd, y: top, width: examEnd - procedureEnd, height }),
+    modifiedDate: normalizeCrop({ x: examEnd, y: top, width: Math.min(1, right) - examEnd, height }),
+  };
+}
+
 export interface PowerScribeColumnCrop {
   name: PowerScribeColumnName;
   blob: Blob;
@@ -55,6 +92,7 @@ export interface PowerScribeCropAccounting {
 
 export interface PowerScribePreprocessOptions {
   manualCrop?: RelativeCropRect | null;
+  manualColumns?: PowerScribeManualColumnCrops | null;
   savedCrop?: RelativeCropRect | null;
   headerWords?: PowerScribeOcrWord[];
 }
@@ -307,6 +345,15 @@ function childRect(parent: RelativeCropRect, child: RelativeCropRect): RelativeC
   });
 }
 
+function enclosingRect(rects: RelativeCropRect[]): RelativeCropRect {
+  const normalized = rects.map(normalizeCrop);
+  const x = Math.min(...normalized.map((rect) => rect.x));
+  const y = Math.min(...normalized.map((rect) => rect.y));
+  const right = Math.max(...normalized.map((rect) => rect.x + rect.width));
+  const bottom = Math.max(...normalized.map((rect) => rect.y + rect.height));
+  return normalizeCrop({ x, y, width: right - x, height: bottom - y });
+}
+
 export function __testBoundToStudyListArea(rect: RelativeCropRect): RelativeCropRect {
   return boundToStudyListArea(rect);
 }
@@ -552,8 +599,16 @@ export async function preprocessPowerScribeColumnsForOcr(
     const hasPowerScribeSignal = ['PROCEDURE', 'EXAM', 'EXAMDATE', 'MODIFIED', 'MYREPORTS']
       .some((signal) => signalWords.has(signal));
     const pixelCrop = detectPowerScribeStudyListCropFromBitmap(bitmap);
+    const manualColumns = options.manualColumns
+      ? {
+          procedure: normalizeCrop(options.manualColumns.procedure),
+          examDate: normalizeCrop(options.manualColumns.examDate),
+          modifiedDate: normalizeCrop(options.manualColumns.modifiedDate),
+        }
+      : null;
+    const manualTableRect = manualColumns ? enclosingRect(Object.values(manualColumns)) : null;
     const selectedTier = selectPowerScribeCropTier({
-      manual: Boolean(options.manualCrop),
+      manual: Boolean(options.manualCrop || manualColumns),
       headerAnchors: Boolean(headerLayout),
       datetimeColumns: Boolean(datetimeLayout),
       pixelValley: pixelCrop.method === 'pixelValley',
@@ -561,8 +616,8 @@ export async function preprocessPowerScribeColumnsForOcr(
       hasPowerScribeSignal,
     });
     let tableCrop: DetectedCrop;
-    if (selectedTier === 'manual' && options.manualCrop) {
-      tableCrop = { rect: normalizeCrop(options.manualCrop), confidence: 1, method: 'manual' };
+    if (selectedTier === 'manual' && (options.manualCrop || manualTableRect)) {
+      tableCrop = { rect: normalizeCrop(options.manualCrop ?? manualTableRect!), confidence: 1, method: 'manual' };
     } else if (selectedTier === 'headerAnchors' && headerLayout) {
       tableCrop = { rect: normalizeCrop(headerLayout.tableRect), confidence: 1, method: 'headerAnchors' };
     } else if (selectedTier === 'datetimeColumns' && datetimeLayout) {
@@ -589,17 +644,25 @@ export async function preprocessPowerScribeColumnsForOcr(
         }
       : valleyLayout;
     const threeColumnCrop: DetectedCrop = {
-      rect: childRect(tableCrop.rect, columnLayout.threeColumnRect),
+      rect: manualTableRect ?? childRect(tableCrop.rect, columnLayout.threeColumnRect),
       confidence: columnLayout.confidence,
-      method: tableCrop.method === 'headerAnchors' || tableCrop.method === 'datetimeColumns'
+      method: tableCrop.method === 'manual'
+        ? 'manual'
+        : tableCrop.method === 'headerAnchors' || tableCrop.method === 'datetimeColumns'
         ? tableCrop.method
         : columnLayout.method === 'detected' ? 'pixelValley' : tableCrop.method,
     };
-    const columnDefinitions: Array<{ name: PowerScribeColumnName; rect: RelativeCropRect }> = [
-      { name: 'procedure', rect: childRect(tableCrop.rect, columnLayout.columns.procedure) },
-      { name: 'examDate', rect: childRect(tableCrop.rect, columnLayout.columns.examDate) },
-      { name: 'modifiedDate', rect: childRect(tableCrop.rect, columnLayout.columns.modifiedDate) },
-    ];
+    const columnDefinitions: Array<{ name: PowerScribeColumnName; rect: RelativeCropRect }> = manualColumns
+      ? [
+          { name: 'procedure', rect: manualColumns.procedure },
+          { name: 'examDate', rect: manualColumns.examDate },
+          { name: 'modifiedDate', rect: manualColumns.modifiedDate },
+        ]
+      : [
+          { name: 'procedure', rect: childRect(tableCrop.rect, columnLayout.columns.procedure) },
+          { name: 'examDate', rect: childRect(tableCrop.rect, columnLayout.columns.examDate) },
+          { name: 'modifiedDate', rect: childRect(tableCrop.rect, columnLayout.columns.modifiedDate) },
+        ];
     const pitch = structuralLayout?.bandPitch ?? null;
     const preprocessScale = pitch == null ? 3 : Math.max(1.5, Math.min(4, 36 / Math.max(9, pitch * 0.55)));
     const columns: PowerScribeColumnCrop[] = [];
@@ -610,7 +673,7 @@ export async function preprocessPowerScribeColumnsForOcr(
         blob: await preprocessedBlobFromBitmapCrop(bitmap, column.rect, outputType, preprocessScale),
       });
     }
-    const headerValleyDrift = structuralLayout && valleyLayout.method === 'detected'
+    const headerValleyDrift = !manualColumns && structuralLayout && valleyLayout.method === 'detected'
       ? Math.max(
           Math.abs(structuralLayout.columns.examDate.x - valleyLayout.columns.examDate.x),
           Math.abs(structuralLayout.columns.modifiedDate.x - valleyLayout.columns.modifiedDate.x),
