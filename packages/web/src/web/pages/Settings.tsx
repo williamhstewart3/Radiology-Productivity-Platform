@@ -15,6 +15,8 @@ import type { UserSettings, ExamAlias, ExamDictionaryEntry } from '../types';
 import type { ImportResult } from '../utils/rvuFileImporter';
 import { supabasePersistence } from '../services/supabasePersistence';
 import { effectiveAutoCommitThreshold } from '../services/automationSettings';
+import { ensureCmsRvuFoundation } from '../services/cmsRvuFoundationService';
+import { ensureCuratedRadiologyDictionarySeed } from '../data/radiologyExamDictionarySeed';
 
 interface SettingsProps {
   onNavigate?: (tab: 'automation' | 'profiles' | 'locations' | 'admin') => void;
@@ -110,9 +112,16 @@ export function Settings({ onNavigate }: SettingsProps) {
   }
 
   async function handleResetCpt() {
-    if (!confirm('Clear CPT table and re-seed from built-in defaults?')) return;
+    if (!confirm('Restore the CPT library from CMS, ACR, and institutional defaults?')) return;
+    setImportError(null);
     await db.cptRvuTable.clear();
     await db.cptRvuTable.bulkPut(dedupeCptRvuRowsForBulkPut(buildSeedCptRows(), 'settings CPT seed reset'));
+    try {
+      await ensureCmsRvuFoundation();
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'CMS CPT library download failed');
+    }
+    await ensureCuratedRadiologyDictionarySeed();
     const count = await db.cptRvuTable.count();
     setCptCount(count);
   }

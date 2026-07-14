@@ -17,7 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { Sheet } from './ui/Sheet';
-import { candidateKey, cptRowToCandidate, professionalCptRows, searchCptRows } from '../utils/cptPicker';
+import { candidateKey, cptRowToCandidate, professionalCptRows, searchCptRows, searchKnownTitleCandidates } from '../utils/cptPicker';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { CptRvuRow, MatchCandidate } from '../types';
 import { MODALITY_LABELS } from '../types';
@@ -26,6 +26,11 @@ interface PickerRow {
   candidate: MatchCandidate;
   /** Confidence percent shown for Suggested rows; search/recent rows don't carry the matcher's confidence. */
   confidencePercent?: number;
+}
+
+interface PickerSection {
+  label: string;
+  rows: PickerRow[];
 }
 
 export function ChangeCodePicker({ open, row, onClose, onCommit, onSplit }: {
@@ -52,6 +57,7 @@ export function ChangeCodePicker({ open, row, onClose, onCommit, onSplit }: {
 
   const rawRows = useLiveQuery(() => db.cptRvuTable.where('statusCategory').equals('active').toArray(), [], [] as CptRvuRow[]);
   const professionalRows = useMemo(() => professionalCptRows(rawRows), [rawRows]);
+  const examDictionary = useLiveQuery(() => db.examDictionary.toArray(), [], []);
 
   const recentAliases = useLiveQuery(() => db.examAliases.orderBy('lastUsedAt').reverse().limit(8).toArray(), [], []);
   const recentRows = useMemo(() => {
@@ -66,15 +72,38 @@ export function ChangeCodePicker({ open, row, onClose, onCommit, onSplit }: {
   }, [recentAliases, professionalRows]);
 
   const searchResults = useMemo(() => searchCptRows(professionalRows, query), [professionalRows, query]);
+  const knownTitleResults = useMemo(
+    () => searchKnownTitleCandidates(examDictionary, professionalRows, query),
+    [examDictionary, professionalRows, query],
+  );
 
   const suggested: PickerRow[] = useMemo(
     () => (row?.candidates ?? []).map((candidate) => ({ candidate, confidencePercent: Math.round(candidate.confidence * 100) })),
     [row],
   );
-  const browseRows: PickerRow[] = useMemo(
-    () => (query.trim() ? searchResults : recentRows).map((cptRow) => ({ candidate: cptRowToCandidate(cptRow) })),
-    [query, searchResults, recentRows],
-  );
+  const browseSections = useMemo<PickerSection[]>(() => {
+    if (!query.trim()) {
+      return recentRows.length > 0
+        ? [{ label: 'Recent', rows: recentRows.map((cptRow) => ({ candidate: cptRowToCandidate(cptRow) })) }]
+        : [];
+    }
+
+    return [
+      {
+        label: 'Institution & known titles',
+        rows: knownTitleResults.map((candidate) => ({ candidate })),
+      },
+      {
+        label: 'ACR radiology',
+        rows: searchResults.filter((cptRow) => cptRow.includeInAutoMatch).map((cptRow) => ({ candidate: cptRowToCandidate(cptRow) })),
+      },
+      {
+        label: 'CMS full library',
+        rows: searchResults.filter((cptRow) => !cptRow.includeInAutoMatch).map((cptRow) => ({ candidate: cptRowToCandidate(cptRow) })),
+      },
+    ].filter((section) => section.rows.length > 0);
+  }, [knownTitleResults, query, recentRows, searchResults]);
+  const browseRows = useMemo(() => browseSections.flatMap((section) => section.rows), [browseSections]);
   const flat = useMemo(() => [...suggested, ...browseRows], [suggested, browseRows]);
 
   const selectedKeys = useMemo(() => new Set(selected.map(candidateKey)), [selected]);
@@ -172,25 +201,31 @@ export function ChangeCodePicker({ open, row, onClose, onCommit, onSplit }: {
             </div>
           )}
 
-          <div>
-            {!query.trim() && recentRows.length > 0 && (
-              <p className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-rd-label-secondary">Recent</p>
-            )}
-            <div className="space-y-1">
-              {browseRows.length === 0 && query.trim() && (
-                <p className="px-1 py-2 text-[13px] text-rd-label-secondary">No matches — try a CPT code or a different term</p>
-              )}
-              {browseRows.map((item, index) => (
-                <PickerRowButton
-                  key={candidateKey(item.candidate)}
-                  item={item}
-                  highlighted={suggested.length + index === highlightIndex}
-                  checked={selectedKeys.has(candidateKey(item.candidate))}
-                  onClick={() => toggle(item.candidate)}
-                />
-              ))}
-            </div>
-          </div>
+          {browseRows.length === 0 && query.trim() && (
+            <p className="px-1 py-2 text-[13px] text-rd-label-secondary">No matches — try a CPT code or a different term</p>
+          )}
+
+          {browseSections.map((section, sectionIndex) => {
+            const sectionOffset = suggested.length + browseSections
+              .slice(0, sectionIndex)
+              .reduce((total, previous) => total + previous.rows.length, 0);
+            return (
+              <div key={section.label}>
+                <p className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-rd-label-secondary">{section.label}</p>
+                <div className="space-y-1">
+                  {section.rows.map((item, index) => (
+                    <PickerRowButton
+                      key={`${section.label}:${candidateKey(item.candidate)}`}
+                      item={item}
+                      highlighted={sectionOffset + index === highlightIndex}
+                      checked={selectedKeys.has(candidateKey(item.candidate))}
+                      onClick={() => toggle(item.candidate)}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         <div className="flex flex-col gap-3 border-t border-rd-separator pt-3 sm:flex-row sm:items-center sm:justify-between">

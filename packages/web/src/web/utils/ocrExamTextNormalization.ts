@@ -87,6 +87,10 @@ export function normalizeOcrExamTextForMatching(raw: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 
+  if (/^(?:LE|UE)\s+(?:VENOUS|ARTERIAL)\b/i.test(text) || /^(?:LOWER|UPPER)\s+EXTREMITY\s+(?:VENOUS|ARTERIAL)\b/i.test(text)) {
+    text = `US ${text}`;
+  }
+
   text = stripTrailingOcrDateTimeGarbage(text);
 
   return text;

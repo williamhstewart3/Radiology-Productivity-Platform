@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { __testReassembleColumnRows, classifyPowerScribeStatusText, powerScribeRowGrammarFailure } from '../src/web/providers/OCRImportProvider';
+import { __testApplyColumnDateOverrides, __testReassembleColumnRows, classifyPowerScribeStatusText, powerScribeRowGrammarFailure } from '../src/web/providers/OCRImportProvider';
 import { parseOcrLines } from '../src/web/utils/powerScribeParser';
 
 function ocrResult(lines: Array<{ text: string; y0: number; y1: number; x0?: number; x1?: number }>) {
@@ -61,6 +61,36 @@ describe('PowerScribe column OCR row reassembly', () => {
     expect(parsed[0].procedureName).toBe('CT CHEST ABDOMEN PELVIS');
     expect(parsed[0].rawProcedureColumnText).toBeUndefined();
     expect(powerScribeRowGrammarFailure(parsed[0])).toBeNull();
+  });
+
+  test('does not erase valid line dates when an individual column OCR parse fails', () => {
+    const [parsed] = parseOcrLines(['CTCHEST ABDOMEN PELVIS W CONTRAST 7/14/2026 3:37 AM 7/14/2026 11:19 AM']);
+    const result = __testApplyColumnDateOverrides(parsed, {
+      line: parsed.rawText,
+      rawProcedureColumnText: 'CTCHEST ABDOMEN PELVIS W CONTRAST',
+      rawExamDateColumnText: '',
+      rawModifiedDateColumnText: '',
+    }, '2026-07-14');
+
+    expect(result.examDateTime).toBe('2026-07-14T03:37:00');
+    expect(result.modifiedDateTime).toBe('2026-07-14T11:19:00');
+    expect(powerScribeRowGrammarFailure(result)).toBeNull();
+  });
+
+  test('pairs legible times with the selected date when compact date tokens are damaged', () => {
+    const [parsed] = parseOcrLines(['CT ANGIOGRAM PULMONARY EMBOLUS WWD']);
+    const result = __testApplyColumnDateOverrides(parsed, {
+      line: 'CT ANGIOGRAM PULMONARY EMBOLUS WWD 24M 1:14 PM 21426 1:17 PM',
+      rawProcedureColumnText: 'CT ANGIOGRAM PULMONARY EMBOLUS WWD',
+      rawExamDateColumnText: '24M 1:14 PM',
+      rawModifiedDateColumnText: '21426 1:17 PM',
+    }, '2026-07-14');
+
+    expect(result.examDateTime).toBe('2026-07-14T13:14:00');
+    expect(result.modifiedDateTime).toBe('2026-07-14T13:17:00');
+    expect(result.needsReview).toBe(true);
+    expect(result.reviewReason).toContain('paired the visible time');
+    expect(powerScribeRowGrammarFailure(result)).toBeNull();
   });
 });
 

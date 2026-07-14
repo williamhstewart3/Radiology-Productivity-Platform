@@ -145,6 +145,13 @@ describe('modality-first CPT matching', () => {
     expect(__testDeterministicCptCodesFor('CT RENAL STONE PROTOCOL')).toEqual(['74176']);
   });
 
+  test('maps MRI wrist contrast variants and bilateral leg venous ultrasound deterministically', () => {
+    expect(__testDeterministicCptCodesFor('MRI WRIST WO CONTRAST')).toEqual(['73221']);
+    expect(__testDeterministicCptCodesFor('MRI WRIST W CONTRAST')).toEqual(['73222']);
+    expect(__testDeterministicCptCodesFor('MRI WRIST W WO CONTRAST')).toEqual(['73223']);
+    expect(__testDeterministicCptCodesFor('US LE VENOUS LOWER EXTREMITY BILATERAL')).toEqual(['93970']);
+  });
+
   test('import pipeline supplies procedureName without exam or read dates', () => {
     const study = {
       source: 'ocr',

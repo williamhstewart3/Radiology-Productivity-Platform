@@ -699,6 +699,12 @@ function deterministicCptCodesFor(parsed: ModalityFirstParse): string[] {
   }
 
   if (parsed.lane === 'MRI') {
+    if (/\bWRIST\b/i.test(upper)) {
+      if (/\bW\s*WO\b|\bWWO\b|\bWITH AND WITHOUT\b/i.test(upper)) return ['73223'];
+      if (/\bWO\b|\bWITHOUT\b|\bW\/O\b/i.test(upper)) return ['73221'];
+      if (/\bW\b|\bWITH\b|\bCONTRAST\b/i.test(upper)) return ['73222'];
+      return ['73221', '73222', '73223'];
+    }
     if (parsed.keywords.has('PROSTATE')) return ['72197'];
     if (parsed.keywords.has('MRCP') && parsed.keywords.has('ABDOMEN')) return ['74183'];
     if (parsed.keywords.has('ABDOMEN') && (/\bW\s*WO\b|\bWWO\b|\bWITH AND WITHOUT\b/i.test(upper))) return ['74183'];
@@ -708,6 +714,9 @@ function deterministicCptCodesFor(parsed: ModalityFirstParse): string[] {
     if (parsed.keywords.has('CAROTID') && /\bBILATERAL\b/i.test(upper)) return ['93880'];
     if (parsed.keywords.has('LOWER_EXTREMITY') && /\bARTERIAL\b/i.test(upper)) {
       return /\bBILATERAL\b/i.test(upper) ? ['93925'] : ['93926'];
+    }
+    if (parsed.keywords.has('LOWER_EXTREMITY') && /\bVENOUS\b/i.test(upper)) {
+      return /\bBILATERAL\b/i.test(upper) ? ['93970'] : ['93971'];
     }
     if (/\bOB\b.*(?:<|LESS THAN|LT)\s*14\b|\bOB\b.*\bFIRST GESTATION\b|\bOB\b.*\bSINGLE\b/i.test(upper)) return ['76801'];
   }

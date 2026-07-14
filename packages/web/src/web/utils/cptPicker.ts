@@ -10,7 +10,7 @@
  */
 
 import { pickProfessionalRow, tokenScore } from '../pages/CptExplorer';
-import type { CptRvuRow, MatchCandidate, MatchMethod } from '../types';
+import type { CptRvuRow, ExamDictionaryEntry, MatchCandidate, MatchMethod } from '../types';
 
 /** Same bar Codes.tsx uses: tokenScore's low end (a single fuzzy token hit) is fine when a filter has already narrowed the set, but an open search with no filter needs a much stronger signal. */
 export const CPT_SEARCH_SCORE_FLOOR = 60;
@@ -46,6 +46,44 @@ export function cptRowToCandidate(row: CptRvuRow, method: MatchMethod = 'manual_
     confidence: 1,
     method,
   };
+}
+
+export function searchKnownTitleCandidates(
+  entries: ExamDictionaryEntry[],
+  professionalRows: CptRvuRow[],
+  query: string,
+  limit = 12,
+): MatchCandidate[] {
+  const q = query.trim();
+  if (!q) return [];
+  const searchTemplate = professionalRows[0];
+  if (!searchTemplate) return [];
+  const rowsByCode = new Map(professionalRows.map((row) => [row.cptCode, row]));
+  const ranked = entries
+    .map((entry) => {
+      const names = [entry.canonicalDisplayName, ...entry.commonSynonyms, ...entry.hospitalAliases, ...entry.powerScribeNames];
+      const score = Math.max(...names.map((name) => tokenScore({ ...searchTemplate, cptCode: '', description: name }, q)));
+      return { entry, score, tier: entry.source === 'institution' ? 2 : 1 };
+    })
+    .filter(({ score }) => score >= CPT_SEARCH_SCORE_FLOOR)
+    .sort((a, b) => b.tier - a.tier || b.score - a.score);
+
+  const candidates: MatchCandidate[] = [];
+  const seen = new Set<string>();
+  for (const { entry } of ranked) {
+    for (const serialized of entry.cptCodes) {
+      const cptCode = serialized.split('-')[0]?.trim();
+      const row = cptCode ? rowsByCode.get(cptCode) : undefined;
+      if (!row || seen.has(row.cptCode)) continue;
+      seen.add(row.cptCode);
+      candidates.push({
+        ...cptRowToCandidate(row, 'manual_name_match'),
+        description: entry.canonicalDisplayName,
+      });
+      if (candidates.length >= limit) return candidates;
+    }
+  }
+  return candidates;
 }
 
 export function candidateKey(candidate: Pick<MatchCandidate, 'cptCode' | 'modifier'>): string {
