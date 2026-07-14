@@ -367,7 +367,19 @@ function parseSingleRowWithReason(rawRow: string): { row: ParsedLine | null; rea
   if (isMetadataOnlyLine(trimmed)) return { row: null, reason: 'Metadata or UI-only row' };
 
   const { rowIndex, text: rowWithoutLeftJunk } = stripLeftTableJunk(trimmed);
-  const dateText = normalizeOcrDateChars(rowWithoutLeftJunk);
+  const firstDigitIndex = rowWithoutLeftJunk.search(/\d/);
+  const prefixBeforeDigit = firstDigitIndex >= 0 ? rowWithoutLeftJunk.slice(0, firstDigitIndex) : rowWithoutLeftJunk;
+  const damagedDatePrefix = prefixBeforeDigit.match(/\s+[ATF]$/i);
+  const procedureEndIndex = damagedDatePrefix?.index ?? firstDigitIndex;
+  const dateStartIndex = damagedDatePrefix ? firstDigitIndex - 1 : firstDigitIndex;
+  const procedureText = firstDigitIndex >= 0
+    ? rowWithoutLeftJunk
+      .slice(0, procedureEndIndex)
+      .replace(/[-–—:;,./|\s]+$/g, '')
+      .trim()
+    : rowWithoutLeftJunk;
+  const dateMaterial = firstDigitIndex >= 0 ? rowWithoutLeftJunk.slice(dateStartIndex) : '';
+  const dateText = normalizeOcrDateChars(dateMaterial);
   const dateMatches = parseDateTimeMatchesFromOcr(dateText);
   const firstDate = dateMatches[0] ?? parseDateTimeFromOcr(dateText);
   const lastDate =
@@ -375,7 +387,7 @@ function parseSingleRowWithReason(rawRow: string): { row: ParsedLine | null; rea
     dateMatches[dateMatches.length - 1] ??
     firstDate;
 
-  const stripped = stripDatesAndIdentifiers(rowWithoutLeftJunk, dateMatches);
+  const stripped = stripDatesAndIdentifiers(procedureText, []);
   const cleanedExamNameRaw = normalizeOcrExamTextForMatching(stripped.text);
   const cleanedExamName = cleanedExamNameRaw.length >= 2
     ? cleanedExamNameRaw

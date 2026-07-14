@@ -116,7 +116,8 @@ export function __testColumnOcrParams() {
 
 export function powerScribeRowGrammarFailure(row: Pick<ParsedLine, 'procedureName' | 'examDateTime' | 'modifiedDateTime'>): string | null {
   const procedure = row.procedureName.trim();
-  if (!/^(?:CT|CTA|MRI|MR|MRA|XR|US|NM|PET|MAMMO|FL|IR)\b[A-Z0-9 /+&()\-.]{2,}$/.test(procedure)) {
+  if (/\d/.test(procedure)) return 'Procedure contains numeric date or row spillover';
+  if (!/^(?:CT|CTA|MRI|MR|MRA|XR|US|NM|PET|MAMMO|FL|IR)\b[A-Z /+&()\-.]{2,}$/.test(procedure)) {
     return 'Procedure is not a plausible all-caps RIS title';
   }
   if (!row.examDateTime) return 'Missing or unclear Exam Date';
@@ -150,6 +151,15 @@ function normalizeColumnLineText(text: string): string {
   return text
     .replace(/[|•·]+/g, ' ')
     .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function normalizeProcedureColumnText(text: string): string {
+  const normalized = normalizeColumnLineText(text);
+  const firstDigit = normalized.search(/\d/);
+  return (firstDigit >= 0 ? normalized.slice(0, firstDigit) : normalized)
+    .replace(/[-–—:;,./|\s]+$/g, '')
+    .replace(/\s+[ATF]$/i, '')
     .trim();
 }
 
@@ -242,7 +252,7 @@ function reassembleColumnRowsWithDebug(results: ColumnOcrResults): ReassembledCo
   if (rowCenters.length === 0) {
     const maxLength = Math.max(results.procedure.lines.length, results.examDate.lines.length, results.modifiedDate.lines.length);
     return Array.from({ length: maxLength }, (_, index) => {
-      const rawProcedureColumnText = normalizeColumnLineText(results.procedure.lines[index] ?? 'UNCLEAR POWERSCRIBE ROW');
+      const rawProcedureColumnText = normalizeProcedureColumnText(results.procedure.lines[index] ?? 'UNCLEAR POWERSCRIBE ROW');
       const rawExamDateColumnText = normalizeColumnLineText(results.examDate.lines[index] ?? '');
       const rawModifiedDateColumnText = normalizeColumnLineText(results.modifiedDate.lines[index] ?? '');
       return {
@@ -258,7 +268,7 @@ function reassembleColumnRowsWithDebug(results: ColumnOcrResults): ReassembledCo
     .sort((a, b) => a - b)
     .map((center) => {
       const procedure = nearestLine(procedureLines, center, tolerance);
-      const rawProcedureColumnText = normalizeColumnLineText(procedure?.text ?? 'UNCLEAR POWERSCRIBE ROW');
+      const rawProcedureColumnText = normalizeProcedureColumnText(procedure?.text ?? 'UNCLEAR POWERSCRIBE ROW');
       const rawExamDateColumnText = nearbyColumnText(examLines, center, tolerance);
       const rawModifiedDateColumnText = nearbyColumnText(modifiedLines, center, tolerance);
       return {
@@ -286,7 +296,7 @@ export function __testReassembleColumnRows(results: ColumnOcrResults): string[] 
 function reassembleColumnRowsByIndex(results: ColumnOcrResults): string[] {
   const maxLength = Math.max(results.procedure.lines.length, results.examDate.lines.length, results.modifiedDate.lines.length);
   return Array.from({ length: maxLength }, (_, index) => [
-    results.procedure.lines[index] ?? 'UNCLEAR POWERSCRIBE ROW',
+    normalizeProcedureColumnText(results.procedure.lines[index] ?? 'UNCLEAR POWERSCRIBE ROW'),
     results.examDate.lines[index] ?? '',
     results.modifiedDate.lines[index] ?? '',
   ].join(' ').replace(/\s{2,}/g, ' ').trim()).filter(Boolean);
