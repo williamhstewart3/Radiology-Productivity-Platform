@@ -109,6 +109,12 @@ function reviewReasonFor(top: MatchCandidate | undefined, candidates: MatchCandi
   if (top.confidence < 0.95) return 'Low confidence match';
   const plausible = candidates.filter((candidate) => productivityRelevant(candidate) && candidate.confidence >= 0.65);
   if (plausible.length > 1 && plausible.every(isExactInstitutionMappingCandidate)) return null;
+  if (
+    isExactInstitutionMappingCandidate(top) &&
+    plausible.slice(1).every((candidate) =>
+      isExactInstitutionMappingCandidate(candidate) || candidate.explanation?.source === 'Orbit CME seed mapping',
+    )
+  ) return null;
   if (plausible.length > 1 && plausible.every(isDeterministicProtocolCandidate)) return null;
   if (isDeterministicProtocolCandidate(top) && plausible.slice(1).every((candidate) => candidate.confidence < 0.99)) return null;
   if (plausible.length > 1 && top.method !== 'alias_match') return 'Multiple possible CPT matches';
@@ -374,7 +380,9 @@ export async function commitPipelineResults(
 
     if (rowCommitted) {
       await learnAlias({
-        rawText: study.source === 'ocr' ? study.examTitle : procedureName,
+        // PowerScribe is the sole capture system: persist its resolved local
+        // procedure title, never a noisy raw OCR rendering, as the alias.
+        rawText: displayTitle,
         canonicalExamName: displayTitle,
         candidates: selectedCandidates.map((candidate) => ({
           cptCode: candidate.cptCode,

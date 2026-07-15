@@ -2,11 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import type { CptRvuRow, ExamDictionaryEntry, Modality } from '../src/web/types';
 import type { ImportedStudy } from '../src/web/types/importProvider';
 import { __testInstitutionMappingReviewReason, __testProcedureNameFor } from '../src/web/pipeline/importPipeline';
+import { findOrbitCmeSeedMapping } from '../src/web/data/orbitCmeSeedMappings';
 import {
   __testAutoMatchRowsFor,
   __testDeterministicCptCodesFor,
   __testHasClinicallyMeaningfulInstitutionDifference,
   __testParseModalityFirst,
+  __testRankCandidatesBySourcePriority,
   __testShouldSuppressMergedProcedureMatching,
   resolveInstitutionProcedure,
 } from '../src/web/utils/matching';
@@ -89,10 +91,53 @@ describe('modality-first CPT matching', () => {
     });
   });
 
-  test('routes exact and uniquely modality-omitted Orbit titles deterministically', () => {
-    expect(__testDeterministicCptCodesFor('CAROTID DUPLEX US BILATERAL')).toEqual(['93880']);
-    expect(__testDeterministicCptCodesFor('OB US LIMITED')).toEqual(['76815']);
-    expect(__testDeterministicCptCodesFor('ABDOMEN COMPLETE')).toEqual(['76700']);
+  test('keeps Orbit-only titles in the Orbit fallback tier', () => {
+    expect(__testDeterministicCptCodesFor('XR Chest 3 Views')).toEqual([]);
+    expect(__testDeterministicCptCodesFor('XR Ribs Bilateral 3 Views')).toEqual([]);
+    expect(__testDeterministicCptCodesFor('XR T-Spine 4+ Views')).toEqual([]);
+    expect(findOrbitCmeSeedMapping('XR Chest 3 Views')?.cptCode).toBe('71047');
+    expect(findOrbitCmeSeedMapping('XR Ribs Bilateral 3 Views')?.cptCode).toBe('71110');
+    expect(findOrbitCmeSeedMapping('XR T-Spine 4+ Views')?.cptCode).toBe('72074');
+  });
+
+  test('ranks institution, learned title, Orbit, then reference data regardless of confidence', () => {
+    const candidate = (cptCode: string, confidence: number, source: string, method: 'alias_match' | 'radiology_match' = 'radiology_match') => ({
+      cptCode,
+      modifier: '26',
+      description: source,
+      workRvu: 1,
+      modality: 'XR' as Modality,
+      confidence,
+      method,
+      explanation: { rawText: 'XR LOCAL TITLE', normalizedText: 'xr local title', source, detail: source },
+    });
+    const ranked = __testRankCandidatesBySourcePriority([
+      candidate('70001', 0.99, 'ACR-active CMS fuzzy match'),
+      candidate('70002', 0.995, 'deterministic protocol mapping'),
+      candidate('70003', 0.93, 'Orbit CME seed mapping'),
+      candidate('70004', 0.95, 'learned alias', 'alias_match'),
+      candidate('70005', 0.985, 'Institution procedure dictionary'),
+    ]);
+
+    expect(ranked.map((item) => item.cptCode)).toEqual(['70005', '70004', '70003', '70002', '70001']);
+  });
+
+  test('deduplication retains the institution mapping when Orbit lists the same CPT', () => {
+    const base = {
+      cptCode: '71045',
+      modifier: '26',
+      description: 'XR chest portable',
+      workRvu: 1,
+      modality: 'XR' as Modality,
+      method: 'radiology_match' as const,
+    };
+    const ranked = __testRankCandidatesBySourcePriority([
+      { ...base, confidence: 0.93, explanation: { rawText: 'XR CHEST PORTABLE', normalizedText: 'xr chest portable', source: 'Orbit CME seed mapping', detail: 'Orbit' } },
+      { ...base, confidence: 0.985, explanation: { rawText: 'XR CHEST PORTABLE', normalizedText: 'xr chest portable', source: 'Institution procedure dictionary', detail: 'institution' } },
+    ]);
+
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0].explanation?.source).toBe('Institution procedure dictionary');
   });
 
   test('normalizes XR views and deterministic plain film aliases', () => {
@@ -259,6 +304,28 @@ describe('modality-first CPT matching', () => {
 
     expect(__testInstitutionMappingReviewReason(nearInstitution)).toBe('Low confidence match');
     expect(__testInstitutionMappingReviewReason(exactWithExtra)).toBe('Multiple possible CPT matches');
+  });
+
+  test('an Orbit comparison never displaces or blocks an exact institution mapping', () => {
+    const institution = {
+      cptCode: '73590',
+      modifier: '26',
+      description: 'XR tibia and fibula',
+      workRvu: 1,
+      modality: 'XR' as Modality,
+      confidence: 0.985,
+      method: 'radiology_match' as const,
+      explanation: { rawText: 'XR LOCAL LEG', normalizedText: 'xr local leg', source: 'Institution procedure dictionary', detail: 'institution exact' },
+    };
+    const orbitComparison = {
+      ...institution,
+      cptCode: '73650',
+      description: 'XR heel',
+      confidence: 0.93,
+      explanation: { ...institution.explanation, source: 'Orbit CME seed mapping', detail: 'Orbit comparison' },
+    };
+
+    expect(__testInstitutionMappingReviewReason([institution, orbitComparison])).toBeNull();
   });
 
   test('an exact deterministic reference match ignores weaker fuzzy alternatives', () => {

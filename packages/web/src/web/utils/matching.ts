@@ -681,8 +681,6 @@ function hasNormalizedPhrase(normalized: string, phrase: string): boolean {
 function deterministicCptCodesFor(parsed: ModalityFirstParse): string[] {
   const normalized = normalizeRadiologyDescription(parsed.cleanedProcedure);
   const upper = parsed.cleanedProcedure.toUpperCase();
-  const orbitMapping = findOrbitCmeSeedMapping(parsed.cleanedProcedure);
-  if (orbitMapping) return [orbitMapping.cptCode];
 
   if (parsed.lane === 'XR') {
     if (parsed.keywords.has('CHEST_PORTABLE') || hasNormalizedPhrase(normalized, 'XR CHEST PORTABLE')) return ['71045'];
@@ -896,6 +894,33 @@ function dedupeCandidates(candidates: MatchCandidate[]): MatchCandidate[] {
   return result;
 }
 
+function candidateSourcePriority(candidate: MatchCandidate): number {
+  const source = candidate.explanation?.source;
+  if (source === INSTITUTION_PROCEDURE_DICTIONARY_SOURCE || source === 'Institution mapping') return 0;
+  if (candidate.method === 'alias_match') return 1;
+  if (source === 'exam dictionary' || source === 'OCR learning table') return 2;
+  if (source === 'Orbit CME seed mapping') return 3;
+  if (source === 'deterministic protocol mapping' || source === 'common radiology mapping') return 4;
+  if (source?.includes('CMS') || source?.includes('ACR')) return 5;
+  return 6;
+}
+
+function rankCandidatesBySourcePriority(candidates: MatchCandidate[]): MatchCandidate[] {
+  return dedupeCandidates(
+    [...candidates].sort((a, b) => {
+      const priorityDiff = candidateSourcePriority(a) - candidateSourcePriority(b);
+      if (priorityDiff !== 0) return priorityDiff;
+      const confidenceDiff = b.confidence - a.confidence;
+      if (confidenceDiff !== 0) return confidenceDiff;
+      return (b.workRvu ?? 0) - (a.workRvu ?? 0);
+    }),
+  );
+}
+
+export function __testRankCandidatesBySourcePriority(candidates: MatchCandidate[]): MatchCandidate[] {
+  return rankCandidatesBySourcePriority(candidates);
+}
+
 export async function findMatchCandidates(
   rawInput: string,
   maxResults = 5,
@@ -951,45 +976,27 @@ export async function findMatchCandidates(
     scopedAliases.filter((alias) => aliasNormalizedKeys(alias).some((key) => exactKeys.has(key))),
   )[0];
 
-  if (exactAlias) {
-    candidates.push(...await candidatesForAlias(exactAlias));
-  }
-
-  if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForInstitutionMappings(matchInput, maxResults));
-  }
-
-  // Exact deterministic mappings (including the curated Orbit table) must be
-  // considered before lower-priority dictionary and fuzzy candidates.  When
-  // this ran after the candidate cap, an exact CPT could be omitted entirely;
-  // when it ran after the 0.93 Orbit candidate, CPT de-duplication retained the
-  // weaker copy and unnecessarily sent the row to review.
+  // The local procedure table is authoritative. Learned exact titles come
+  // next, then Orbit CME fills a title that is not known locally. Reference
+  // rules and ACR/CMS descriptions remain lower-tier fallbacks.
+  candidates.push(...await candidatesForInstitutionMappings(matchInput, maxResults));
+  if (exactAlias) candidates.push(...await candidatesForAlias(exactAlias));
+  candidates.push(...await candidatesForDictionary(matchInput, maxResults));
+  candidates.push(...await candidatesForOcrLearning(matchInput, profileId));
+  candidates.push(...await candidatesForOrbitCmeSeed(matchInput));
   candidates.push(...await candidatesForDeterministicProtocol(matchInput, parsed));
 
-  if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForDictionary(matchInput, maxResults));
-  }
-
-  if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForOcrLearning(matchInput, profileId));
-  }
-
-  if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForOrbitCmeSeed(matchInput));
-  }
-
-  if (candidates.length < maxResults) {
+  if (rankCandidatesBySourcePriority(candidates).length < maxResults) {
     const commonCandidates = await candidatesForCommonRadiologyMapping(matchInput);
     if (commonCandidates.length > 0) {
-      return dedupeCandidates([...candidates, ...commonCandidates])
+      return rankCandidatesBySourcePriority([...candidates, ...commonCandidates])
         .filter((candidate) => candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0)
         .filter((candidate) => candidateRespectsOrBypassesModalityLane(candidate, modalityLane))
-        .sort((a, b) => b.confidence - a.confidence)
         .slice(0, maxResults);
     }
   }
 
-  const allCpt = candidates.length < maxResults
+  const allCpt = rankCandidatesBySourcePriority(candidates).length < maxResults
     ? await db.cptRvuTable.where('statusCategory').anyOf(['active', 'restricted']).toArray()
     : [];
   const autoMatchCpt = allCpt.filter(isAutoMatchEligibleRow);
@@ -1046,16 +1053,9 @@ export async function findMatchCandidates(
     }
   }
 
-  const ranked = dedupeCandidates(candidates)
+  const ranked = rankCandidatesBySourcePriority(candidates)
     .filter((candidate) => candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0)
-    .filter((candidate) => candidateRespectsOrBypassesModalityLane(candidate, modalityLane))
-    .sort((a, b) => {
-      const aRvu = a.workRvu ?? 0;
-      const bRvu = b.workRvu ?? 0;
-      if (aRvu === 0 && bRvu !== 0) return 1;
-      if (aRvu !== 0 && bRvu === 0) return -1;
-      return b.confidence - a.confidence;
-    });
+    .filter((candidate) => candidateRespectsOrBypassesModalityLane(candidate, modalityLane));
 
   if (ranked.length > 0 && ranked[0].confidence < CONFIDENCE_THRESHOLD) {
     return [];
@@ -1088,6 +1088,7 @@ export async function searchExamLibrary(
   const modalityScopedCpt = allCpt.filter((row) => rowMatchesModalityLane(row, modalityLane));
   const keywordScopedCpt = keywordScopedRows(modalityScopedCpt, parsed);
 
+  const orbitCandidates = await candidatesForOrbitCmeSeed(matchInput);
   const deterministicCandidates = await candidatesForDeterministicProtocol(matchInput, parsed);
   const commonCandidates = await candidatesForCommonRadiologyMapping(matchInput);
   const exactDescriptionCandidates = keywordScopedCpt
@@ -1119,7 +1120,7 @@ export async function searchExamLibrary(
     .slice(0, maxResults * 2)
     .map(({ row, score }) => rowToCandidate(matchInput, row, score, 'radiology_match', 'CMS fuzzy match'));
 
-  return dedupeCandidates([...deterministicCandidates, ...commonCandidates, ...exactDescriptionCandidates, ...fuzzyCandidates])
+  return rankCandidatesBySourcePriority([...orbitCandidates, ...deterministicCandidates, ...commonCandidates, ...exactDescriptionCandidates, ...fuzzyCandidates])
     .filter((candidate) => candidateRespectsOrBypassesModalityLane(candidate, modalityLane))
     .slice(0, maxResults);
 }
@@ -1145,10 +1146,11 @@ async function upsertDictionaryEntry(payload: LearnAliasPayload, normalized: str
   if (!candidates.length) return;
   const cptCodes = candidates.map((candidate) => `${candidate.cptCode}-26`);
   const canonicalDisplayName = payload.canonicalExamName ?? payload.rawText;
-  const existing = (await db.examDictionary.toArray()).find((entry) =>
-    entry.normalizedKey === normalized ||
-    entry.cptCodes.sort().join('|') === [...cptCodes].sort().join('|'),
-  );
+  const dictionaryEntries = await db.examDictionary.toArray();
+  const codeKey = [...cptCodes].sort().join('|');
+  const existing = dictionaryEntries.find((entry) => entry.normalizedKey === normalized) ??
+    dictionaryEntries.find((entry) => entry.source === 'institution' && [...entry.cptCodes].sort().join('|') === codeKey) ??
+    dictionaryEntries.find((entry) => [...entry.cptCodes].sort().join('|') === codeKey);
   const now = new Date().toISOString();
   const synonym = payload.rawText.trim();
   if (existing) {
@@ -1182,6 +1184,7 @@ async function upsertDictionaryEntry(payload: LearnAliasPayload, normalized: str
     bodyRegion: null,
     typicalCombinations: cptCodes.length > 1 ? [cptCodes.join(' + ')] : [],
     timesUsed: 1,
+    source: 'user',
     createdAt: now,
     updatedAt: now,
   });
@@ -1288,11 +1291,17 @@ export async function learnAlias(
   const primary = candidates[0];
   const normalized = normalizeRadiologyDescription(rawText);
   const legacyNormalized = normalizeExamText(rawText);
+  const canonicalNormalized = normalizeRadiologyDescription(canonicalExamName ?? rawText);
   const existing = (await db.examAliases.toArray())
     .find((a) => (
       a.profileId === profileId &&
       (a.siteId ?? null) === siteId &&
-      (a.aliasText === normalized || a.aliasText === legacyNormalized || normalizeRadiologyDescription(a.aliasTextRaw) === normalized)
+      (
+        a.aliasText === normalized ||
+        a.aliasText === legacyNormalized ||
+        normalizeRadiologyDescription(a.aliasTextRaw) === normalized ||
+        normalizeRadiologyDescription(a.canonicalExamName ?? '') === canonicalNormalized
+      )
     ));
 
   const cptCodes = candidates.map((c) => `${c.cptCode}-26`);
@@ -1317,6 +1326,7 @@ export async function learnAlias(
     );
     await db.examAliases.update(existing.id, {
       aliasText: normalized,
+      aliasTextRaw: rawText,
       siteId,
       cptCode: primary.cptCode,
       modifier: '26',
@@ -1347,7 +1357,7 @@ export async function learnAlias(
     modifier: '26',
     cptCodes,
     totalWorkRvu,
-    matchConfidence: action === 'manual_add' || action === 'correct' ? 0.95 : 0.90,
+    matchConfidence: action === 'manual_add' || action === 'correct' || action === 'confirm' ? 0.95 : 0.90,
     confirmations: 1,
     corrections: action === 'correct' ? 1 : 0,
     rejections: action === 'reject' ? 1 : 0,
