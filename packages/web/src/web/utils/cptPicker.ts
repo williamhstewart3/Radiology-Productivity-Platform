@@ -78,7 +78,7 @@ export function searchKnownTitleCandidates(
       seen.add(row.cptCode);
       candidates.push({
         ...cptRowToCandidate(row, 'manual_name_match'),
-        description: entry.canonicalDisplayName,
+        displayTitle: entry.canonicalDisplayName,
       });
       if (candidates.length >= limit) return candidates;
     }

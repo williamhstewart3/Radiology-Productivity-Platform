@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { selectedCandidatesForRow, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { confidencePhrase } from '../services/inboxService';
+import { matchCandidateDisplayTitle } from '../utils/matchCandidateDisplay';
 import type { ImportSource } from '../types/importProvider';
 import { KeyHint } from './ui/KeyHint';
 
@@ -68,7 +69,9 @@ export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onS
         <div className="space-y-3">
           <p className="font-mono text-[15px] text-rd-label-secondary">“{row.source.procedureName ?? row.source.examTitle}”</p>
           <div>
-            <p className="text-[22px] font-semibold text-rd-label-primary">{candidate?.description ?? 'Choose a code'}</p>
+            <p className="text-[22px] font-semibold text-rd-label-primary">
+              {candidate ? matchCandidateDisplayTitle(candidate, row.displayTitle ?? row.source.procedureName ?? row.source.examTitle) : 'Choose a code'}
+            </p>
             {chips.length > 0 ? (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {chips.map((option, index) => (

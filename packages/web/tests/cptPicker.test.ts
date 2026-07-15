@@ -120,7 +120,12 @@ describe('layered CPT title search', () => {
       [row({ cptCode: '73221', description: 'Mri joint upr extrem w/o dye', modality: 'MRI', workRvu: 1.32 })],
       'MRI wrist',
     );
-    expect(candidates[0]).toMatchObject({ cptCode: '73221', description: 'MRI WRIST WO CONTRAST', method: 'manual_name_match' });
+    expect(candidates[0]).toMatchObject({
+      cptCode: '73221',
+      description: 'Mri joint upr extrem w/o dye',
+      displayTitle: 'MRI WRIST WO CONTRAST',
+      method: 'manual_name_match',
+    });
   });
 });
 

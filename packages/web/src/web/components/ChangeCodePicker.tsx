@@ -18,12 +18,14 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { Sheet } from './ui/Sheet';
 import { candidateKey, cptRowToCandidate, professionalCptRows, searchCptRows, searchKnownTitleCandidates } from '../utils/cptPicker';
+import { matchCandidateDisplayTitle } from '../utils/matchCandidateDisplay';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { CptRvuRow, MatchCandidate } from '../types';
 import { MODALITY_LABELS } from '../types';
 
 interface PickerRow {
   candidate: MatchCandidate;
+  institutionalFallback?: string;
   /** Confidence percent shown for Suggested rows; search/recent rows don't carry the matcher's confidence. */
   confidencePercent?: number;
 }
@@ -78,7 +80,11 @@ export function ChangeCodePicker({ open, row, onClose, onCommit, onSplit }: {
   );
 
   const suggested: PickerRow[] = useMemo(
-    () => (row?.candidates ?? []).map((candidate) => ({ candidate, confidencePercent: Math.round(candidate.confidence * 100) })),
+    () => (row?.candidates ?? []).map((candidate) => ({
+      candidate,
+      institutionalFallback: row?.displayTitle ?? row?.source.procedureName ?? row?.source.examTitle,
+      confidencePercent: Math.round(candidate.confidence * 100),
+    })),
     [row],
   );
   const browseSections = useMemo<PickerSection[]>(() => {
@@ -261,7 +267,7 @@ function PickerRowButton({ item, highlighted, checked, onClick }: { item: Picker
       <span className="flex min-w-0 items-center gap-2">
         {checked && <span aria-hidden="true" className="shrink-0 text-rd-positive">✓</span>}
         <span className="min-w-0">
-          <span className="block truncate">{item.candidate.description}</span>
+          <span className="block truncate">{matchCandidateDisplayTitle(item.candidate, item.institutionalFallback)}</span>
           <span className="font-mono text-[11px] text-rd-label-secondary">{item.candidate.cptCode}{item.candidate.modifier ? `-${item.candidate.modifier}` : ''} · {MODALITY_LABELS[item.candidate.modality]}</span>
         </span>
       </span>

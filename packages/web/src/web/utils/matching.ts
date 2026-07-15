@@ -261,6 +261,7 @@ function rowToCandidate(
   confidence: number,
   method: MatchCandidate['method'],
   source = 'CMS RVU table',
+  displayTitle?: string,
 ): MatchCandidate {
   const normalizedText = normalizeRadiologyDescription(rawInput);
   const effectiveSource = source === 'CMS RVU table' && isAutoMatchEligibleRow(row)
@@ -270,6 +271,7 @@ function rowToCandidate(
     cptCode: row.cptCode,
     modifier: row.modifier,
     description: row.description,
+    ...(displayTitle?.trim() ? { displayTitle: displayTitle.trim() } : {}),
     workRvu: row.workRvu,
     modality: row.modality,
     confidence: Math.min(1, Math.max(0, confidence)),
@@ -317,7 +319,14 @@ async function candidatesForAlias(alias: ExamAlias, confidence?: number): Promis
     const { cptCode } = parseAliasCode(serialized);
     const rows = await getModifier26Rows(cptCode);
     for (const row of rows) {
-      candidates.push(rowToCandidate(alias.aliasTextRaw, row, confidence ?? aliasConfidence(alias), 'alias_match', alias.siteId ? 'site alias' : 'learned alias'));
+      candidates.push(rowToCandidate(
+        alias.aliasTextRaw,
+        row,
+        confidence ?? aliasConfidence(alias),
+        'alias_match',
+        alias.siteId ? 'site alias' : 'learned alias',
+        alias.canonicalExamName ?? alias.aliasTextRaw,
+      ));
     }
   }
   return candidates;
@@ -345,7 +354,7 @@ async function candidatesForDictionary(rawInput: string, maxResults: number): Pr
   for (const serialized of exactEntry.cptCodes) {
     const { cptCode } = parseAliasCode(serialized);
     const rows = await getModifier26Rows(cptCode);
-    for (const row of rows) candidates.push(rowToCandidate(rawInput, row, 0.985, 'radiology_match', 'exam dictionary'));
+    for (const row of rows) candidates.push(rowToCandidate(rawInput, row, 0.985, 'radiology_match', 'exam dictionary', exactEntry.canonicalDisplayName));
     if (dedupeCandidates(candidates).length >= maxResults) break;
   }
   return candidates;
@@ -355,7 +364,7 @@ async function candidatesForOrbitCmeSeed(rawInput: string): Promise<MatchCandida
   const mapping = findOrbitCmeSeedMapping(rawInput);
   if (!mapping) return [];
   const rows = await getModifier26Rows(mapping.cptCode);
-  return rows.map((row) => rowToCandidate(rawInput, row, 0.93, 'radiology_match', 'Orbit CME seed mapping'));
+  return rows.map((row) => rowToCandidate(rawInput, row, 0.93, 'radiology_match', 'Orbit CME seed mapping', rawInput));
 }
 
 async function candidatesForOcrLearning(rawInput: string, profileId?: string | null): Promise<MatchCandidate[]> {
@@ -390,7 +399,7 @@ async function candidatesForOcrLearning(rawInput: string, profileId?: string | n
     const rows = await getModifier26Rows(entry.matchedCpt);
     for (const row of rows) {
       if (entry.modifier && row.modifier !== entry.modifier) continue;
-      candidates.push(rowToCandidate(rawInput, row, entry.confidence, 'ocr_match', 'OCR learning table'));
+      candidates.push(rowToCandidate(rawInput, row, entry.confidence, 'ocr_match', 'OCR learning table', rawInput));
     }
   }
   return candidates;
@@ -401,7 +410,7 @@ async function candidatesForCommonRadiologyMapping(rawInput: string): Promise<Ma
   for (const cptCode of getCommonRadiologyMappingCodes(rawInput)) {
     const rows = await getModifier26Rows(cptCode);
     for (const row of rows) {
-      candidates.push(rowToCandidate(rawInput, row, 0.99, 'radiology_match', 'common radiology mapping'));
+      candidates.push(rowToCandidate(rawInput, row, 0.99, 'radiology_match', 'common radiology mapping', rawInput));
     }
   }
   return candidates;
@@ -600,6 +609,7 @@ async function candidatesForInstitutionMappings(rawInput: string, maxResults: nu
           confidence,
           'radiology_match',
           INSTITUTION_PROCEDURE_DICTIONARY_SOURCE,
+          entry.institutionProcedureName ?? procedureType,
         );
         if (candidate.explanation) {
           candidate.explanation.detail =
@@ -754,7 +764,7 @@ async function candidatesForDeterministicProtocol(rawInput: string, parsed: Moda
   for (const cptCode of deterministicCptCodesFor(parsed)) {
     const rows = await getModifier26Rows(cptCode);
     for (const row of rows) {
-      candidates.push(rowToCandidate(rawInput, row, 0.995, 'radiology_match', 'deterministic protocol mapping'));
+      candidates.push(rowToCandidate(rawInput, row, 0.995, 'radiology_match', 'deterministic protocol mapping', rawInput));
     }
   }
   return candidates;

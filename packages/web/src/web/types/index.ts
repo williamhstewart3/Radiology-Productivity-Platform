@@ -555,7 +555,10 @@ export interface RadiologistProfile {
 export interface MatchCandidate {
   cptCode: string;
   modifier: string | null;
+  /** Official billing/reference description retained for audit and logging. */
   description: string;
+  /** Local PowerScribe/institutional wording shown to the radiologist. */
+  displayTitle?: string;
   workRvu: number | null;
   modality: Modality;
   confidence: number;
