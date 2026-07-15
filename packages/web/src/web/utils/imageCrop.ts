@@ -29,6 +29,17 @@ export type PowerScribeColumnName = 'procedure' | 'examDate' | 'modifiedDate';
 
 export type PowerScribeManualColumnCrops = Record<PowerScribeColumnName, RelativeCropRect>;
 
+export interface PowerScribeRowBand {
+  top: number;
+  bottom: number;
+}
+
+export interface PowerScribeRowSlot extends PowerScribeRowBand {
+  index: number;
+  compositeTop: number;
+  compositeBottom: number;
+}
+
 export interface PowerScribeManualColumnGuides {
   left: number;
   procedureEnd: number;
@@ -74,6 +85,8 @@ export interface PowerScribeColumnPreprocessResult {
   tableCrop: DetectedCrop;
   threeColumnCrop: DetectedCrop;
   columns: PowerScribeColumnCrop[];
+  rowBands: PowerScribeRowBand[];
+  rowSlots: PowerScribeRowSlot[];
   accounting: PowerScribeCropAccounting;
 }
 
@@ -83,6 +96,7 @@ export interface PowerScribeCropAccounting {
   imageWidth: number;
   imageHeight: number;
   modifiedAnchorCount: number;
+  detectedRowCount: number;
   bandPitch: number | null;
   preprocessScale: number;
   headerValleyDrift: number | null;
@@ -93,6 +107,7 @@ export interface PowerScribeCropAccounting {
 export interface PowerScribePreprocessOptions {
   manualCrop?: RelativeCropRect | null;
   manualColumns?: PowerScribeManualColumnCrops | null;
+  manualRows?: PowerScribeRowBand[] | null;
   savedCrop?: RelativeCropRect | null;
   headerWords?: PowerScribeOcrWord[];
 }
@@ -303,6 +318,113 @@ export async function detectPowerScribeStudyListCrop(image: File | Blob): Promis
   }
 }
 
+function medianValue(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+export function normalizePowerScribeRowBands(
+  bands: PowerScribeRowBand[],
+  range?: { top: number; bottom: number },
+): PowerScribeRowBand[] {
+  const minTop = clamp01(range?.top ?? 0);
+  const maxBottom = Math.max(minTop + 0.005, clamp01(range?.bottom ?? 1));
+  const sorted = bands
+    .map((band) => ({
+      top: Math.max(minTop, Math.min(maxBottom, clamp01(band.top))),
+      bottom: Math.max(minTop, Math.min(maxBottom, clamp01(band.bottom))),
+    }))
+    .filter((band) => band.bottom - band.top >= 0.003)
+    .sort((a, b) => a.top - b.top);
+  if (sorted.length === 0) return [];
+
+  const boundaries = [sorted[0].top];
+  for (let index = 0; index < sorted.length - 1; index++) {
+    boundaries.push((sorted[index].bottom + sorted[index + 1].top) / 2);
+  }
+  boundaries.push(sorted.at(-1)!.bottom);
+
+  const normalized: PowerScribeRowBand[] = [];
+  for (let index = 0; index < boundaries.length - 1; index++) {
+    const top = Math.max(minTop, boundaries[index]);
+    const bottom = Math.min(maxBottom, boundaries[index + 1]);
+    if (bottom - top >= 0.003) normalized.push({ top, bottom });
+  }
+  return normalized;
+}
+
+export function detectPowerScribeRowBandsFromProjection(
+  projection: number[],
+  range: { top: number; bottom: number } = { top: 0, bottom: 1 },
+): PowerScribeRowBand[] {
+  if (projection.length < 8) return [];
+  const smoothed = smooth(projection, 1);
+  const baseline = percentile(smoothed, 0.5);
+  const high = percentile(smoothed, 0.9);
+  const threshold = baseline + Math.max(0.002, (high - baseline) * 0.28);
+  const groups: Array<{ start: number; end: number; score: number }> = [];
+  let start: number | null = null;
+  let lastActive = -1;
+  let score = 0;
+
+  for (let index = 0; index < smoothed.length; index++) {
+    const active = smoothed[index] >= threshold && smoothed[index] > baseline * 1.08;
+    if (active) {
+      if (start === null) start = index;
+      lastActive = index;
+      score += Math.max(0, smoothed[index] - baseline);
+    }
+    const gapEnded = start !== null && index - lastActive > 1;
+    if (gapEnded || (index === smoothed.length - 1 && start !== null)) {
+      groups.push({ start: start!, end: lastActive, score });
+      start = null;
+      score = 0;
+    }
+  }
+  if (groups.length < 2) return [];
+
+  const centers = groups
+    .map((group) => ({
+      center: (group.start + group.end) / 2,
+      score: group.score,
+    }))
+    .sort((a, b) => a.center - b.center);
+  const rawPitches = centers
+    .slice(1)
+    .map((center, index) => center.center - centers[index].center)
+    .filter((pitch) => pitch >= 3);
+  const pitch = medianValue(rawPitches) ?? Math.max(4, projection.length / centers.length);
+  const minimumSeparation = Math.max(2, pitch * 0.42);
+  const filtered: typeof centers = [];
+  for (const center of centers) {
+    const previous = filtered.at(-1);
+    if (!previous || center.center - previous.center >= minimumSeparation) {
+      filtered.push(center);
+    } else if (center.score > previous.score) {
+      filtered[filtered.length - 1] = center;
+    }
+  }
+  if (filtered.length < 2) return [];
+
+  const rangeHeight = Math.max(0.005, range.bottom - range.top);
+  const boundaries = [Math.max(0, filtered[0].center - pitch / 2)];
+  for (let index = 0; index < filtered.length - 1; index++) {
+    boundaries.push((filtered[index].center + filtered[index + 1].center) / 2);
+  }
+  boundaries.push(Math.min(projection.length, filtered.at(-1)!.center + pitch / 2));
+  return normalizePowerScribeRowBands(
+    boundaries.slice(0, -1).map((boundary, index) => ({
+      top: range.top + (boundary / projection.length) * rangeHeight,
+      bottom: range.top + (boundaries[index + 1] / projection.length) * rangeHeight,
+    })),
+    range,
+  );
+}
+
 export async function cropImageBlob(
   image: File | Blob,
   cropRect: RelativeCropRect,
@@ -496,6 +618,73 @@ function detectPowerScribeColumnLayoutFromBitmap(bitmap: ImageBitmap, tableRect:
   return detectPowerScribeColumnLayoutFromProjection(projection.map((value) => value / Math.max(1, yMax - yMin)));
 }
 
+function detectPowerScribeRowBandsFromBitmap(
+  bitmap: ImageBitmap,
+  columns: PowerScribeManualColumnCrops,
+): PowerScribeRowBand[] {
+  const image = imageDataForDetection(bitmap);
+  if (!image) return [];
+  const { data, width, height } = image;
+  const dateColumns = [columns.examDate, columns.modifiedDate].map(normalizeCrop);
+  const top = Math.max(0, Math.min(...dateColumns.map((column) => column.y)));
+  const bottom = Math.min(1, Math.max(...dateColumns.map((column) => column.y + column.height)));
+  const yStart = Math.max(1, Math.floor(top * height));
+  const yEnd = Math.min(height - 1, Math.ceil(bottom * height));
+  const xRanges = dateColumns.map((column) => {
+    const inset = Math.min(column.width * 0.06, 0.012);
+    return {
+      start: Math.max(1, Math.floor((column.x + inset) * width)),
+      end: Math.min(width - 1, Math.ceil((column.x + column.width - inset) * width)),
+    };
+  });
+  const sampledLuminance: number[] = [];
+  for (let y = yStart; y < yEnd; y += 2) {
+    for (const range of xRanges) {
+      for (let x = range.start; x < range.end; x += 3) {
+        const offset = (y * width + x) * 4;
+        sampledLuminance.push(data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114);
+      }
+    }
+  }
+  const darkThreshold = Math.min(190, percentile(sampledLuminance, 0.24) + 14);
+  const projection = Array.from({ length: Math.max(1, yEnd - yStart) }, () => 0);
+
+  for (let y = yStart; y < yEnd; y++) {
+    let ink = 0;
+    let sampled = 0;
+    for (const range of xRanges) {
+      for (let x = range.start; x < range.end; x++) {
+        const offset = (y * width + x) * 4;
+        const upOffset = ((y - 1) * width + x) * 4;
+        const luminance = data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114;
+        const upLuminance = data[upOffset] * 0.299 + data[upOffset + 1] * 0.587 + data[upOffset + 2] * 0.114;
+        if (luminance <= darkThreshold || Math.abs(luminance - upLuminance) > 30) ink++;
+        sampled++;
+      }
+    }
+    const coverage = ink / Math.max(1, sampled);
+    // Full-width rules are table chrome, not text baselines.
+    projection[y - yStart] = coverage > 0.62 ? 0 : coverage;
+  }
+
+  return detectPowerScribeRowBandsFromProjection(projection, {
+    top: yStart / height,
+    bottom: yEnd / height,
+  });
+}
+
+export async function detectPowerScribeRowBands(
+  image: File | Blob,
+  columns: PowerScribeManualColumnCrops,
+): Promise<PowerScribeRowBand[]> {
+  const bitmap = await createImageBitmap(image);
+  try {
+    return detectPowerScribeRowBandsFromBitmap(bitmap, columns);
+  } finally {
+    bitmap.close();
+  }
+}
+
 export function __testDetectPowerScribeColumnLayoutFromProjection(projection: number[]): PowerScribeColumnLayout {
   return detectPowerScribeColumnLayoutFromProjection(projection);
 }
@@ -562,6 +751,72 @@ async function preprocessedBlobFromBitmapCrop(bitmap: ImageBitmap, cropRect: Rel
     canvas.toBlob((blob) => {
       if (blob) resolve(blob);
       else reject(new Error('Canvas preprocessing export failed'));
+    }, outputType);
+  });
+}
+
+function buildPowerScribeRowSlots(
+  bands: PowerScribeRowBand[],
+  imageHeight: number,
+  scale: number,
+): PowerScribeRowSlot[] {
+  const padding = Math.max(8, Math.round(scale * 4));
+  let cursor = padding;
+  return bands.map((band, index) => {
+    const slotHeight = Math.max(8, Math.round((band.bottom - band.top) * imageHeight * scale));
+    const slot: PowerScribeRowSlot = {
+      ...band,
+      index,
+      compositeTop: cursor,
+      compositeBottom: cursor + slotHeight,
+    };
+    cursor += slotHeight + padding;
+    return slot;
+  });
+}
+
+async function preprocessedStackedRowsBlob(
+  bitmap: ImageBitmap,
+  columnRect: RelativeCropRect,
+  rowSlots: PowerScribeRowSlot[],
+  outputType: string,
+  scale: number,
+): Promise<Blob> {
+  const column = absoluteRectFromRelative(columnRect, bitmap.width, bitmap.height);
+  const padding = Math.max(8, Math.round(scale * 4));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(column.width * scale));
+  canvas.height = Math.max(padding, (rowSlots.at(-1)?.compositeBottom ?? 0) + padding);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('Canvas is not available for row OCR preprocessing');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = false;
+
+  for (const slot of rowSlots) {
+    const sourceY = Math.max(0, Math.round(slot.top * bitmap.height));
+    const sourceBottom = Math.min(bitmap.height, Math.round(slot.bottom * bitmap.height));
+    const sourceHeight = Math.max(1, sourceBottom - sourceY);
+    const targetHeight = Math.max(1, slot.compositeBottom - slot.compositeTop);
+    ctx.drawImage(
+      bitmap,
+      column.x,
+      sourceY,
+      column.width,
+      sourceHeight,
+      0,
+      slot.compositeTop,
+      canvas.width,
+      targetHeight,
+    );
+    const cellData = ctx.getImageData(0, slot.compositeTop, canvas.width, targetHeight);
+    ctx.putImageData(adaptiveThreshold(cellData, canvas.width, targetHeight), 0, slot.compositeTop);
+  }
+
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('Row OCR preprocessing export failed'));
     }, outputType);
   });
 }
@@ -663,14 +918,28 @@ export async function preprocessPowerScribeColumnsForOcr(
           { name: 'examDate', rect: childRect(tableCrop.rect, columnLayout.columns.examDate) },
           { name: 'modifiedDate', rect: childRect(tableCrop.rect, columnLayout.columns.modifiedDate) },
         ];
+    const columnRects = Object.fromEntries(
+      columnDefinitions.map((column) => [column.name, column.rect]),
+    ) as PowerScribeManualColumnCrops;
+    const rowRange = {
+      top: Math.min(...columnDefinitions.map((column) => column.rect.y)),
+      bottom: Math.max(...columnDefinitions.map((column) => column.rect.y + column.rect.height)),
+    };
+    const detectedRows = options.manualRows
+      ? normalizePowerScribeRowBands(options.manualRows, rowRange)
+      : detectPowerScribeRowBandsFromBitmap(bitmap, columnRects);
     const pitch = structuralLayout?.bandPitch ?? null;
     const preprocessScale = pitch == null ? 3 : Math.max(1.5, Math.min(4, 36 / Math.max(9, pitch * 0.55)));
+    const rowBands = detectedRows.length >= 2 ? detectedRows : [];
+    const rowSlots = buildPowerScribeRowSlots(rowBands, bitmap.height, preprocessScale);
     const columns: PowerScribeColumnCrop[] = [];
     for (const column of columnDefinitions) {
       columns.push({
         name: column.name,
         rect: column.rect,
-        blob: await preprocessedBlobFromBitmapCrop(bitmap, column.rect, outputType, preprocessScale),
+        blob: rowSlots.length > 0
+          ? await preprocessedStackedRowsBlob(bitmap, column.rect, rowSlots, outputType, preprocessScale)
+          : await preprocessedBlobFromBitmapCrop(bitmap, column.rect, outputType, preprocessScale),
       });
     }
     const headerValleyDrift = !manualColumns && structuralLayout && valleyLayout.method === 'detected'
@@ -683,12 +952,15 @@ export async function preprocessPowerScribeColumnsForOcr(
       tableCrop,
       threeColumnCrop,
       columns,
+      rowBands,
+      rowSlots,
       accounting: {
         engine: 'tesseract.js',
         cropMethod: tableCrop.method,
         imageWidth: bitmap.width,
         imageHeight: bitmap.height,
         modifiedAnchorCount: structuralLayout?.modifiedAnchorCount ?? 0,
+        detectedRowCount: rowBands.length,
         bandPitch: pitch,
         preprocessScale,
         headerValleyDrift,

@@ -28,6 +28,8 @@ import {
   type PowerScribeCropAccounting,
   type PowerScribeColumnName,
   type PowerScribeManualColumnCrops,
+  type PowerScribeRowBand,
+  type PowerScribeRowSlot,
   type RelativeCropRect,
 } from '../utils/imageCrop';
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
@@ -38,6 +40,7 @@ export interface OCRImportOptions {
   cropBeforeOcr?: boolean;
   cropRegion?: RelativeCropRect | null;
   manualColumnCrops?: PowerScribeManualColumnCrops | null;
+  manualRowBands?: PowerScribeRowBand[] | null;
   savedCropRegion?: RelativeCropRect | null;
   autoDetectPowerScribeTable?: boolean;
 }
@@ -57,6 +60,7 @@ export interface OCRImportDebugInfo {
   crop: DetectedCrop | null;
   threeColumnCrop?: DetectedCrop | null;
   columnCrops?: Array<{ name: PowerScribeColumnName; rect: RelativeCropRect }>;
+  rowBands?: PowerScribeRowBand[];
   ocrProvider: string;
   ocrText: string;
   ocrLines: string[];
@@ -377,6 +381,50 @@ function applyColumnDateOverrides(row: ParsedLine, debugRow: ReassembledColumnRo
   };
 }
 
+function textInRowSlot(result: OcrResult, slot: PowerScribeRowSlot): string {
+  const positioned = result.positionedLines
+    .filter((line) => {
+      const center = lineCenterY(line);
+      return center != null && center >= slot.compositeTop && center <= slot.compositeBottom;
+    })
+    .sort((a, b) => {
+      const yDifference = (a.bbox?.y0 ?? 0) - (b.bbox?.y0 ?? 0);
+      if (Math.abs(yDifference) > 3) return yDifference;
+      return (a.bbox?.x0 ?? 0) - (b.bbox?.x0 ?? 0);
+    })
+    .map((line) => normalizeColumnLineText(line.text))
+    .filter(Boolean);
+  if (positioned.length > 0) return positioned.join(' ').replace(/\s{2,}/g, ' ').trim();
+  return result.positionedLines.length === 0
+    ? normalizeColumnLineText(result.lines[slot.index] ?? '')
+    : '';
+}
+
+function reassembleColumnRowsBySlots(
+  results: ColumnOcrResults,
+  slots: PowerScribeRowSlot[],
+): ReassembledColumnRow[] {
+  return slots.map((slot) => {
+    const rawProcedureColumnText = textInRowSlot(results.procedure, slot);
+    const rawExamDateColumnText = textInRowSlot(results.examDate, slot);
+    const rawModifiedDateColumnText = textInRowSlot(results.modifiedDate, slot);
+    const combined = [rawProcedureColumnText, rawExamDateColumnText, rawModifiedDateColumnText].filter(Boolean).join(' ').trim();
+    return {
+      line: combined || 'UNCLEAR POWERSCRIBE ROW',
+      rawProcedureColumnText,
+      rawExamDateColumnText,
+      rawModifiedDateColumnText,
+    };
+  });
+}
+
+export function __testReassembleColumnRowsBySlots(
+  results: ColumnOcrResults,
+  slots: PowerScribeRowSlot[],
+): ReassembledColumnRow[] {
+  return reassembleColumnRowsBySlots(results, slots);
+}
+
 export function __testApplyColumnDateOverrides(
   row: ParsedLine,
   debugRow: ReassembledColumnRow | undefined,
@@ -416,6 +464,7 @@ export class OCRImportProvider implements ImportProvider {
         ? null
         : await preprocessPowerScribeColumnsForOcr(this.file, {
             manualColumns: this.options.manualColumnCrops ?? null,
+            manualRows: this.options.manualRowBands ?? null,
             manualCrop: this.options.autoDetectPowerScribeTable === false
               ? this.options.cropRegion ?? DEFAULT_POWERSCRIBE_STUDY_LIST_CROP
               : this.options.cropRegion ?? null,
@@ -484,10 +533,14 @@ export class OCRImportProvider implements ImportProvider {
         columnResults[column.name] = await provider.extractText(column.blob, COLUMN_OCR_PARAMS[column.name]);
       }
     }
-    let columnDebugRows = columnResults ? reassembleColumnRowsWithDebug(columnResults) : [];
+    let columnDebugRows = columnResults
+      ? preprocessed?.rowSlots.length
+        ? reassembleColumnRowsBySlots(columnResults, preprocessed.rowSlots)
+        : reassembleColumnRowsWithDebug(columnResults)
+      : [];
     let rowLines = columnResults ? columnDebugRows.map((row) => row.line) : result?.lines ?? [];
     let parsedWithDebug = parseOcrLinesWithDebug(rowLines);
-    if (columnResults && parsedWithDebug.rows.length === 0) {
+    if (columnResults && !preprocessed?.rowSlots.length && parsedWithDebug.rows.length === 0) {
       const fallbackLines = reassembleColumnRowsByIndex(columnResults);
       const fallbackParsed = parseOcrLinesWithDebug(fallbackLines);
       if (fallbackParsed.rows.length > 0 || fallbackLines.length > rowLines.length) {
@@ -531,6 +584,7 @@ export class OCRImportProvider implements ImportProvider {
       crop: preprocessed?.tableCrop ?? null,
       threeColumnCrop: preprocessed?.threeColumnCrop ?? null,
       columnCrops: preprocessed?.columns.map((column) => ({ name: column.name, rect: column.rect })),
+      rowBands: preprocessed?.rowBands ?? [],
       ocrProvider: provider.name,
       ocrText,
       ocrLines,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { __testApplyColumnDateOverrides, __testReassembleColumnRows, __testShouldUseUnreadablePowerScribeFallback, classifyPowerScribeStatusText, powerScribeRowGrammarFailure, recoverPowerScribeProcedureName } from '../src/web/providers/OCRImportProvider';
+import { __testApplyColumnDateOverrides, __testReassembleColumnRows, __testReassembleColumnRowsBySlots, __testShouldUseUnreadablePowerScribeFallback, classifyPowerScribeStatusText, powerScribeRowGrammarFailure, recoverPowerScribeProcedureName } from '../src/web/providers/OCRImportProvider';
 import { parseOcrLines } from '../src/web/utils/powerScribeParser';
 
 function ocrResult(lines: Array<{ text: string; y0: number; y1: number; x0?: number; x1?: number }>) {
@@ -22,6 +22,44 @@ function ocrResult(lines: Array<{ text: string; y0: number; y1: number; x0?: num
 }
 
 describe('PowerScribe column OCR row reassembly', () => {
+  test('uses pre-OCR geometric row slots instead of nearest OCR-line alignment', () => {
+    const rows = __testReassembleColumnRowsBySlots({
+      procedure: ocrResult([
+        { text: 'XR CHEST PORTABLE', y0: 15, y1: 28 },
+        { text: 'CT HEAD WO CONTRAST', y0: 65, y1: 78 },
+      ]),
+      examDate: ocrResult([
+        { text: '7/15/2026 8:01 AM', y0: 20, y1: 31 },
+        { text: '7/15/2026 8:12 AM', y0: 70, y1: 81 },
+      ]),
+      modifiedDate: ocrResult([
+        { text: '7/15/2026 8:09 AM', y0: 18, y1: 29 },
+        { text: '7/15/2026 8:25 AM', y0: 68, y1: 79 },
+      ]),
+    }, [
+      { index: 0, top: 0.1, bottom: 0.2, compositeTop: 10, compositeBottom: 40 },
+      { index: 1, top: 0.2, bottom: 0.3, compositeTop: 60, compositeBottom: 90 },
+    ]);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].line).toContain('XR CHEST PORTABLE 7/15/2026 8:01 AM 7/15/2026 8:09 AM');
+    expect(rows[1].line).toContain('CT HEAD WO CONTRAST 7/15/2026 8:12 AM 7/15/2026 8:25 AM');
+  });
+
+  test('keeps a geometrically detected row visible when OCR returns no text in its slot', () => {
+    const rows = __testReassembleColumnRowsBySlots({
+      procedure: ocrResult([{ text: 'XR CHEST PORTABLE', y0: 15, y1: 28 }]),
+      examDate: ocrResult([{ text: '7/15/2026 8:01 AM', y0: 15, y1: 28 }]),
+      modifiedDate: ocrResult([{ text: '7/15/2026 8:09 AM', y0: 15, y1: 28 }]),
+    }, [
+      { index: 0, top: 0.1, bottom: 0.2, compositeTop: 10, compositeBottom: 40 },
+      { index: 1, top: 0.2, bottom: 0.3, compositeTop: 60, compositeBottom: 90 },
+    ]);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[1].line).toBe('UNCLEAR POWERSCRIBE ROW');
+  });
+
   test('keeps split date and time fragments on the same structured row', () => {
     const rows = __testReassembleColumnRows({
       procedure: ocrResult([

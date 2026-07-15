@@ -11,7 +11,7 @@ import type { PowerScribeStructuredOcrRow } from '../types/structuredOcr';
 import { getDefaultOcrEngine, type OcrEngine } from '../utils/ocrProvider';
 import { PSM } from 'tesseract.js';
 import { detectPowerScribeDatetimeLayout, detectPowerScribeHeaderLayout } from '../utils/powerScribeHeaderAnchors';
-import type { PowerScribeManualColumnCrops, PowerScribeManualColumnGuides, RelativeCropRect } from '../utils/imageCrop';
+import type { PowerScribeManualColumnCrops, PowerScribeManualColumnGuides, PowerScribeRowBand, RelativeCropRect } from '../utils/imageCrop';
 
 interface WorkflowContext {
   profileId: string | null;
@@ -251,6 +251,7 @@ export async function processOcrImport(
     size?: number | null;
     cropAlreadyApplied?: boolean;
     manualColumnCrops?: PowerScribeManualColumnCrops | null;
+    manualRowBands?: PowerScribeRowBand[] | null;
   },
 ): Promise<ProcessedImportResult> {
   const settings = await ensureUserSettings();
@@ -275,6 +276,7 @@ export async function processOcrImport(
   const provider = new OCRImportProvider(source, context.logDate, {
       cropBeforeOcr: !metadata?.cropAlreadyApplied && settings.requireCropBeforeOcr !== false,
       manualColumnCrops: metadata?.manualColumnCrops ?? null,
+      manualRowBands: metadata?.manualRowBands ?? null,
       savedCropRegion: compatibleSavedCrop
         ? {
             x: compatibleSavedCrop.x,

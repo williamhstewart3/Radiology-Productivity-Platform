@@ -32,9 +32,12 @@ import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { MatchCandidate, UserSettings } from '../types';
 import {
   DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES,
+  detectPowerScribeRowBands,
+  normalizePowerScribeRowBands,
   powerScribeManualColumnsFromGuides,
   type PowerScribeManualColumnCrops,
   type PowerScribeManualColumnGuides,
+  type PowerScribeRowBand,
 } from '../utils/imageCrop';
 
 function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocrDebug']; imageFile?: File | Blob | null }) {
@@ -61,6 +64,7 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
     ['Procedure OCR lines', debug.columnLineCounts?.procedure ?? 'n/a'],
     ['Exam date OCR lines', debug.columnLineCounts?.examDate ?? 'n/a'],
     ['Modified OCR lines', debug.columnLineCounts?.modifiedDate ?? 'n/a'],
+    ['Geometric row crops', debug.accounting?.detectedRowCount ?? 0],
     ['Reconstructed rows', debug.reconstructedRowCount ?? debug.ocrLines.length],
     ['Parsed rows', debug.parsedRowCount ?? debug.detectedRows.length],
     ['Rejected rows', debug.rejectedRowCount ?? 0],
@@ -385,14 +389,21 @@ function CapturePreview({
   inspection,
   manualGuides,
   onManualGuidesChange,
+  rowBands,
+  onRowBandsChange,
 }: {
   file: File;
   inspection: PowerScribeCapturePrecheck;
   manualGuides: PowerScribeManualColumnGuides | null;
   onManualGuidesChange: (guides: PowerScribeManualColumnGuides | null) => void;
+  rowBands: PowerScribeRowBand[] | null;
+  onRowBandsChange: (bands: PowerScribeRowBand[] | null) => void;
 }) {
   const [url, setUrl] = useState('');
   const [draggingGuide, setDraggingGuide] = useState<keyof PowerScribeManualColumnGuides | null>(null);
+  const [draggingRowBoundary, setDraggingRowBoundary] = useState<number | null>(null);
+  const [detectingRows, setDetectingRows] = useState(false);
+  const [rowDetectionMessage, setRowDetectionMessage] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const next = URL.createObjectURL(file);
@@ -419,6 +430,51 @@ function CapturePreview({
     if (name === 'top') next.top = Math.max(0, Math.min(nextValue, next.bottom - 0.1));
     if (name === 'bottom') next.bottom = Math.max(next.top + 0.1, Math.min(1, nextValue));
     onManualGuidesChange(next);
+  }
+
+  const rowBoundaries = rowBands?.length
+    ? [rowBands[0].top, ...rowBands.map((band) => band.bottom)]
+    : [];
+
+  function updateRowBoundary(index: number, nextValue: number) {
+    if (!rowBands?.length) return;
+    const boundaries = [...rowBoundaries];
+    const minimumGap = 0.004;
+    const minimum = index === 0 ? 0 : boundaries[index - 1] + minimumGap;
+    const maximum = index === boundaries.length - 1 ? 1 : boundaries[index + 1] - minimumGap;
+    boundaries[index] = Math.max(minimum, Math.min(maximum, nextValue));
+    onRowBandsChange(boundaries.slice(0, -1).map((top, rowIndex) => ({
+      top,
+      bottom: boundaries[rowIndex + 1],
+    })));
+  }
+
+  function removeRowBoundary(index: number) {
+    if (!rowBands?.length || index <= 0 || index >= rowBoundaries.length - 1) return;
+    const boundaries = rowBoundaries.filter((_, boundaryIndex) => boundaryIndex !== index);
+    onRowBandsChange(boundaries.slice(0, -1).map((top, rowIndex) => ({
+      top,
+      bottom: boundaries[rowIndex + 1],
+    })));
+  }
+
+  async function startRowAdjustment() {
+    const guides = manualGuides ?? inspection.suggestedManualGuides ?? DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES;
+    setDetectingRows(true);
+    setRowDetectionMessage(null);
+    try {
+      const detected = await detectPowerScribeRowBands(file, powerScribeManualColumnsFromGuides(guides));
+      if (detected.length < 2) {
+        onRowBandsChange(null);
+        setRowDetectionMessage('Rows were not clear enough to separate. Tighten the column crop and try again.');
+        return;
+      }
+      if (!manualGuides) onManualGuidesChange({ ...guides });
+      onRowBandsChange(detected);
+      setRowDetectionMessage(`${detected.length} row crops detected. Drag a horizontal divider to correct it.`);
+    } finally {
+      setDetectingRows(false);
+    }
   }
 
   const guideHandles: Array<{
@@ -457,6 +513,25 @@ function CapturePreview({
     const direction = event.key === increaseKey ? 1 : -1;
     updateGuide(name, manualGuides[name] + direction * (event.shiftKey ? 0.01 : 0.0025));
   }
+
+  function rowValueFromPointer(event: ReactPointerEvent<HTMLElement>): number | null {
+    const bounds = previewRef.current?.getBoundingClientRect();
+    if (!bounds) return null;
+    return (event.clientY - bounds.top) / bounds.height;
+  }
+
+  function splitRowAtPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!rowBands?.length || event.detail < 2) return;
+    const value = rowValueFromPointer(event);
+    if (value == null) return;
+    const rowIndex = rowBands.findIndex((band) => value > band.top + 0.004 && value < band.bottom - 0.004);
+    if (rowIndex < 0) return;
+    event.preventDefault();
+    const next = [...rowBands];
+    const band = next[rowIndex];
+    next.splice(rowIndex, 1, { top: band.top, bottom: value }, { top: value, bottom: band.bottom });
+    onRowBandsChange(normalizePowerScribeRowBands(next));
+  }
   const previewWidth = manualGuides
     ? 'min(100%, 960px)'
     : `min(100%, ${(320 * inspection.width) / inspection.height}px)`;
@@ -465,6 +540,7 @@ function CapturePreview({
     <div className="space-y-3">
       <div
         ref={previewRef}
+        onPointerUp={splitRowAtPointer}
         className="relative mx-auto overflow-hidden rounded-[10px] border border-rd-separator bg-black/5"
         style={{ aspectRatio: `${inspection.width} / ${inspection.height}`, width: previewWidth }}
       >
@@ -503,7 +579,21 @@ function CapturePreview({
             </span>
           );
         })}
-        {manualGuides && guideHandles.map((handle) => {
+        {rowBands?.map((band, index) => (
+          <span
+            key={`row-band-${index}`}
+            aria-label={`Row crop ${index + 1}`}
+            className="pointer-events-none absolute z-10 border-y border-rose-500/60"
+            style={{
+              left: `${(manualGuides?.left ?? inspection.tableRect?.x ?? 0) * 100}%`,
+              top: `${band.top * 100}%`,
+              width: `${((manualGuides?.right ?? ((inspection.tableRect?.x ?? 0) + (inspection.tableRect?.width ?? 1))) - (manualGuides?.left ?? inspection.tableRect?.x ?? 0)) * 100}%`,
+              height: `${(band.bottom - band.top) * 100}%`,
+              backgroundColor: index % 2 === 0 ? 'rgba(225, 29, 72, 0.035)' : 'rgba(225, 29, 72, 0.075)',
+            }}
+          />
+        ))}
+        {manualGuides && guideHandles.filter((handle) => !rowBands?.length || handle.orientation === 'vertical').map((handle) => {
           const vertical = handle.orientation === 'vertical';
           const active = draggingGuide === handle.name;
           return (
@@ -564,10 +654,65 @@ function CapturePreview({
             </button>
           );
         })}
+        {manualGuides && rowBands?.length && rowBoundaries.map((boundary, index) => (
+          <button
+            key={`row-boundary-${index}`}
+            type="button"
+            aria-label={`Row boundary ${index + 1} of ${rowBoundaries.length}, ${Math.round(boundary * 100)} percent. Drag to adjust${index > 0 && index < rowBoundaries.length - 1 ? ', or double click to merge rows' : ''}.`}
+            title={index > 0 && index < rowBoundaries.length - 1 ? 'Drag to adjust · double-click to merge rows' : 'Drag to adjust'}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setDraggingRowBoundary(index);
+              const value = rowValueFromPointer(event);
+              if (value != null) updateRowBoundary(index, value);
+            }}
+            onPointerMove={(event) => {
+              if (draggingRowBoundary !== index) return;
+              const value = rowValueFromPointer(event);
+              if (value != null) updateRowBoundary(index, value);
+            }}
+            onPointerUp={(event) => {
+              event.stopPropagation();
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+              setDraggingRowBoundary(null);
+            }}
+            onDoubleClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              removeRowBoundary(index);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                event.preventDefault();
+                updateRowBoundary(index, boundary + (event.key === 'ArrowDown' ? 1 : -1) * (event.shiftKey ? 0.01 : 0.0025));
+              } else if (event.key === 'Delete' || event.key === 'Backspace') {
+                event.preventDefault();
+                removeRowBoundary(index);
+              }
+            }}
+            className="absolute z-30 rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            style={{
+              left: `${manualGuides.left * 100}%`,
+              top: `${boundary * 100}%`,
+              width: `${(manualGuides.right - manualGuides.left) * 100}%`,
+              height: '10px',
+              transform: 'translateY(-50%)',
+              cursor: 'row-resize',
+              touchAction: 'none',
+            }}
+          >
+            <span className="pointer-events-none absolute left-0 top-[3px] h-1 w-full rounded-full border border-white bg-rose-600 shadow-[0_0_0_1px_rgba(0,0,0,0.55)]" />
+            <span className="pointer-events-none absolute left-1/2 top-0 h-[10px] w-5 -translate-x-1/2 rounded border border-white bg-rose-600 shadow" />
+          </button>
+        ))}
       </div>
       <p className="text-[12px] text-rd-label-secondary">
         {inspection.width} × {inspection.height} · {manualColumns
-          ? 'Drag the crop edges so each colored band contains only its named column.'
+          ? rowBands?.length
+            ? `${rowBands.length} geometric row crops will be applied before OCR.`
+            : 'Drag the crop edges so each colored band contains only its named column.'
           : inspection.detected
           ? 'This looks like a PowerScribe worklist; the outlined region is the candidate table.'
           : 'No table outline was detected. If this is the PowerScribe worklist, you can still process it for review.'}
@@ -575,28 +720,63 @@ function CapturePreview({
       {inspection.detected && (
         <button
           type="button"
-          onClick={() => onManualGuidesChange(
-            manualGuides
-              ? null
-              : { ...(inspection.suggestedManualGuides ?? DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES) },
-          )}
+          onClick={() => {
+            onRowBandsChange(null);
+            onManualGuidesChange(
+              manualGuides
+                ? null
+                : { ...(inspection.suggestedManualGuides ?? DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES) },
+            );
+          }}
           className="min-h-9 rounded-[8px] border border-rd-separator bg-rd-surface px-3 text-[12px] font-medium text-rd-label-primary"
         >
           {manualGuides ? 'Use detected crop' : 'Adjust crop'}
         </button>
       )}
+      {(manualGuides || inspection.suggestedManualGuides) && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void startRowAdjustment()}
+            disabled={detectingRows}
+            className="min-h-9 rounded-[8px] border border-rose-500/50 bg-rose-500/10 px-3 text-[12px] font-medium text-rd-label-primary disabled:opacity-50"
+          >
+            {detectingRows ? 'Detecting rows…' : rowBands?.length ? 'Redetect rows' : 'Adjust rows'}
+          </button>
+          {rowBands?.length ? (
+            <button
+              type="button"
+              onClick={() => {
+                onRowBandsChange(null);
+                setRowDetectionMessage(null);
+              }}
+              className="min-h-9 rounded-[8px] border border-rd-separator bg-rd-surface px-3 text-[12px] font-medium text-rd-label-secondary"
+            >
+              Clear row edits
+            </button>
+          ) : null}
+        </div>
+      )}
+      {rowDetectionMessage && <p className="text-[11px] text-rd-label-secondary">{rowDetectionMessage}</p>}
       {manualGuides && (
         <div className="space-y-2" aria-label="Manual PowerScribe column crop controls">
           <p className="text-[12px] font-medium text-rd-label-primary">
-            Drag the colored edges on the image. Use arrow keys for fine adjustment.
+            {rowBands?.length
+              ? 'Drag rose dividers to resize rows. Double-click inside a row to split it; double-click a divider to merge.'
+              : 'Step 1: drag the colored column edges. Step 2: choose Adjust rows.'}
           </p>
           <div className="flex flex-wrap gap-1.5 text-[10px] text-rd-label-secondary">
-            {guideHandles.map((handle) => (
+            {guideHandles.filter((handle) => !rowBands?.length || handle.orientation === 'vertical').map((handle) => (
               <span key={handle.name} className="rounded-full border border-rd-separator bg-rd-surface px-2 py-1">
                 <span className="mr-1 inline-block size-2 rounded-full" style={{ backgroundColor: handle.color }} />
                 {handle.label} {Math.round(manualGuides[handle.name] * 100)}%
               </span>
             ))}
+            {rowBands?.length ? (
+              <span className="rounded-full border border-rose-500/40 bg-rose-500/10 px-2 py-1 font-medium text-rd-label-primary">
+                {rowBands.length} rows
+              </span>
+            ) : null}
           </div>
         </div>
       )}
@@ -618,6 +798,7 @@ export function Import({ onReviewReady }: ImportProps) {
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
   const [capturePreview, setCapturePreview] = useState<PowerScribeCapturePrecheck | null>(null);
   const [manualCropGuides, setManualCropGuides] = useState<PowerScribeManualColumnGuides | null>(null);
+  const [manualRowBands, setManualRowBands] = useState<PowerScribeRowBand[] | null>(null);
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   // Eagerly generated (not lazily inside the persist effect below) so that
   // effect only ever runs once per actual state change instead of twice per
@@ -686,6 +867,7 @@ export function Import({ onReviewReady }: ImportProps) {
         setClipboardFile(null);
         setCapturePreview(null);
         setManualCropGuides(null);
+        setManualRowBands(null);
         lastClipboardImageHashRef.current = null;
       } else if (event.key === 'Enter') {
         event.preventDefault();
@@ -693,12 +875,13 @@ export function Import({ onReviewReady }: ImportProps) {
           clipboardFile!,
           'confirmed preview',
           manualCropGuides ? powerScribeManualColumnsFromGuides(manualCropGuides) : null,
+          manualRowBands,
         );
       }
     }
     window.addEventListener('keydown', handlePreviewKey);
     return () => window.removeEventListener('keydown', handlePreviewKey);
-  }, [clipboardFile, processing, manualCropGuides]);
+  }, [clipboardFile, processing, manualCropGuides, manualRowBands]);
 
   useEffect(() => {
     if (mode !== 'ocr') return;
@@ -812,6 +995,7 @@ export function Import({ onReviewReady }: ImportProps) {
     file: File,
     timelineSource: string,
     manualColumnCrops: PowerScribeManualColumnCrops | null = null,
+    manualRows: PowerScribeRowBand[] | null = null,
   ) {
     setProcessing(true);
     setError(null);
@@ -823,7 +1007,7 @@ export function Import({ onReviewReady }: ImportProps) {
         siteId: activePractice?.id ?? null,
         sessionId,
         logDate,
-      }, { filename: file.name, size: file.size, manualColumnCrops });
+      }, { filename: file.name, size: file.size, manualColumnCrops, manualRowBands: manualRows });
       pushToast('info', 'Matching CPT codes...', 'Running aliases, active CPT filters, and review checks.');
       setOcrDebug(processed.ocrDebug ?? null);
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
@@ -866,6 +1050,7 @@ export function Import({ onReviewReady }: ImportProps) {
     file: File,
     timelineSource: string,
     manualColumnCrops: PowerScribeManualColumnCrops | null = null,
+    manualRows: PowerScribeRowBand[] | null = null,
   ) {
     if (processingRef.current) return;
     setProcessing(true);
@@ -874,13 +1059,14 @@ export function Import({ onReviewReady }: ImportProps) {
     setClipboardFile(null);
     setCapturePreview(null);
     setManualCropGuides(null);
+    setManualRowBands(null);
     pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
     try {
       const usedStructuredHelper = manualColumnCrops
         ? false
         : await processWindowsClipboardCapture(file, timelineSource);
       if (!usedStructuredHelper) {
-        await processOcrFile(file, timelineSource, manualColumnCrops);
+        await processOcrFile(file, timelineSource, manualColumnCrops, manualRows);
       }
     } finally {
       setProcessing(false);
@@ -901,6 +1087,7 @@ export function Import({ onReviewReady }: ImportProps) {
     }
     setCapturePreview(preview);
     setManualCropGuides(preview.detected ? null : { ...DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES });
+    setManualRowBands(null);
     setClipboardFile(file);
     pushToast(
       preview.detected ? 'success' : 'warning',
@@ -1046,6 +1233,8 @@ export function Import({ onReviewReady }: ImportProps) {
                   inspection={capturePreview}
                   manualGuides={manualCropGuides}
                   onManualGuidesChange={setManualCropGuides}
+                  rowBands={manualRowBands}
+                  onRowBandsChange={setManualRowBands}
                 />
               )}
               <div className="flex flex-wrap gap-2">
@@ -1055,6 +1244,7 @@ export function Import({ onReviewReady }: ImportProps) {
                     clipboardFile,
                     'confirmed preview',
                     manualCropGuides ? powerScribeManualColumnsFromGuides(manualCropGuides) : null,
+                    manualRowBands,
                   )}
                   disabled={processing}
                   className="min-h-11 rounded-[10px] bg-rd-label-primary px-3 text-[13px] font-semibold text-rd-bg disabled:opacity-40"
@@ -1067,6 +1257,7 @@ export function Import({ onReviewReady }: ImportProps) {
                     setClipboardFile(null);
                     setCapturePreview(null);
                     setManualCropGuides(null);
+                    setManualRowBands(null);
                     lastClipboardImageHashRef.current = null;
                   }}
                   disabled={processing}
