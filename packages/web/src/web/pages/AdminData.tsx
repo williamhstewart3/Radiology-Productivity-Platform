@@ -1,25 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Database, ExternalLink, Pin, PinOff, RefreshCw } from 'lucide-react';
+import { Database, Pin, RefreshCw } from 'lucide-react';
 import { db } from '../db/database';
 import { supabasePersistence, type RvuDatasetMetadata } from '../services/supabasePersistence';
-
-const ALWAYS_ON_TOP_KEY = 'wrvu_always_on_top_preference';
-
-function readAlwaysOnTopPreference(): boolean {
-  return localStorage.getItem(ALWAYS_ON_TOP_KEY) === 'true';
-}
-
-function writeAlwaysOnTopPreference(enabled: boolean) {
-  localStorage.setItem(ALWAYS_ON_TOP_KEY, String(enabled));
-  window.dispatchEvent(new CustomEvent('wrvu-always-on-top-changed', { detail: { enabled } }));
-}
+import { useMiniPaceWindow } from '../components/MiniPaceWindowProvider';
 
 export function AdminData() {
   const [dataset, setDataset] = useState<RvuDatasetMetadata | null>(null);
   const [localCount, setLocalCount] = useState<number | null>(null);
-  const [alwaysOnTop, setAlwaysOnTop] = useState(readAlwaysOnTopPreference());
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const { openMiniWindow, alwaysOnTopSupported } = useMiniPaceWindow();
 
   async function refresh() {
     setLoading(true);
@@ -38,12 +28,6 @@ export function AdminData() {
   useEffect(() => {
     refresh();
   }, []);
-
-  function toggleAlwaysOnTop() {
-    const next = !alwaysOnTop;
-    setAlwaysOnTop(next);
-    writeAlwaysOnTopPreference(next);
-  }
 
   const supabaseReady = supabasePersistence.isConfigured();
   const supabaseCredentialsPresent = supabasePersistence.hasCredentials();
@@ -112,35 +96,23 @@ export function AdminData() {
       <div className="card space-y-4">
         <div className="flex items-start gap-3">
           <div className="desk-empty-icon shrink-0">
-            {alwaysOnTop ? <Pin className="size-5" /> : <PinOff className="size-5" />}
+            <Pin className="size-5" />
           </div>
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Mini Window</h2>
             <p className="text-xs text-slate-400 mt-1">
-              Browser tabs cannot force true system-wide always-on-top. This keeps the mini window visually pinned and remembers the preference. Use the Electron shell for native always-on-top.
+              The mini pace window uses the browser's true always-on-top Picture-in-Picture surface and remains above PACS and other applications while it is open.
             </p>
           </div>
         </div>
 
         <button
-          onClick={toggleAlwaysOnTop}
-          className={`w-full rounded-xl border px-4 py-3 text-sm font-semibold transition-colors ${
-            alwaysOnTop
-              ? 'border-cyan-400/40 bg-cyan-400/15 text-cyan-200'
-              : 'border-white/15 bg-white/5 text-slate-300 hover:border-white/30'
-          }`}
+          onClick={() => void openMiniWindow()}
+          disabled={!alwaysOnTopSupported}
+          className="w-full rounded-xl border border-cyan-400/40 bg-cyan-400/15 px-4 py-3 text-sm font-semibold text-cyan-200 transition-colors disabled:border-white/15 disabled:bg-white/5 disabled:text-slate-500"
         >
-          Always on Top: {alwaysOnTop ? 'On' : 'Off'}
+          {alwaysOnTopSupported ? 'Open always-on-top mini window' : 'Always-on-top requires current Chrome or Edge'}
         </button>
-
-        <a
-          href="/mini-pace"
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-2 text-xs text-slate-400 hover:text-white transition-colors"
-        >
-          <ExternalLink className="size-3" /> Open mini pace window
-        </a>
       </div>
     </div>
   );
