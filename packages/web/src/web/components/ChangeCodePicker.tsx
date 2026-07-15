@@ -8,30 +8,39 @@
  * pickProfessionalRow functions -- not a reimplementation, so results can't
  * drift from those surfaces). Chosen codes render as removable chips with a
  * live wRVU sum; committing feeds the existing selection path, which is
- * already multi-CPT-aware (commitPipelineResults and learnAlias both
- * iterate the full candidate set, not a single index).
+ * already multi-CPT-aware. When multiple codes are chosen, the user
+ * explicitly decides whether they belong to one combined exam or should
+ * become separate Inbox studies after merged OCR.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { Sheet } from './ui/Sheet';
-import { candidateKey, cptRowToCandidate, professionalCptRows, searchCptRows } from '../utils/cptPicker';
+import { candidateKey, cptRowToCandidate, professionalCptRows, searchCptRows, searchKnownTitleCandidates } from '../utils/cptPicker';
+import { matchCandidateDisplayTitle } from '../utils/matchCandidateDisplay';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { CptRvuRow, MatchCandidate } from '../types';
 import { MODALITY_LABELS } from '../types';
 
 interface PickerRow {
   candidate: MatchCandidate;
+  institutionalFallback?: string;
   /** Confidence percent shown for Suggested rows; search/recent rows don't carry the matcher's confidence. */
   confidencePercent?: number;
 }
 
-export function ChangeCodePicker({ open, row, onClose, onCommit }: {
+interface PickerSection {
+  label: string;
+  rows: PickerRow[];
+}
+
+export function ChangeCodePicker({ open, row, onClose, onCommit, onSplit }: {
   open: boolean;
   row: PipelineReviewRow | null;
   onClose: () => void;
   onCommit: (candidates: MatchCandidate[]) => void;
+  onSplit: (candidates: MatchCandidate[]) => void;
 }) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<MatchCandidate[]>([]);
@@ -50,6 +59,7 @@ export function ChangeCodePicker({ open, row, onClose, onCommit }: {
 
   const rawRows = useLiveQuery(() => db.cptRvuTable.where('statusCategory').equals('active').toArray(), [], [] as CptRvuRow[]);
   const professionalRows = useMemo(() => professionalCptRows(rawRows), [rawRows]);
+  const examDictionary = useLiveQuery(() => db.examDictionary.toArray(), [], []);
 
   const recentAliases = useLiveQuery(() => db.examAliases.orderBy('lastUsedAt').reverse().limit(8).toArray(), [], []);
   const recentRows = useMemo(() => {
@@ -64,15 +74,42 @@ export function ChangeCodePicker({ open, row, onClose, onCommit }: {
   }, [recentAliases, professionalRows]);
 
   const searchResults = useMemo(() => searchCptRows(professionalRows, query), [professionalRows, query]);
+  const knownTitleResults = useMemo(
+    () => searchKnownTitleCandidates(examDictionary, professionalRows, query),
+    [examDictionary, professionalRows, query],
+  );
 
   const suggested: PickerRow[] = useMemo(
-    () => (row?.candidates ?? []).map((candidate) => ({ candidate, confidencePercent: Math.round(candidate.confidence * 100) })),
+    () => (row?.candidates ?? []).map((candidate) => ({
+      candidate,
+      institutionalFallback: row?.displayTitle ?? row?.source.procedureName ?? row?.source.examTitle,
+      confidencePercent: Math.round(candidate.confidence * 100),
+    })),
     [row],
   );
-  const browseRows: PickerRow[] = useMemo(
-    () => (query.trim() ? searchResults : recentRows).map((cptRow) => ({ candidate: cptRowToCandidate(cptRow) })),
-    [query, searchResults, recentRows],
-  );
+  const browseSections = useMemo<PickerSection[]>(() => {
+    if (!query.trim()) {
+      return recentRows.length > 0
+        ? [{ label: 'Recent', rows: recentRows.map((cptRow) => ({ candidate: cptRowToCandidate(cptRow) })) }]
+        : [];
+    }
+
+    return [
+      {
+        label: 'Institution & known titles',
+        rows: knownTitleResults.map((candidate) => ({ candidate })),
+      },
+      {
+        label: 'ACR radiology',
+        rows: searchResults.filter((cptRow) => cptRow.includeInAutoMatch).map((cptRow) => ({ candidate: cptRowToCandidate(cptRow) })),
+      },
+      {
+        label: 'CMS full library',
+        rows: searchResults.filter((cptRow) => !cptRow.includeInAutoMatch).map((cptRow) => ({ candidate: cptRowToCandidate(cptRow) })),
+      },
+    ].filter((section) => section.rows.length > 0);
+  }, [knownTitleResults, query, recentRows, searchResults]);
+  const browseRows = useMemo(() => browseSections.flatMap((section) => section.rows), [browseSections]);
   const flat = useMemo(() => [...suggested, ...browseRows], [suggested, browseRows]);
 
   const selectedKeys = useMemo(() => new Set(selected.map(candidateKey)), [selected]);
@@ -90,6 +127,12 @@ export function ChangeCodePicker({ open, row, onClose, onCommit }: {
   function commit() {
     if (selected.length === 0) return;
     onCommit(selected);
+    onClose();
+  }
+
+  function split() {
+    if (selected.length < 2) return;
+    onSplit(selected);
     onClose();
   }
 
@@ -164,37 +207,50 @@ export function ChangeCodePicker({ open, row, onClose, onCommit }: {
             </div>
           )}
 
-          <div>
-            {!query.trim() && recentRows.length > 0 && (
-              <p className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-rd-label-secondary">Recent</p>
-            )}
-            <div className="space-y-1">
-              {browseRows.length === 0 && query.trim() && (
-                <p className="px-1 py-2 text-[13px] text-rd-label-secondary">No matches — try a CPT code or a different term</p>
-              )}
-              {browseRows.map((item, index) => (
-                <PickerRowButton
-                  key={candidateKey(item.candidate)}
-                  item={item}
-                  highlighted={suggested.length + index === highlightIndex}
-                  checked={selectedKeys.has(candidateKey(item.candidate))}
-                  onClick={() => toggle(item.candidate)}
-                />
-              ))}
-            </div>
-          </div>
+          {browseRows.length === 0 && query.trim() && (
+            <p className="px-1 py-2 text-[13px] text-rd-label-secondary">No matches — try a CPT code or a different term</p>
+          )}
+
+          {browseSections.map((section, sectionIndex) => {
+            const sectionOffset = suggested.length + browseSections
+              .slice(0, sectionIndex)
+              .reduce((total, previous) => total + previous.rows.length, 0);
+            return (
+              <div key={section.label}>
+                <p className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-rd-label-secondary">{section.label}</p>
+                <div className="space-y-1">
+                  {section.rows.map((item, index) => (
+                    <PickerRowButton
+                      key={`${section.label}:${candidateKey(item.candidate)}`}
+                      item={item}
+                      highlighted={sectionOffset + index === highlightIndex}
+                      checked={selectedKeys.has(candidateKey(item.candidate))}
+                      onClick={() => toggle(item.candidate)}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-rd-separator pt-3">
+        <div className="flex flex-col gap-3 border-t border-rd-separator pt-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[12px] text-rd-label-secondary">↵ toggle · ⌘↵ done · Esc cancel</p>
-          <button
-            type="button"
-            onClick={commit}
-            disabled={selected.length === 0}
-            className="min-h-11 rounded-[10px] bg-rd-label-primary px-4 text-[14px] font-semibold text-rd-bg disabled:opacity-40"
-          >
-            Done{selected.length > 0 ? ` (${selected.length})` : ''}
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {selected.length > 1 && (
+              <button type="button" onClick={split} className="min-h-11 rounded-[10px] border border-rd-caution px-3 text-[14px] font-semibold text-rd-caution">
+                Split into {selected.length} studies
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={commit}
+              disabled={selected.length === 0}
+              className="min-h-11 rounded-[10px] bg-rd-label-primary px-4 text-[14px] font-semibold text-rd-bg disabled:opacity-40"
+            >
+              {selected.length > 1 ? 'Keep together' : `Done${selected.length > 0 ? ` (${selected.length})` : ''}`}
+            </button>
+          </div>
         </div>
       </div>
     </Sheet>
@@ -211,7 +267,7 @@ function PickerRowButton({ item, highlighted, checked, onClick }: { item: Picker
       <span className="flex min-w-0 items-center gap-2">
         {checked && <span aria-hidden="true" className="shrink-0 text-rd-positive">✓</span>}
         <span className="min-w-0">
-          <span className="block truncate">{item.candidate.description}</span>
+          <span className="block truncate">{matchCandidateDisplayTitle(item.candidate, item.institutionalFallback)}</span>
           <span className="font-mono text-[11px] text-rd-label-secondary">{item.candidate.cptCode}{item.candidate.modifier ? `-${item.candidate.modifier}` : ''} · {MODALITY_LABELS[item.candidate.modality]}</span>
         </span>
       </span>

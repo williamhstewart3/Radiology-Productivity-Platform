@@ -1,4 +1,4 @@
-import { parseDateTimeFromOcr } from '../utils/studyDateParser';
+import { parseDateTimeFromOcr, parseVisibleTimeWithFallbackDate } from '../utils/studyDateParser';
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
 import type { PowerScribeStructuredOcrRow } from '../types/structuredOcr';
 
@@ -10,16 +10,17 @@ function splitIsoMinute(value: string | null): { date: string | null; time: stri
   return { date: match[1], time: match[2], dateTime: normalized };
 }
 
-function bestDateTime(value: string | null, rawText: string): { date: string | null; time: string | null; dateTime: string | null; confidence: number } {
+function bestDateTime(value: string | null, rawText: string, fallbackDate: string): { date: string | null; time: string | null; dateTime: string | null; confidence: number; inferredFromFallbackDate: boolean } {
   const fromIso = splitIsoMinute(value);
-  if (fromIso.dateTime) return { ...fromIso, confidence: 1 };
+  if (fromIso.dateTime) return { ...fromIso, confidence: 1, inferredFromFallbackDate: false };
 
-  const parsed = parseDateTimeFromOcr(rawText);
+  const parsed = parseDateTimeFromOcr(rawText) ?? parseVisibleTimeWithFallbackDate(rawText, fallbackDate);
   return {
     date: parsed?.studyDate ?? null,
     time: parsed?.studyTime ?? null,
     dateTime: parsed?.studyDateTime ?? null,
     confidence: parsed?.confidence ?? 0,
+    inferredFromFallbackDate: parsed?.matchedPattern === 'TIME_WITH_FALLBACK_DATE',
   };
 }
 
@@ -45,13 +46,14 @@ export class StructuredPowerScribeOcrImportProvider implements ImportProvider {
 
     return this.rows.map((row) => {
       const procedureName = row.procedureName.trim() || 'UNCLEAR POWERSCRIBE ROW';
-      const exam = bestDateTime(row.examDateTime, row.rawExamDateText);
-      const modified = bestDateTime(row.modifiedDateTime, row.rawModifiedText);
+      const exam = bestDateTime(row.examDateTime, row.rawExamDateText, this.fallbackDate);
+      const modified = bestDateTime(row.modifiedDateTime, row.rawModifiedText, exam.date ?? this.fallbackDate);
       const productivityDate = modified.date ?? this.fallbackDate;
-      const parserNeedsReview = row.needsReview || procedureName === 'UNCLEAR POWERSCRIBE ROW' || !exam.dateTime || !modified.dateTime;
+      const parserNeedsReview = row.needsReview || procedureName === 'UNCLEAR POWERSCRIBE ROW' || !exam.dateTime || !modified.dateTime || exam.inferredFromFallbackDate || modified.inferredFromFallbackDate;
       const parserReviewReason =
         row.reviewReason ??
         (procedureName === 'UNCLEAR POWERSCRIBE ROW' ? 'Unclear PowerScribe procedure text' :
+          exam.inferredFromFallbackDate || modified.inferredFromFallbackDate ? 'Date token was unclear; paired the visible time with the selected reading date' :
           !modified.dateTime ? 'Missing Modified time/date - productivity date will use selected log date unless corrected.' :
           !exam.dateTime ? 'Missing or unclear PowerScribe Exam Date column' :
           null);

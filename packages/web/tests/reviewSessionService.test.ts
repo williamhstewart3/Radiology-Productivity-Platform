@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mergeReviewSessionRows } from '../src/web/services/reviewSessionService';
+import { __testQuietRowsForImmediateCommit, mergeReviewSessionRows } from '../src/web/services/reviewSessionService';
 import type { PipelineReviewRow } from '../src/web/pipeline/importPipeline';
 import type { ImportedStudy } from '../src/web/types/importProvider';
 import type { MatchCandidate, Modality } from '../src/web/types';
@@ -75,6 +75,13 @@ function row(patch: Partial<ImportedStudy> = {}, cptCodes = ['71045']): Pipeline
 }
 
 describe('active review session duplicate merging', () => {
+  test('commits quiet rows even when another row still needs review', () => {
+    const quiet = row();
+    const pending = { ...row({}, ['73650']), needsReview: true };
+
+    expect(__testQuietRowsForImmediateCommit([quiet, pending])).toEqual([quiet]);
+  });
+
   test('does not self-dedupe repeated same-CPT rows when exact times differ', () => {
     const existing = row({
       examDateTime: '2026-07-01T17:18:00',

@@ -2,18 +2,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useOrg } from '../hooks/useOrg';
-import type { PipelineReviewRow } from '../pipeline/importPipeline';
+import { selectedCandidatesForRow, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { AttentionCard } from '../components/AttentionCard';
 import { ChangeCodePicker } from '../components/ChangeCodePicker';
 import { Card } from '../components/ui/Card';
 import { KeyHint } from '../components/ui/KeyHint';
-import { applyInboxCandidateSelection, formatInboxAccounting, resolveInboxRows, summarizeInboxAccounting } from '../services/inboxService';
+import { applyInboxCandidateSelection, applyInboxRowSplit, formatInboxAccounting, resolveInboxRows, summarizeInboxAccounting } from '../services/inboxService';
 import { restoreCaptureState, snapshotCaptureState, type CaptureUndoSnapshot } from '../services/captureUndoService';
 import { recommendedDuplicateAction as computeRecommendedDuplicateAction } from '../utils/duplicateActions';
 import { listRecentBatches, undoBatch, type RecentBatch } from '../services/studyLogService';
 import { RecentBatches } from '../components/RecentBatches';
 import { todayDateString } from '../utils/calculations';
-import type { StudyLog } from '../types';
+import type { MatchCandidate, StudyLog } from '../types';
 
 function parseRows(rowsJson: string | undefined): PipelineReviewRow[] {
   if (!rowsJson) return [];
@@ -114,6 +114,22 @@ export function Inbox() {
     setReceipt('Decision undone');
   }, [undoSnapshot]);
 
+  const splitRow = useCallback(async (rowId: string, candidates: MatchCandidate[]) => {
+    if (busy || candidates.length < 2) return;
+    setBusy(true);
+    const snapshot = await snapshotCaptureState();
+    try {
+      const splitCount = await applyInboxRowSplit(profileId, rowId, candidates);
+      if (splitCount > 1) {
+        setUndoSnapshot(snapshot);
+        setReceipt(`Split into ${splitCount} studies; verify each one before accepting`);
+        window.setTimeout(() => setUndoSnapshot(null), 10_000);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, profileId]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (pickerOpen) return;
@@ -167,6 +183,7 @@ export function Inbox() {
           onAccept={() => void resolve([current.tempId], 'accept')}
           onSkip={() => void resolve([current.tempId], 'skip')}
           onOpenPicker={() => setPickerOpen(true)}
+          onSplit={() => void splitRow(current.tempId, selectedCandidatesForRow(current))}
           onUpdateExisting={() => void resolve([current.tempId], 'update_existing')}
           recommendedDuplicateAction={currentRecommendedAction}
           expandRequest={expandRequest}
@@ -187,6 +204,10 @@ export function Inbox() {
         onCommit={(candidates) => {
           if (!current) return;
           void applyInboxCandidateSelection(profileId, current.tempId, candidates);
+        }}
+        onSplit={(candidates) => {
+          if (!current) return;
+          void splitRow(current.tempId, candidates);
         }}
       />
     </div>

@@ -10,6 +10,7 @@ import {
 import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
 import { detectMultipleModalityStarts } from './powerScribeParser';
 import { findOrbitCmeSeedMapping } from '../data/orbitCmeSeedMappings';
+import { classifyModality } from '../data/modalityClassifier';
 import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from '../data/acrRadiologyActiveCptSet';
 
 const CPT_CODE_PATTERN = /^\d{5}$/;
@@ -60,6 +61,7 @@ type BodyProtocolKeyword =
   | 'HIP'
   | 'WRIST'
   | 'HAND'
+  | 'TIBIA_FIBULA'
   | 'CHEST_PORTABLE'
   | 'PROSTATE'
   | 'RENAL_STONE'
@@ -110,7 +112,10 @@ function stripLeadingOcrJunk(rawInput: string): string {
 
   const modalityStart = text.search(FIRST_MODALITY_PATTERN);
   if (modalityStart > 0) {
-    text = text.slice(modalityStart).trim();
+    const prefix = text.slice(0, modalityStart).trim();
+    const prefixLooksLikeOcrGutter = /\d|[+@#*|\\_\-.:;()[\]{}<>!?~$]/.test(prefix) ||
+      /^(?:SIGNED|FINAL|COMPLETE(?:D)?|NORMAL|ABNORMAL|NEW|OLD|READ|UNREAD|WARNING|ALERT|CHECK)\b/i.test(prefix);
+    if (prefixLooksLikeOcrGutter) text = text.slice(modalityStart).trim();
   }
 
   let previous = '';
@@ -139,6 +144,23 @@ function detectModalityLane(rawInput: string): ModalityLane | null {
   if (/^(?:MAMMO|MAMMOGRAM|MAMMOGRAPHY)(?:\b|\s)/.test(normalized)) return 'MAMMO';
   if (/^(?:DXA|DEXA)(?:\b|\s)/.test(normalized)) return 'DXA';
   if (/^(?:FLUORO|FLUOROSCOPY)(?:\b|\s)/.test(normalized)) return 'FLUORO';
+  const orbitMapping = findOrbitCmeSeedMapping(normalized);
+  if (orbitMapping) {
+    const orbitModality = classifyModality(orbitMapping.cptCode);
+    if (orbitModality === 'CT' || orbitModality === 'MRI' || orbitModality === 'XR' || orbitModality === 'US' || orbitModality === 'NM_PET' || orbitModality === 'MAMMO' || orbitModality === 'FLUORO') {
+      return orbitModality;
+    }
+    return null;
+  }
+  if (/\b(?:CTA|CT ANGIO(?:GRAM|GRAPHY)?)\b/.test(normalized)) return 'CTA';
+  if (/\b(?:MRA|MR ANGIO(?:GRAM|GRAPHY)?)\b/.test(normalized)) return 'MRA';
+  if (/\bCT\b/.test(normalized)) return 'CT';
+  if (/\b(?:MRI|MR)\b/.test(normalized)) return 'MRI';
+  if (/\b(?:XR|X RAY|X-RAY|RADIOGRAPH)\b/.test(normalized)) return 'XR';
+  if (/\b(?:US|U\/S|ULTRASOUND|SONOGRAM)\b/.test(normalized)) return 'US';
+  if (/\bPET\b/.test(normalized)) return 'PET';
+  if (/\b(?:NM|NUCLEAR)\b/.test(normalized)) return 'NM_PET';
+  if (/\b(?:MAMMO|MAMMOGRAM|MAMMOGRAPHY)\b/.test(normalized)) return 'MAMMO';
   return null;
 }
 
@@ -159,6 +181,7 @@ function extractBodyProtocolKeywords(text: string): Set<BodyProtocolKeyword> {
   if (/\bHIP\b/.test(upper)) keywords.add('HIP');
   if (/\bWRIST\b/.test(upper)) keywords.add('WRIST');
   if (/\bHAND\b/.test(upper)) keywords.add('HAND');
+  if (/\bTIBIA\s+(?:AND\s+)?FIBULA\b|\bTIB\s*[/ -]?\s*FIB\b/.test(upper)) keywords.add('TIBIA_FIBULA');
   if (/\bCHEST\b.*\bPORTABLE\b|\bPORTABLE\b.*\bCHEST\b/.test(upper)) keywords.add('CHEST_PORTABLE');
   if (/\bPROSTATE\b/.test(upper)) keywords.add('PROSTATE');
   if (/\bRENAL\b.*\bSTONE\b|\bSTONE\b.*\bPROTOCOL\b/.test(upper)) keywords.add('RENAL_STONE');
@@ -224,6 +247,7 @@ function candidateRespectsOrBypassesModalityLane(candidate: MatchCandidate, lane
   if (
     candidate.method === 'alias_match' ||
     source === 'exam dictionary' ||
+    source === 'Orbit CME seed mapping' ||
     source === INSTITUTION_PROCEDURE_DICTIONARY_SOURCE ||
     source === 'Institution mapping' ||
     source === 'OCR learning table'
@@ -237,6 +261,7 @@ function rowToCandidate(
   confidence: number,
   method: MatchCandidate['method'],
   source = 'CMS RVU table',
+  displayTitle?: string,
 ): MatchCandidate {
   const normalizedText = normalizeRadiologyDescription(rawInput);
   const effectiveSource = source === 'CMS RVU table' && isAutoMatchEligibleRow(row)
@@ -246,6 +271,7 @@ function rowToCandidate(
     cptCode: row.cptCode,
     modifier: row.modifier,
     description: row.description,
+    ...(displayTitle?.trim() ? { displayTitle: displayTitle.trim() } : {}),
     workRvu: row.workRvu,
     modality: row.modality,
     confidence: Math.min(1, Math.max(0, confidence)),
@@ -293,7 +319,14 @@ async function candidatesForAlias(alias: ExamAlias, confidence?: number): Promis
     const { cptCode } = parseAliasCode(serialized);
     const rows = await getModifier26Rows(cptCode);
     for (const row of rows) {
-      candidates.push(rowToCandidate(alias.aliasTextRaw, row, confidence ?? aliasConfidence(alias), 'alias_match', alias.siteId ? 'site alias' : 'learned alias'));
+      candidates.push(rowToCandidate(
+        alias.aliasTextRaw,
+        row,
+        confidence ?? aliasConfidence(alias),
+        'alias_match',
+        alias.siteId ? 'site alias' : 'learned alias',
+        alias.canonicalExamName ?? alias.aliasTextRaw,
+      ));
     }
   }
   return candidates;
@@ -321,7 +354,7 @@ async function candidatesForDictionary(rawInput: string, maxResults: number): Pr
   for (const serialized of exactEntry.cptCodes) {
     const { cptCode } = parseAliasCode(serialized);
     const rows = await getModifier26Rows(cptCode);
-    for (const row of rows) candidates.push(rowToCandidate(rawInput, row, 0.94, 'radiology_match', 'exam dictionary'));
+    for (const row of rows) candidates.push(rowToCandidate(rawInput, row, 0.985, 'radiology_match', 'exam dictionary', exactEntry.canonicalDisplayName));
     if (dedupeCandidates(candidates).length >= maxResults) break;
   }
   return candidates;
@@ -331,7 +364,7 @@ async function candidatesForOrbitCmeSeed(rawInput: string): Promise<MatchCandida
   const mapping = findOrbitCmeSeedMapping(rawInput);
   if (!mapping) return [];
   const rows = await getModifier26Rows(mapping.cptCode);
-  return rows.map((row) => rowToCandidate(rawInput, row, 0.93, 'radiology_match', 'Orbit CME seed mapping'));
+  return rows.map((row) => rowToCandidate(rawInput, row, 0.93, 'radiology_match', 'Orbit CME seed mapping', rawInput));
 }
 
 async function candidatesForOcrLearning(rawInput: string, profileId?: string | null): Promise<MatchCandidate[]> {
@@ -366,7 +399,7 @@ async function candidatesForOcrLearning(rawInput: string, profileId?: string | n
     const rows = await getModifier26Rows(entry.matchedCpt);
     for (const row of rows) {
       if (entry.modifier && row.modifier !== entry.modifier) continue;
-      candidates.push(rowToCandidate(rawInput, row, entry.confidence, 'ocr_match', 'OCR learning table'));
+      candidates.push(rowToCandidate(rawInput, row, entry.confidence, 'ocr_match', 'OCR learning table', rawInput));
     }
   }
   return candidates;
@@ -377,7 +410,7 @@ async function candidatesForCommonRadiologyMapping(rawInput: string): Promise<Ma
   for (const cptCode of getCommonRadiologyMappingCodes(rawInput)) {
     const rows = await getModifier26Rows(cptCode);
     for (const row of rows) {
-      candidates.push(rowToCandidate(rawInput, row, 0.99, 'radiology_match', 'common radiology mapping'));
+      candidates.push(rowToCandidate(rawInput, row, 0.99, 'radiology_match', 'common radiology mapping', rawInput));
     }
   }
   return candidates;
@@ -407,6 +440,14 @@ export interface InstitutionResolverCandidate {
   exact: boolean;
   corrections: string[];
   hardConflicts: string[];
+  truncatedPrefix: boolean;
+}
+
+function truncatedInstitutionPrefix(rawInput: string): string | null {
+  const match = rawInput.trim().match(/^(.*?)(?:\u2026|\.{2,}|[·•]{2,})\s*$/u);
+  if (!match) return null;
+  const prefix = normalizeRadiologyDescription(match[1]).trim();
+  return prefix.length >= 8 ? prefix : null;
 }
 
 export interface InstitutionResolverResult {
@@ -462,6 +503,7 @@ function institutionHardConflicts(rawInput: string, procedureType: string): stri
 
 function scoreInstitutionEntry(rawInput: string, entry: ExamDictionaryEntry): InstitutionResolverCandidate {
   const inputKeys = institutionNameKeys(rawInput);
+  const truncatedPrefix = truncatedInstitutionPrefix(rawInput);
   const inputLane = detectModalityLane(rawInput);
   const knownNames = dictionaryKnownNames(entry);
   let best = {
@@ -471,11 +513,13 @@ function scoreInstitutionEntry(rawInput: string, entry: ExamDictionaryEntry): In
     tolerantScore: 0,
     tokenScore: 0,
     exact: false,
+    truncatedPrefix: false,
   };
 
   for (const name of knownNames) {
     const keys = institutionNameKeys(name);
-    const exact = keys.normalized === inputKeys.normalized || keys.spaceless === inputKeys.spaceless || keys.tolerantSpaceless === inputKeys.tolerantSpaceless;
+    const prefixMatch = Boolean(truncatedPrefix && keys.normalized.startsWith(truncatedPrefix));
+    const exact = prefixMatch || keys.normalized === inputKeys.normalized || keys.spaceless === inputKeys.spaceless || keys.tolerantSpaceless === inputKeys.tolerantSpaceless;
     const normalizedScore = stringSimilarity(inputKeys.normalized, keys.normalized);
     const spacelessScore = stringSimilarity(inputKeys.spaceless, keys.spaceless);
     const tolerantScore = stringSimilarity(inputKeys.tolerantSpaceless, keys.tolerantSpaceless);
@@ -483,7 +527,7 @@ function scoreInstitutionEntry(rawInput: string, entry: ExamDictionaryEntry): In
     const score = exact ? 1 : Math.max(normalizedScore * 0.78, spacelessScore * 0.95, tolerantScore * 0.98, tokenScore * 0.82);
     const current = best.exact ? 1 : Math.max(best.normalizedScore * 0.78, best.spacelessScore * 0.95, best.tolerantScore * 0.98, best.tokenScore * 0.82);
     if (score > current) {
-      best = { procedureType: name, normalizedScore, spacelessScore, tolerantScore, tokenScore, exact };
+      best = { procedureType: name, normalizedScore, spacelessScore, tolerantScore, tokenScore, exact, truncatedPrefix: prefixMatch };
     }
   }
 
@@ -506,11 +550,12 @@ function scoreInstitutionEntry(rawInput: string, entry: ExamDictionaryEntry): In
     exact: best.exact,
     corrections: institutionCorrections(rawInput, best.procedureType),
     hardConflicts,
+    truncatedPrefix: best.truncatedPrefix,
   };
 }
 
 export function resolveInstitutionProcedure(rawInput: string, entries: ExamDictionaryEntry[], maxResults = 5): InstitutionResolverResult {
-  const institutionEntries = entries.filter((entry) => entry.source === 'institution' && entry.cptCodes.length > 0);
+  const institutionEntries = entries.filter((entry) => entry.source === 'institution');
   if (!rawInput.trim() || institutionEntries.length === 0) {
     return { matchType: 'no_institution_match', candidates: [], alternatives: [] };
   }
@@ -523,7 +568,8 @@ export function resolveInstitutionProcedure(rawInput: string, entries: ExamDicti
 
   const top = scored[0];
   const close = scored.filter((candidate) => candidate.entry.id !== top.entry.id && top.score - candidate.score <= 0.10);
-  if (!top.exact && close.length > 0) {
+  const ambiguousTruncatedPrefix = top.truncatedPrefix && close.some((candidate) => candidate.exact && candidate.truncatedPrefix);
+  if ((!top.exact && close.length > 0) || ambiguousTruncatedPrefix) {
     return {
       matchType: 'ambiguous_institution_match',
       candidates: [top, ...close].slice(0, maxResults).map((candidate) => ({ ...candidate, matchType: 'ambiguous_institution_match' })),
@@ -536,6 +582,13 @@ export function resolveInstitutionProcedure(rawInput: string, entries: ExamDicti
     candidates: scored.slice(0, maxResults),
     alternatives: scored.slice(1, maxResults),
   };
+}
+
+export async function resolveInstitutionDisplayName(rawInput: string): Promise<string | null> {
+  const entries = (await db.examDictionary.toArray()).filter((entry) => entry.source === 'institution');
+  const resolution = resolveInstitutionProcedure(rawInput, entries, 5);
+  if (resolution.matchType === 'ambiguous_institution_match' || resolution.matchType === 'no_institution_match') return null;
+  return resolution.candidates[0]?.procedureType ?? null;
 }
 
 async function candidatesForInstitutionMappings(rawInput: string, maxResults: number): Promise<MatchCandidate[]> {
@@ -556,6 +609,7 @@ async function candidatesForInstitutionMappings(rawInput: string, maxResults: nu
           confidence,
           'radiology_match',
           INSTITUTION_PROCEDURE_DICTIONARY_SOURCE,
+          entry.institutionProcedureName ?? procedureType,
         );
         if (candidate.explanation) {
           candidate.explanation.detail =
@@ -642,6 +696,7 @@ function deterministicCptCodesFor(parsed: ModalityFirstParse): string[] {
     if (parsed.keywords.has('CHEST_PORTABLE') || hasNormalizedPhrase(normalized, 'XR CHEST PORTABLE')) return ['71045'];
     if (hasNormalizedPhrase(normalized, 'XR CHEST PA AND LATERAL') || hasNormalizedPhrase(normalized, 'XR CHEST 2 VIEWS')) return ['71046'];
     if (hasNormalizedPhrase(normalized, 'XR ABDOMEN AP') || hasNormalizedPhrase(normalized, 'XR ABDOMEN 1 VIEW')) return ['74018'];
+    if (parsed.keywords.has('TIBIA_FIBULA')) return ['73590'];
     if (/\bXR\b.*\bWRIST\b.*\b(?:PA|LATERAL|OBLIQUE|3 VIEWS)\b/i.test(upper)) return ['73110'];
     if (/\bXR\b.*\bHAND\b.*\b(?:PA|LATERAL|OBLIQUE)\b/i.test(upper)) return ['73130'];
     if (/\bXR\b.*\bHIP\b.*\bPELVIS\b.*\b(?:AP|LATERAL)\b/i.test(upper) || /\bXR\b.*\bPELVIS\b.*\bHIP\b.*\b(?:AP|LATERAL)\b/i.test(upper)) return ['73502'];
@@ -679,6 +734,12 @@ function deterministicCptCodesFor(parsed: ModalityFirstParse): string[] {
   }
 
   if (parsed.lane === 'MRI') {
+    if (/\bWRIST\b/i.test(upper)) {
+      if (/\bW\s*WO\b|\bWWO\b|\bWITH AND WITHOUT\b/i.test(upper)) return ['73223'];
+      if (/\bWO\b|\bWITHOUT\b|\bW\/O\b/i.test(upper)) return ['73221'];
+      if (/\bW\b|\bWITH\b|\bCONTRAST\b/i.test(upper)) return ['73222'];
+      return ['73221', '73222', '73223'];
+    }
     if (parsed.keywords.has('PROSTATE')) return ['72197'];
     if (parsed.keywords.has('MRCP') && parsed.keywords.has('ABDOMEN')) return ['74183'];
     if (parsed.keywords.has('ABDOMEN') && (/\bW\s*WO\b|\bWWO\b|\bWITH AND WITHOUT\b/i.test(upper))) return ['74183'];
@@ -688,6 +749,9 @@ function deterministicCptCodesFor(parsed: ModalityFirstParse): string[] {
     if (parsed.keywords.has('CAROTID') && /\bBILATERAL\b/i.test(upper)) return ['93880'];
     if (parsed.keywords.has('LOWER_EXTREMITY') && /\bARTERIAL\b/i.test(upper)) {
       return /\bBILATERAL\b/i.test(upper) ? ['93925'] : ['93926'];
+    }
+    if (parsed.keywords.has('LOWER_EXTREMITY') && /\bVENOUS\b/i.test(upper)) {
+      return /\bBILATERAL\b/i.test(upper) ? ['93970'] : ['93971'];
     }
     if (/\bOB\b.*(?:<|LESS THAN|LT)\s*14\b|\bOB\b.*\bFIRST GESTATION\b|\bOB\b.*\bSINGLE\b/i.test(upper)) return ['76801'];
   }
@@ -700,7 +764,7 @@ async function candidatesForDeterministicProtocol(rawInput: string, parsed: Moda
   for (const cptCode of deterministicCptCodesFor(parsed)) {
     const rows = await getModifier26Rows(cptCode);
     for (const row of rows) {
-      candidates.push(rowToCandidate(rawInput, row, 0.995, 'radiology_match', 'deterministic protocol mapping'));
+      candidates.push(rowToCandidate(rawInput, row, 0.995, 'radiology_match', 'deterministic protocol mapping', rawInput));
     }
   }
   return candidates;
@@ -735,6 +799,8 @@ function rowMatchesKeyword(row: CptRvuRow, keyword: BodyProtocolKeyword): boolea
       return /\bWRIST\b/.test(description);
     case 'HAND':
       return /\bHAND\b/.test(description);
+    case 'TIBIA_FIBULA':
+      return row.cptCode === '73590' || (/\bTIBIA\b/.test(description) && /\bFIBULA\b/.test(description));
     case 'CHEST_PORTABLE':
       return /\bCHEST\b/.test(description) && /\b(?:1 VIEW|PORTABLE)\b/.test(description);
     case 'PROSTATE':
@@ -770,7 +836,7 @@ function keywordScopedRows(rows: CptRvuRow[], parsed: ModalityFirstParse): CptRv
   const priorityGroups: BodyProtocolKeyword[][] = [
     ['CARDIAC_SCORE', 'RENAL_STONE', 'APPENDIX', 'LUNG_CANCER_SCREENING', 'MRCP', 'MAMMO_BIOPSY', 'STEREOTACTIC'],
     ['PROSTATE', 'CAROTID', 'CHEST_PORTABLE'],
-    ['C_SPINE', 'T_SPINE', 'L_SPINE', 'SPINE', 'HIP', 'WRIST', 'HAND', 'HEAD', 'NECK', 'BRAIN', 'CHEST', 'ABDOMEN', 'PELVIS', 'LOWER_EXTREMITY', 'UPPER_EXTREMITY'],
+    ['C_SPINE', 'T_SPINE', 'L_SPINE', 'SPINE', 'HIP', 'WRIST', 'HAND', 'TIBIA_FIBULA', 'HEAD', 'NECK', 'BRAIN', 'CHEST', 'ABDOMEN', 'PELVIS', 'LOWER_EXTREMITY', 'UPPER_EXTREMITY'],
   ];
 
   let scoped = rows;
@@ -838,6 +904,33 @@ function dedupeCandidates(candidates: MatchCandidate[]): MatchCandidate[] {
   return result;
 }
 
+function candidateSourcePriority(candidate: MatchCandidate): number {
+  const source = candidate.explanation?.source;
+  if (source === INSTITUTION_PROCEDURE_DICTIONARY_SOURCE || source === 'Institution mapping') return 0;
+  if (candidate.method === 'alias_match') return 1;
+  if (source === 'exam dictionary' || source === 'OCR learning table') return 2;
+  if (source === 'Orbit CME seed mapping') return 3;
+  if (source === 'deterministic protocol mapping' || source === 'common radiology mapping') return 4;
+  if (source?.includes('CMS') || source?.includes('ACR')) return 5;
+  return 6;
+}
+
+function rankCandidatesBySourcePriority(candidates: MatchCandidate[]): MatchCandidate[] {
+  return dedupeCandidates(
+    [...candidates].sort((a, b) => {
+      const priorityDiff = candidateSourcePriority(a) - candidateSourcePriority(b);
+      if (priorityDiff !== 0) return priorityDiff;
+      const confidenceDiff = b.confidence - a.confidence;
+      if (confidenceDiff !== 0) return confidenceDiff;
+      return (b.workRvu ?? 0) - (a.workRvu ?? 0);
+    }),
+  );
+}
+
+export function __testRankCandidatesBySourcePriority(candidates: MatchCandidate[]): MatchCandidate[] {
+  return rankCandidatesBySourcePriority(candidates);
+}
+
 export async function findMatchCandidates(
   rawInput: string,
   maxResults = 5,
@@ -893,42 +986,27 @@ export async function findMatchCandidates(
     scopedAliases.filter((alias) => aliasNormalizedKeys(alias).some((key) => exactKeys.has(key))),
   )[0];
 
-  if (exactAlias) {
-    candidates.push(...await candidatesForAlias(exactAlias));
-  }
+  // The local procedure table is authoritative. Learned exact titles come
+  // next, then Orbit CME fills a title that is not known locally. Reference
+  // rules and ACR/CMS descriptions remain lower-tier fallbacks.
+  candidates.push(...await candidatesForInstitutionMappings(matchInput, maxResults));
+  if (exactAlias) candidates.push(...await candidatesForAlias(exactAlias));
+  candidates.push(...await candidatesForDictionary(matchInput, maxResults));
+  candidates.push(...await candidatesForOcrLearning(matchInput, profileId));
+  candidates.push(...await candidatesForOrbitCmeSeed(matchInput));
+  candidates.push(...await candidatesForDeterministicProtocol(matchInput, parsed));
 
-  if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForInstitutionMappings(matchInput, maxResults));
-  }
-
-  if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForDictionary(matchInput, maxResults));
-  }
-
-  if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForOcrLearning(matchInput, profileId));
-  }
-
-  if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForOrbitCmeSeed(matchInput));
-  }
-
-  if (candidates.length < maxResults) {
-    candidates.push(...await candidatesForDeterministicProtocol(matchInput, parsed));
-  }
-
-  if (candidates.length < maxResults) {
+  if (rankCandidatesBySourcePriority(candidates).length < maxResults) {
     const commonCandidates = await candidatesForCommonRadiologyMapping(matchInput);
     if (commonCandidates.length > 0) {
-      return dedupeCandidates([...candidates, ...commonCandidates])
+      return rankCandidatesBySourcePriority([...candidates, ...commonCandidates])
         .filter((candidate) => candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0)
         .filter((candidate) => candidateRespectsOrBypassesModalityLane(candidate, modalityLane))
-        .sort((a, b) => b.confidence - a.confidence)
         .slice(0, maxResults);
     }
   }
 
-  const allCpt = candidates.length < maxResults
+  const allCpt = rankCandidatesBySourcePriority(candidates).length < maxResults
     ? await db.cptRvuTable.where('statusCategory').anyOf(['active', 'restricted']).toArray()
     : [];
   const autoMatchCpt = allCpt.filter(isAutoMatchEligibleRow);
@@ -973,7 +1051,7 @@ export async function findMatchCandidates(
         const radioScore = scoreRadiologyMatch(radiologyNorm, row.description);
         const normalizedTextScore = combinedSimilarity(radiologyDescriptionKey, normalizedDescription);
         const keywordBoost = Array.from(parsed.keywords).some((keyword) => rowMatchesKeyword(row, keyword)) ? 0.08 : 0;
-        return { row, score: Math.min(1, Math.max(exactNormalizedScore, radioScore, normalizedTextScore * 0.92) + keywordBoost) };
+        return { row, score: Math.min(0.89, Math.max(exactNormalizedScore, radioScore, normalizedTextScore * 0.92) + keywordBoost) };
       })
       .filter((x) => x.score >= 0.35)
       .sort((a, b) => b.score - a.score)
@@ -985,16 +1063,9 @@ export async function findMatchCandidates(
     }
   }
 
-  const ranked = dedupeCandidates(candidates)
+  const ranked = rankCandidatesBySourcePriority(candidates)
     .filter((candidate) => candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0)
-    .filter((candidate) => candidateRespectsOrBypassesModalityLane(candidate, modalityLane))
-    .sort((a, b) => {
-      const aRvu = a.workRvu ?? 0;
-      const bRvu = b.workRvu ?? 0;
-      if (aRvu === 0 && bRvu !== 0) return 1;
-      if (aRvu !== 0 && bRvu === 0) return -1;
-      return b.confidence - a.confidence;
-    });
+    .filter((candidate) => candidateRespectsOrBypassesModalityLane(candidate, modalityLane));
 
   if (ranked.length > 0 && ranked[0].confidence < CONFIDENCE_THRESHOLD) {
     return [];
@@ -1027,6 +1098,7 @@ export async function searchExamLibrary(
   const modalityScopedCpt = allCpt.filter((row) => rowMatchesModalityLane(row, modalityLane));
   const keywordScopedCpt = keywordScopedRows(modalityScopedCpt, parsed);
 
+  const orbitCandidates = await candidatesForOrbitCmeSeed(matchInput);
   const deterministicCandidates = await candidatesForDeterministicProtocol(matchInput, parsed);
   const commonCandidates = await candidatesForCommonRadiologyMapping(matchInput);
   const exactDescriptionCandidates = keywordScopedCpt
@@ -1058,7 +1130,7 @@ export async function searchExamLibrary(
     .slice(0, maxResults * 2)
     .map(({ row, score }) => rowToCandidate(matchInput, row, score, 'radiology_match', 'CMS fuzzy match'));
 
-  return dedupeCandidates([...deterministicCandidates, ...commonCandidates, ...exactDescriptionCandidates, ...fuzzyCandidates])
+  return rankCandidatesBySourcePriority([...orbitCandidates, ...deterministicCandidates, ...commonCandidates, ...exactDescriptionCandidates, ...fuzzyCandidates])
     .filter((candidate) => candidateRespectsOrBypassesModalityLane(candidate, modalityLane))
     .slice(0, maxResults);
 }
@@ -1084,10 +1156,11 @@ async function upsertDictionaryEntry(payload: LearnAliasPayload, normalized: str
   if (!candidates.length) return;
   const cptCodes = candidates.map((candidate) => `${candidate.cptCode}-26`);
   const canonicalDisplayName = payload.canonicalExamName ?? payload.rawText;
-  const existing = (await db.examDictionary.toArray()).find((entry) =>
-    entry.normalizedKey === normalized ||
-    entry.cptCodes.sort().join('|') === [...cptCodes].sort().join('|'),
-  );
+  const dictionaryEntries = await db.examDictionary.toArray();
+  const codeKey = [...cptCodes].sort().join('|');
+  const existing = dictionaryEntries.find((entry) => entry.normalizedKey === normalized) ??
+    dictionaryEntries.find((entry) => entry.source === 'institution' && [...entry.cptCodes].sort().join('|') === codeKey) ??
+    dictionaryEntries.find((entry) => [...entry.cptCodes].sort().join('|') === codeKey);
   const now = new Date().toISOString();
   const synonym = payload.rawText.trim();
   if (existing) {
@@ -1121,6 +1194,7 @@ async function upsertDictionaryEntry(payload: LearnAliasPayload, normalized: str
     bodyRegion: null,
     typicalCombinations: cptCodes.length > 1 ? [cptCodes.join(' + ')] : [],
     timesUsed: 1,
+    source: 'user',
     createdAt: now,
     updatedAt: now,
   });
@@ -1227,11 +1301,17 @@ export async function learnAlias(
   const primary = candidates[0];
   const normalized = normalizeRadiologyDescription(rawText);
   const legacyNormalized = normalizeExamText(rawText);
+  const canonicalNormalized = normalizeRadiologyDescription(canonicalExamName ?? rawText);
   const existing = (await db.examAliases.toArray())
     .find((a) => (
       a.profileId === profileId &&
       (a.siteId ?? null) === siteId &&
-      (a.aliasText === normalized || a.aliasText === legacyNormalized || normalizeRadiologyDescription(a.aliasTextRaw) === normalized)
+      (
+        a.aliasText === normalized ||
+        a.aliasText === legacyNormalized ||
+        normalizeRadiologyDescription(a.aliasTextRaw) === normalized ||
+        normalizeRadiologyDescription(a.canonicalExamName ?? '') === canonicalNormalized
+      )
     ));
 
   const cptCodes = candidates.map((c) => `${c.cptCode}-26`);
@@ -1256,6 +1336,7 @@ export async function learnAlias(
     );
     await db.examAliases.update(existing.id, {
       aliasText: normalized,
+      aliasTextRaw: rawText,
       siteId,
       cptCode: primary.cptCode,
       modifier: '26',
@@ -1286,7 +1367,7 @@ export async function learnAlias(
     modifier: '26',
     cptCodes,
     totalWorkRvu,
-    matchConfidence: action === 'manual_add' || action === 'correct' ? 0.95 : 0.90,
+    matchConfidence: action === 'manual_add' || action === 'correct' || action === 'confirm' ? 0.95 : 0.90,
     confirmations: 1,
     corrections: action === 'correct' ? 1 : 0,
     rejections: action === 'reject' ? 1 : 0,

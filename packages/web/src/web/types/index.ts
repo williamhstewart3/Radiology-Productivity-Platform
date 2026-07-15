@@ -458,7 +458,23 @@ export interface UserSettings {
   autoImportClipboardScreenshots: boolean;
   alwaysProcessPowerScribeClipboard: boolean;
   clearClipboardAfterImport: boolean;
-  savedPowerScribeCropRegions: Record<string, { x: number; y: number; width: number; height: number }>;
+  savedPowerScribeCropRegions: Record<string, {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    imageWidth?: number;
+    imageHeight?: number;
+    /** Exact user-adjusted PowerScribe column guides, reusable at the saved resolution. */
+    manualColumnGuides?: {
+      left: number;
+      procedureEnd: number;
+      examEnd: number;
+      right: number;
+      top: number;
+      bottom: number;
+    };
+  }>;
 }
 
 /** Color accent for a radiologist profile, practice, or org. */
@@ -548,7 +564,10 @@ export interface RadiologistProfile {
 export interface MatchCandidate {
   cptCode: string;
   modifier: string | null;
+  /** Official billing/reference description retained for audit and logging. */
   description: string;
+  /** Local PowerScribe/institutional wording shown to the radiologist. */
+  displayTitle?: string;
   workRvu: number | null;
   modality: Modality;
   confidence: number;

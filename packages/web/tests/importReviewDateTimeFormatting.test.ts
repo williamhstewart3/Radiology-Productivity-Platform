@@ -6,6 +6,7 @@ import {
   formatOcrDateTime,
   shouldShowAccession,
   shouldAutoProcessPowerScribeCaptures,
+  shouldAutoProcessRecognizedCapture,
   approvalButtonLabel,
   buildUserApprovalPatch,
   canApproveReviewRow,
@@ -121,6 +122,12 @@ describe('import review date-time formatting', () => {
     expect(shouldAutoProcessPowerScribeCaptures({ alwaysProcessPowerScribeClipboard: true })).toBe(true);
     expect(shouldAutoProcessPowerScribeCaptures({ alwaysProcessPowerScribeClipboard: false })).toBe(false);
     expect(shouldAutoProcessPowerScribeCaptures(null)).toBe(false);
+  });
+
+  test('auto-process never bypasses preview for an unrecognized capture', () => {
+    expect(shouldAutoProcessRecognizedCapture(true, { alwaysProcessPowerScribeClipboard: true })).toBe(true);
+    expect(shouldAutoProcessRecognizedCapture(false, { alwaysProcessPowerScribeClipboard: true })).toBe(false);
+    expect(shouldAutoProcessRecognizedCapture(true, { alwaysProcessPowerScribeClipboard: false })).toBe(false);
   });
 });
 

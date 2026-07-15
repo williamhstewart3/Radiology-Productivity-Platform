@@ -21,7 +21,7 @@ import {
 } from '../utils/dailyPaceCalculations';
 import { computeByModality, computeYtdStats, todayDateString, topModalityShares } from '../utils/calculations';
 import { buildTimelineBuckets, lensStart } from '../utils/historyTimeline';
-import { MiniPaceWindow } from '../components/MiniPaceWindow';
+import { useMiniPaceWindow } from '../components/MiniPaceWindowProvider';
 import { Readout, type ReadoutTone } from '../components/ui/Readout';
 import { Ring, useCountUp } from '../components/ui/Ring';
 import { StatCard } from '../components/ui/StatCard';
@@ -237,21 +237,7 @@ export function Today({ onNavigate }: TodayProps) {
     return () => clearInterval(interval);
   }, [recalculate]);
 
-  const [miniFallbackOpen, setMiniFallbackOpen] = useState(false);
-  const openMiniWindow = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    const url = new URL('/?mini=pace', window.location.origin).toString();
-    const popup = window.open(
-      url,
-      'wrvu-mini-pace',
-      'width=320,height=280,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no',
-    );
-    if (!popup) {
-      setMiniFallbackOpen(true);
-      return;
-    }
-    popup.focus();
-  }, []);
+  const { openMiniWindow } = useMiniPaceWindow();
 
   const animatedRvu = useCountUp(metrics?.currentRvu ?? 0);
 
@@ -367,33 +353,13 @@ export function Today({ onNavigate }: TodayProps) {
         <button
           type="button"
           onClick={openMiniWindow}
-          title="Open mini pace window"
+          title="Open always-on-top mini pace window"
+          aria-label="Open always-on-top mini pace window"
           className="mt-1 flex size-9 shrink-0 items-center justify-center rounded-full text-rd-label-secondary hover:bg-rd-surface"
         >
           📌
         </button>
       </div>
-
-      {miniFallbackOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-3">
-          <button
-            type="button"
-            className="absolute inset-0 cursor-default"
-            aria-label="Close mini pace"
-            onClick={() => setMiniFallbackOpen(false)}
-          />
-          <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-black shadow-2xl">
-            <button
-              type="button"
-              onClick={() => setMiniFallbackOpen(false)}
-              className="absolute right-2 top-2 z-10 rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300 hover:border-white/25 hover:text-white"
-            >
-              Close
-            </button>
-            <MiniPaceWindow embedded />
-          </div>
-        </div>
-      )}
 
       {(watcherArmed || (activeSession && activeSession.needsReviewCount > 0)) && (
         <div className="flex flex-wrap gap-2">

@@ -1,12 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import {
   DEFAULT_POWERSCRIBE_STUDY_LIST_CROP,
+  DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES,
   __testBoundToStudyListArea,
   __testDetectPowerScribeColumnLayoutFromProjection,
+  detectPowerScribeRowBandsFromProjection,
+  normalizePowerScribeRowBands,
+  powerScribeManualColumnsFromGuides,
+  selectPowerScribeCropTier,
 } from '../src/web/utils/imageCrop';
 
 function syntheticThreeColumnProjection(width = 1000): number[] {
-  const projection = new Array<number>(width).fill(0.002);
+  const projection = Array.from({ length: width }, () => 0.002);
   const addTextBlock = (start: number, end: number, strength: number) => {
     for (let i = start; i <= end; i++) {
       projection[i] = strength + ((i % 17) / 17) * 0.008;
@@ -58,7 +63,7 @@ describe('PowerScribe column crop detection', () => {
   });
 
   test('falls back to configured ratios when gutters are not reliable', () => {
-    const layout = __testDetectPowerScribeColumnLayoutFromProjection(new Array<number>(60).fill(0.02));
+    const layout = __testDetectPowerScribeColumnLayoutFromProjection(Array.from({ length: 60 }, () => 0.02));
 
     expect(layout.method).toBe('fallback');
     expect(layout.columns.procedure.x).toBe(0.13);
@@ -66,5 +71,70 @@ describe('PowerScribe column crop detection', () => {
     expect(layout.columns.modifiedDate.x).toBe(0.76);
     expect(layout.columns.examDate.width).toBeGreaterThanOrEqual(0.22);
     expect(layout.columns.modifiedDate.width).toBeGreaterThanOrEqual(0.235);
+  });
+
+  test('enforces header > datetime > valley > saved tier order', () => {
+    const base = { manual: false, headerAnchors: true, datetimeColumns: true, pixelValley: true, savedCrop: true, hasPowerScribeSignal: true };
+    expect(selectPowerScribeCropTier({ ...base, manual: true })).toBe('manual');
+    expect(selectPowerScribeCropTier(base)).toBe('headerAnchors');
+    expect(selectPowerScribeCropTier({ ...base, headerAnchors: false })).toBe('datetimeColumns');
+    expect(selectPowerScribeCropTier({ ...base, headerAnchors: false, datetimeColumns: false })).toBe('pixelValley');
+    expect(selectPowerScribeCropTier({ ...base, headerAnchors: false, datetimeColumns: false, pixelValley: false })).toBe('savedCrop');
+  });
+
+  test('turns manual guides into three aligned, non-overlapping column crops', () => {
+    const columns = powerScribeManualColumnsFromGuides(DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES);
+
+    expect(columns.procedure.y).toBe(columns.examDate.y);
+    expect(columns.examDate.y).toBe(columns.modifiedDate.y);
+    expect(columns.procedure.height).toBe(columns.examDate.height);
+    expect(columns.examDate.height).toBe(columns.modifiedDate.height);
+    expect(columns.procedure.x + columns.procedure.width).toBe(columns.examDate.x);
+    expect(columns.examDate.x + columns.examDate.width).toBe(columns.modifiedDate.x);
+    expect(columns.procedure.width).toBeCloseTo(0.38);
+    expect(columns.examDate.width).toBeCloseTo(0.2);
+    expect(columns.modifiedDate.width).toBeCloseTo(0.2);
+    expect(columns.procedure.y).toBeCloseTo(0.1);
+    expect(columns.procedure.height).toBeCloseTo(0.85);
+  });
+
+  test('detects contiguous row crops from date-column ink projection before OCR', () => {
+    const projection = Array.from({ length: 120 }, () => 0.002);
+    for (const center of [10, 30, 50, 70, 90, 110]) {
+      for (let offset = -2; offset <= 2; offset++) projection[center + offset] = 0.08 - Math.abs(offset) * 0.01;
+    }
+
+    const rows = detectPowerScribeRowBandsFromProjection(projection, { top: 0.2, bottom: 0.8 });
+
+    expect(rows).toHaveLength(6);
+    expect(rows[0].top).toBeGreaterThanOrEqual(0.2);
+    expect(rows.at(-1)!.bottom).toBeLessThanOrEqual(0.8);
+    for (let index = 1; index < rows.length; index++) {
+      expect(rows[index - 1].bottom).toBeCloseTo(rows[index].top);
+    }
+  });
+
+  test('normalizes edited row boundaries into ordered non-overlapping bands', () => {
+    const rows = normalizePowerScribeRowBands([
+      { top: 0.50, bottom: 0.70 },
+      { top: 0.20, bottom: 0.49 },
+      { top: 0.69, bottom: 0.90 },
+    ], { top: 0.1, bottom: 0.95 });
+
+    expect(rows).toHaveLength(3);
+    expect(rows[0].top).toBe(0.2);
+    expect(rows[0].bottom).toBeCloseTo(rows[1].top);
+    expect(rows[1].bottom).toBeCloseTo(rows[2].top);
+  });
+
+  test('fails closed for a wrong-window capture with no PowerScribe signal', () => {
+    expect(selectPowerScribeCropTier({
+      manual: false,
+      headerAnchors: false,
+      datetimeColumns: false,
+      pixelValley: true,
+      savedCrop: true,
+      hasPowerScribeSignal: false,
+    })).toBeNull();
   });
 });

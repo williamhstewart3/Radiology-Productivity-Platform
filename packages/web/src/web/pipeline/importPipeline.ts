@@ -1,4 +1,4 @@
-import { findMatchCandidates, learnAlias } from '../utils/matching';
+import { findMatchCandidates, learnAlias, resolveInstitutionDisplayName } from '../utils/matching';
 import { checkBatchDuplicates, buildFingerprint, isStrongDuplicateFingerprint } from '../utils/duplicateDetection';
 import { db } from '../db/database';
 import { supabasePersistence } from '../services/supabasePersistence';
@@ -109,7 +109,14 @@ function reviewReasonFor(top: MatchCandidate | undefined, candidates: MatchCandi
   if (top.confidence < 0.95) return 'Low confidence match';
   const plausible = candidates.filter((candidate) => productivityRelevant(candidate) && candidate.confidence >= 0.65);
   if (plausible.length > 1 && plausible.every(isExactInstitutionMappingCandidate)) return null;
+  if (
+    isExactInstitutionMappingCandidate(top) &&
+    plausible.slice(1).every((candidate) =>
+      isExactInstitutionMappingCandidate(candidate) || candidate.explanation?.source === 'Orbit CME seed mapping',
+    )
+  ) return null;
   if (plausible.length > 1 && plausible.every(isDeterministicProtocolCandidate)) return null;
+  if (isDeterministicProtocolCandidate(top) && plausible.slice(1).every((candidate) => candidate.confidence < 0.99)) return null;
   if (plausible.length > 1 && top.method !== 'alias_match') return 'Multiple possible CPT matches';
   return null;
 }
@@ -155,7 +162,12 @@ export async function runImportPipeline(
   const autoCommitThreshold = effectiveAutoCommitThreshold(userSettings?.lowConfidenceThreshold);
   const matched: Array<{ study: ImportedStudy; candidates: MatchCandidate[] }> = [];
 
-  for (const study of studies) {
+  for (const originalStudy of studies) {
+    const originalProcedureName = procedureNameFor(originalStudy);
+    const resolvedDisplayName = await resolveInstitutionDisplayName(originalProcedureName);
+    const study: ImportedStudy = resolvedDisplayName
+      ? { ...originalStudy, procedureName: resolvedDisplayName, canonicalExam: resolvedDisplayName }
+      : originalStudy;
     const procedureName = procedureNameFor(study);
     const query = study.cpt ?? procedureName;
     const candidates = (await findMatchCandidates(query, 6, profileId, {
@@ -368,7 +380,9 @@ export async function commitPipelineResults(
 
     if (rowCommitted) {
       await learnAlias({
-        rawText: procedureName,
+        // PowerScribe is the sole capture system: persist its resolved local
+        // procedure title, never a noisy raw OCR rendering, as the alias.
+        rawText: displayTitle,
         canonicalExamName: displayTitle,
         candidates: selectedCandidates.map((candidate) => ({
           cptCode: candidate.cptCode,

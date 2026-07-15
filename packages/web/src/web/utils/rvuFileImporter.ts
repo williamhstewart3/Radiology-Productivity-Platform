@@ -235,7 +235,7 @@ export async function parseRvuFile(
   return { rows, sourceFilename, year: inferYear(sourceFilename, filename), errors };
 }
 
-function toCptRow(row: ParsedRvuRow, fileVersion: string, existingRow: CptRvuRow | undefined, nowIso: string): CptRvuRow {
+export function toCptRow(row: ParsedRvuRow, fileVersion: string, existingRow: CptRvuRow | undefined, nowIso: string): CptRvuRow {
   const includeInAutoMatch = isRadiologyActiveCpt(row.cptCode);
   return {
     id: existingRow?.id ?? crypto.randomUUID(),

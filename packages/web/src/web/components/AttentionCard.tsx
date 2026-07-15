@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { selectedCandidatesForRow, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { confidencePhrase } from '../services/inboxService';
+import { matchCandidateDisplayTitle } from '../utils/matchCandidateDisplay';
 import type { ImportSource } from '../types/importProvider';
 import { KeyHint } from './ui/KeyHint';
 
@@ -18,12 +19,13 @@ function shortTime(iso: string | null | undefined): string | null {
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onUpdateExisting, recommendedDuplicateAction, expandRequest }: {
+export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onSplit, onUpdateExisting, recommendedDuplicateAction, expandRequest }: {
   row: PipelineReviewRow;
   active: boolean;
   onAccept: () => void;
   onSkip: () => void;
   onOpenPicker: () => void;
+  onSplit: () => void;
   onUpdateExisting: () => void;
   /** null = today's default: "Same study — skip" stays the primary/recommended verb. */
   recommendedDuplicateAction: 'update_existing' | null;
@@ -67,7 +69,9 @@ export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onU
         <div className="space-y-3">
           <p className="font-mono text-[15px] text-rd-label-secondary">“{row.source.procedureName ?? row.source.examTitle}”</p>
           <div>
-            <p className="text-[22px] font-semibold text-rd-label-primary">{candidate?.description ?? 'Choose a code'}</p>
+            <p className="text-[22px] font-semibold text-rd-label-primary">
+              {candidate ? matchCandidateDisplayTitle(candidate, row.displayTitle ?? row.source.procedureName ?? row.source.examTitle) : 'Choose a code'}
+            </p>
             {chips.length > 0 ? (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {chips.map((option, index) => (
@@ -122,6 +126,7 @@ export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onU
               ✓ Accept <KeyHint>↵</KeyHint>
             </button>
             <button type="button" onClick={onOpenPicker} className="min-h-11 px-2 text-[15px] text-rd-label-primary">Change code <KeyHint>E</KeyHint></button>
+            {chips.length > 1 && <button type="button" onClick={onSplit} className="min-h-11 px-2 text-[15px] font-medium text-rd-caution">Split exams</button>}
             <button type="button" onClick={onSkip} className="min-h-11 px-2 text-[15px] text-rd-label-secondary">Skip <KeyHint>S</KeyHint></button>
           </>
         )}

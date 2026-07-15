@@ -141,6 +141,24 @@ export function buildCuratedDictionaryCptRows(entries = buildCuratedRadiologyDic
   return dedupeCptRvuRowsForBulkPut(rows, 'curated dictionary CPT rows');
 }
 
+export function buildOrbitModalityRepairs(
+  existingRows: CptRvuRow[],
+  orbitRows = buildOrbitCmeSeedCptRows(),
+  nowIso = new Date().toISOString(),
+): CptRvuRow[] {
+  const orbitByKey = new Map(orbitRows.map((row) => [cptRvuUniqueKey(row), row]));
+  return existingRows
+    .filter((row) => {
+      const reference = orbitByKey.get(cptRvuUniqueKey(row));
+      return Boolean(reference && reference.modality !== 'OTHER' && row.modality !== reference.modality && !row.isUserVerified);
+    })
+    .map((row) => ({
+      ...row,
+      modality: orbitByKey.get(cptRvuUniqueKey(row))!.modality,
+      updatedAt: nowIso,
+    }));
+}
+
 export async function ensureCuratedRadiologyDictionarySeed(): Promise<void> {
   const entries = buildCuratedRadiologyDictionarySeed();
   if (entries.length === 0) return;
@@ -151,13 +169,15 @@ export async function ensureCuratedRadiologyDictionarySeed(): Promise<void> {
     await db.examDictionary.bulkPut(missingEntries);
   }
 
-  const existingCptKeys = new Set(
-    (await db.cptRvuTable.toArray()).map(cptRvuUniqueKey),
-  );
+  const existingCptRows = await db.cptRvuTable.toArray();
+  const existingCptKeys = new Set(existingCptRows.map(cptRvuUniqueKey));
+  const orbitRows = buildOrbitCmeSeedCptRows();
+  const modalityRepairs = buildOrbitModalityRepairs(existingCptRows, orbitRows);
+  if (modalityRepairs.length > 0) await db.cptRvuTable.bulkPut(modalityRepairs);
   const missingCptRows = dedupeCptRvuRowsForBulkPut(
     [
       ...buildCuratedDictionaryCptRows(entries),
-      ...buildOrbitCmeSeedCptRows(),
+      ...orbitRows,
     ],
     'curated/Orbit CPT seed',
   ).filter((row) => !existingCptKeys.has(cptRvuUniqueKey(row)));

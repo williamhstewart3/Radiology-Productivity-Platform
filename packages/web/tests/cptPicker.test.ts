@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { candidateKey, cptRowToCandidate, professionalCptRows, searchCptRows } from '../src/web/utils/cptPicker';
+import { candidateKey, cptRowToCandidate, professionalCptRows, searchCptRows, searchKnownTitleCandidates } from '../src/web/utils/cptPicker';
 import { tokenScore } from '../src/web/pages/CptExplorer';
-import type { CptRvuRow } from '../src/web/types';
+import type { CptRvuRow, ExamDictionaryEntry } from '../src/web/types';
 
 function row(overrides: Partial<CptRvuRow>): CptRvuRow {
   return {
@@ -80,6 +80,52 @@ describe('searchCptRows — identical scoring to Codes.tsx/CommandPalette (same 
   test('respects the result limit', () => {
     const manyRows = Array.from({ length: 50 }, (_, i) => row({ id: `r${i}`, cptCode: `7${String(i).padStart(4, '0')}`, description: 'CT Abdomen scan' }));
     expect(searchCptRows(manyRows, 'CT abdomen', 10)).toHaveLength(10);
+  });
+});
+
+describe('layered CPT title search', () => {
+  test('finds CMS upper-extremity joint MRI rows from a plain MRI wrist query', () => {
+    const wristRows = [
+      row({ cptCode: '73221', description: 'Mri joint upr extrem w/o dye', modality: 'MRI' }),
+      row({ cptCode: '73222', description: 'Mri joint upr extrem w/dye', modality: 'MRI' }),
+      row({ cptCode: '73223', description: 'Mri joint upr extrem w/o & w/dye', modality: 'MRI' }),
+    ];
+    expect(searchCptRows(wristRows, 'MRI wrist').map((item) => item.cptCode)).toEqual(['73221', '73222', '73223']);
+  });
+
+  test('resolves an institutional MRI wrist title above the generic CMS descriptor', () => {
+    const entry: ExamDictionaryEntry = {
+      id: 'mri_wrist_wo',
+      canonicalDisplayName: 'MRI WRIST WO CONTRAST',
+      normalizedKey: 'mri wrist wo contrast',
+      commonSynonyms: ['MR WRIST WITHOUT CONTRAST'],
+      hospitalAliases: [],
+      powerScribeNames: ['MRI WRIST WO CONTRAST'],
+      cmsDescription: 'Mri joint upr extrem w/o dye',
+      cptCodes: ['73221'],
+      modifier26Wrvu: 1.32,
+      modality: 'MRI',
+      bodyRegion: 'WRIST',
+      typicalCombinations: [],
+      timesUsed: 0,
+      source: 'institution',
+      institutionSheet: 'MR',
+      institutionProcedureName: 'MRI WRIST WO CONTRAST',
+      sourceFileName: 'institution.xlsx',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const candidates = searchKnownTitleCandidates(
+      [entry],
+      [row({ cptCode: '73221', description: 'Mri joint upr extrem w/o dye', modality: 'MRI', workRvu: 1.32 })],
+      'MRI wrist',
+    );
+    expect(candidates[0]).toMatchObject({
+      cptCode: '73221',
+      description: 'Mri joint upr extrem w/o dye',
+      displayTitle: 'MRI WRIST WO CONTRAST',
+      method: 'manual_name_match',
+    });
   });
 });
 

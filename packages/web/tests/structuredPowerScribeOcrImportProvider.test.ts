@@ -76,6 +76,28 @@ describe('StructuredPowerScribeOcrImportProvider', () => {
     expect(studies[0].studyDate).toBe('2026-07-08');
   });
 
+  test('keeps a row reviewable when only its visible times survive damaged date OCR', async () => {
+    const provider = new StructuredPowerScribeOcrImportProvider([
+      {
+        procedureName: 'CT ANGIOGRAM PULMONARY EMBOLUS WWD',
+        examDateTime: null,
+        modifiedDateTime: null,
+        rawProcedureText: 'CT ANGIOGRAM PULMONARY EMBOLUS WWD',
+        rawExamDateText: '24M 1:14 PM',
+        rawModifiedText: '21426 1:17 PM',
+        confidence: 0.82,
+        needsReview: false,
+        reviewReason: null,
+      },
+    ], '2026-07-14');
+
+    const [study] = await provider.importStudies();
+    expect(study.examDateTime).toBe('2026-07-14T13:14:00');
+    expect(study.modifiedDateTime).toBe('2026-07-14T13:17:00');
+    expect(study.parserNeedsReview).toBe(true);
+    expect(study.parserReviewReason).toContain('paired the visible time');
+  });
+
   test('maps row-specific exam and modified date-times from separate columns', async () => {
     const provider = new StructuredPowerScribeOcrImportProvider([
       {

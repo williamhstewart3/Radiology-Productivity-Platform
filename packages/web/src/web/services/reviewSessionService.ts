@@ -160,8 +160,7 @@ export async function loadActiveReviewSession(profileId: string | null): Promise
 
 /**
  * Commits every row that's already ready (auto-approved / nothing left to
- * decide) the moment the batch has zero rows needing review — not only as
- * a side effect of the user resolving the last row that does.
+ * decide) immediately, even when another row in the batch still needs review.
  *
  * Previously this sweep lived exclusively in resolveInboxRows, which only
  * runs when the user accepts or skips a card. A batch where every row
@@ -180,9 +179,6 @@ async function sweepQuietRows(input: {
   rows: PipelineReviewRow[];
   timeline: TimelineEvent[];
 }): Promise<{ rows: PipelineReviewRow[]; timeline: TimelineEvent[] }> {
-  const stillNeedsAttention = input.rows.some((row) => row.included && row.needsReview);
-  if (stillNeedsAttention) return { rows: input.rows, timeline: input.timeline };
-
   const quietRows = input.rows.filter(isReviewRowSaveEligible);
   if (quietRows.length === 0) return { rows: input.rows, timeline: input.timeline };
 
@@ -192,6 +188,10 @@ async function sweepQuietRows(input: {
     rows: input.rows.filter((row) => !quietIds.has(row.tempId)),
     timeline: [...input.timeline, createTimelineEvent(`Auto-counted ${quietRows.length} quiet ${quietRows.length === 1 ? 'study' : 'studies'}`)],
   };
+}
+
+export function __testQuietRowsForImmediateCommit(rows: PipelineReviewRow[]): PipelineReviewRow[] {
+  return rows.filter(isReviewRowSaveEligible);
 }
 
 export async function persistActiveReviewSession(input: {

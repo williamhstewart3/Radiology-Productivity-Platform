@@ -73,14 +73,20 @@ export function confidencePhrase(method: MatchMethod | undefined, hasCandidate: 
 }
 
 export function approveInboxRow(row: PipelineReviewRow): PipelineReviewRow | null {
-  const selectedIndex = row.selectedCandidateIndex ?? row.selectedCandidateIndices?.[0] ?? (row.candidates[0] ? 0 : null);
+  const selectedIndices = (row.selectedCandidateIndices?.length
+    ? row.selectedCandidateIndices
+    : row.selectedCandidateIndex == null
+      ? (row.candidates[0] ? [0] : [])
+      : [row.selectedCandidateIndex])
+    .filter((index) => Boolean(row.candidates[index]));
+  const selectedIndex = selectedIndices[0] ?? null;
   if (selectedIndex == null || !row.candidates[selectedIndex]) return null;
   return {
     ...row,
     included: true,
     autoSkipped: false,
     selectedCandidateIndex: selectedIndex,
-    selectedCandidateIndices: [selectedIndex],
+    selectedCandidateIndices: selectedIndices,
     needsReview: false,
     approvalStatus: row.duplicateStatus === 'possible' ? 'approved_as_new' : 'manual_approved',
   };
@@ -197,11 +203,82 @@ export function mergeInboxCandidateSelection(row: PipelineReviewRow, candidates:
   };
 }
 
+const SPLIT_REVIEW_REASON = 'Split from a merged OCR row; verify this study and its timestamps';
+
+/**
+ * Turns an explicitly selected multi-CPT row into one pending Inbox row per
+ * CPT. The original OCR line is retained only as parser evidence; it is not
+ * learned as an alias for either child study. Ambiguous accession and row
+ * identifiers are cleared because they cannot be paired safely after a split.
+ */
+export function splitInboxRowByCandidates(
+  row: PipelineReviewRow,
+  candidates: MatchCandidate[],
+  createId: () => string = () => crypto.randomUUID(),
+): PipelineReviewRow[] {
+  const uniqueCandidates = [...new Map(candidates.map((candidate) => [candidateKey(candidate), candidate])).values()];
+  if (uniqueCandidates.length < 2) return [row];
+  const originalRawLine = row.source.parserRawLine ?? row.source.examTitle;
+
+  return uniqueCandidates.map((candidate) => ({
+    ...row,
+    tempId: createId(),
+    source: {
+      ...row.source,
+      examTitle: candidate.description,
+      procedureName: candidate.description,
+      canonicalExam: candidate.description,
+      cpt: candidate.cptCode,
+      workRvu: candidate.workRvu,
+      modality: candidate.modality,
+      accessionNumber: null,
+      rowIndex: null,
+      cleanedExamName: candidate.description,
+      cleanedText: candidate.description,
+      parserRawLine: originalRawLine,
+      parserNeedsReview: true,
+      parserReviewReason: SPLIT_REVIEW_REASON,
+    },
+    candidates: [candidate],
+    selectedCandidateIndex: 0,
+    selectedCandidateIndices: [0],
+    displayTitle: candidate.description,
+    needsReview: true,
+    duplicateStatus: null,
+    duplicateExistingLogId: null,
+    duplicateReason: null,
+    included: true,
+    autoSkipped: false,
+    autoApproved: false,
+    autoApprovalLevel: null,
+    approvalStatus: 'pending',
+    reviewReason: SPLIT_REVIEW_REASON,
+    notes: 'Split from merged OCR row',
+  }));
+}
+
 export async function applyInboxCandidateSelection(profileId: string | null, rowId: string, candidates: MatchCandidate[]): Promise<void> {
   const session = await loadActiveReviewSession(profileId);
   if (!session) return;
   const rows = session.rows.map((row) => row.tempId === rowId ? mergeInboxCandidateSelection(row, candidates) : row);
   await persistActiveReviewSession({ ...session, profileId, rows });
+}
+
+export async function applyInboxRowSplit(profileId: string | null, rowId: string, candidates: MatchCandidate[]): Promise<number> {
+  const session = await loadActiveReviewSession(profileId);
+  if (!session) return 0;
+  const target = session.rows.find((row) => row.tempId === rowId);
+  if (!target) return 0;
+  const splitRows = splitInboxRowByCandidates(target, candidates);
+  if (splitRows.length < 2) return 0;
+  const rows = session.rows.flatMap((row) => row.tempId === rowId ? splitRows : [row]);
+  await persistActiveReviewSession({
+    ...session,
+    profileId,
+    rows,
+    timeline: [...session.timeline, createTimelineEvent(`Split one merged OCR row into ${splitRows.length} studies`)],
+  });
+  return splitRows.length;
 }
 
 export interface ExistingStudyTouchPatch {

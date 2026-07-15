@@ -84,6 +84,14 @@ export function getOrbitCmeSeedMappings(): OrbitCmeSeedMapping[] {
 }
 
 let orbitCmeSpacelessIndex: Map<string, OrbitCmeSeedMapping> | null = null;
+let orbitCmeSemanticIndex: Map<string, OrbitCmeSeedMapping | null> | null = null;
+
+export function orbitCmeSemanticTitleKey(value: string): string {
+  return normalizeRadiologyDescription(value)
+    .replace(/\b(?:XR|X RAY|RADIOGRAPH|CTA|CT|MRA|MRI|MR|US|U S|ULTRASOUND|SONOGRAM|NM|PET|MAMMO|FLUORO)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 function getOrbitCmeSpacelessIndex(): Map<string, OrbitCmeSeedMapping> {
   if (!orbitCmeSpacelessIndex) {
@@ -94,10 +102,25 @@ function getOrbitCmeSpacelessIndex(): Map<string, OrbitCmeSeedMapping> {
   return orbitCmeSpacelessIndex;
 }
 
+function getOrbitCmeSemanticIndex(): Map<string, OrbitCmeSeedMapping | null> {
+  if (!orbitCmeSemanticIndex) {
+    orbitCmeSemanticIndex = new Map();
+    for (const row of getOrbitCmeSeedMappings()) {
+      const key = orbitCmeSemanticTitleKey(row.studyName);
+      if (!key) continue;
+      const existing = orbitCmeSemanticIndex.get(key);
+      if (existing === undefined) orbitCmeSemanticIndex.set(key, row);
+      else if (existing?.cptCode !== row.cptCode) orbitCmeSemanticIndex.set(key, null);
+    }
+  }
+  return orbitCmeSemanticIndex;
+}
+
 export function findOrbitCmeSeedMapping(rawInput: string): OrbitCmeSeedMapping | null {
   const normalized = normalizeRadiologyDescription(rawInput);
   return getOrbitCmeSeedMappings().find((row) => row.normalizedKey === normalized) ??
     getOrbitCmeSpacelessIndex().get(spacelessKey(rawInput)) ??
+    getOrbitCmeSemanticIndex().get(orbitCmeSemanticTitleKey(rawInput)) ??
     null;
 }
 

@@ -255,6 +255,21 @@ export function parseDateTimeFromOcr(text: string): ParsedDateTime | null {
   return null;
 }
 
+/**
+ * Recovers a visible time when OCR damaged only the date token. The supplied
+ * date must come from the selected reading date or the other date column, and
+ * callers must keep the row in review because the date was not fully read.
+ */
+export function parseVisibleTimeWithFallbackDate(text: string, fallbackDate: string): ParsedDateTime | null {
+  const dateMatch = fallbackDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const timeMatch = text.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)\b/i);
+  if (!dateMatch || !timeMatch) return null;
+  const [, year, month, day] = dateMatch;
+  const [, hour, minute, ampm] = timeMatch;
+  const parsed = buildUsDateTime(month, day, year, hour, minute, ampm);
+  return parsed ? { ...parsed, confidence: 0.55, matchedPattern: 'TIME_WITH_FALLBACK_DATE' } : null;
+}
+
 function overlapsExisting(match: ParsedDateTimeMatch, matches: ParsedDateTimeMatch[]): boolean {
   return matches.some((existing) => match.index < existing.endIndex && match.endIndex > existing.index);
 }

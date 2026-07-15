@@ -97,9 +97,11 @@ function rateText(metrics: DailyPaceMetrics): string {
 
 interface MiniPaceWindowProps {
   embedded?: boolean;
+  targetWindow?: Window;
+  onNavigate?: (path: string) => void;
 }
 
-export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
+export function MiniPaceWindow({ embedded = false, targetWindow, onNavigate }: MiniPaceWindowProps) {
   const today = todayDateString();
   const { activeProfile } = useProfile();
   const profileId = activeProfile?.id ?? null;
@@ -152,8 +154,9 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
   }, [recalculate]);
 
   useEffect(() => {
-    document.title = metrics ? `${metrics.currentRvu.toFixed(1)} / ${metrics.dailyGoal} wRVU` : 'wRVU Pace';
-  }, [metrics]);
+    const targetDocument = targetWindow?.document ?? document;
+    targetDocument.title = metrics ? `${metrics.currentRvu.toFixed(1)} / ${metrics.dailyGoal} wRVU` : 'wRVU Pace';
+  }, [metrics, targetWindow]);
 
   const recentStudies = useMemo(
     () => [...todayLogs]
@@ -190,9 +193,13 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
   }, [recentStudiesKey, reducedMotion]);
 
   const goTo = useCallback((path: string) => {
+    if (onNavigate) {
+      onNavigate(path);
+      return;
+    }
     window.opener?.location.assign(path);
     window.focus();
-  }, []);
+  }, [onNavigate]);
 
   if (!metrics || todayLogs === undefined) {
     return (

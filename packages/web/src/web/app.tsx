@@ -9,6 +9,7 @@ import { useOrg } from './hooks/useOrg';
 import { db, ensureUserSettings } from './db/database';
 import { Today } from './pages/Today';
 import { MiniPaceWindow } from './components/MiniPaceWindow';
+import { MiniPaceWindowProvider } from './components/MiniPaceWindowProvider';
 import { ProfileSwitcherButton } from './components/ProfileSwitcherSheet';
 import { CommandPalette } from './components/CommandPalette';
 import { BaptistLogoLockup, BaptistLogoMark } from './components/BaptistLogo';
@@ -404,6 +405,7 @@ export default function App() {
 
   return (
     <OrgProvider>
+      <MiniPaceWindowProvider>
       {isMiniWindow ? (
         <div className="min-h-screen" style={{ background: 'var(--theme-bg-deep)' }}>
           <MiniPaceWindow />
@@ -420,6 +422,7 @@ export default function App() {
           </Route>
         </Switch>
       )}
+      </MiniPaceWindowProvider>
     </OrgProvider>
   );
 }

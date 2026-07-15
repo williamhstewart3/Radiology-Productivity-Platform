@@ -105,6 +105,8 @@ const SEARCH_EXPANSIONS: Record<string, string[]> = {
   'rectal mri': ['mri pelvis rectum', 'pelvis mri', '72195', '72197'],
   'thyroid ultrasound': ['ultrasound thyroid', 'soft tissue head neck', '76536'],
   'breast biopsy': ['mammography biopsy', 'breast bx', 'stereotactic biopsy', 'ultrasound breast biopsy', '19081', '19083'],
+  'mri wrist': ['mri joint upr extrem', '73221', '73222', '73223'],
+  'mr wrist': ['mri joint upr extrem', '73221', '73222', '73223'],
 };
 
 function codeInRegion(cptCode: string, region: BodyRegion): boolean {

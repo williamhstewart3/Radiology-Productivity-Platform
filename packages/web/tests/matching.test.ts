@@ -2,11 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import type { CptRvuRow, ExamDictionaryEntry, Modality } from '../src/web/types';
 import type { ImportedStudy } from '../src/web/types/importProvider';
 import { __testInstitutionMappingReviewReason, __testProcedureNameFor } from '../src/web/pipeline/importPipeline';
+import { findOrbitCmeSeedMapping } from '../src/web/data/orbitCmeSeedMappings';
 import {
   __testAutoMatchRowsFor,
   __testDeterministicCptCodesFor,
   __testHasClinicallyMeaningfulInstitutionDifference,
   __testParseModalityFirst,
+  __testRankCandidatesBySourcePriority,
   __testShouldSuppressMergedProcedureMatching,
   resolveInstitutionProcedure,
 } from '../src/web/utils/matching';
@@ -74,12 +76,96 @@ describe('modality-first CPT matching', () => {
       .toBe('XR WRIST RIGHT 3 VIEWS');
   });
 
+  test('keeps anatomy and protocol words that legitimately precede the modality token', () => {
+    expect(__testParseModalityFirst('CAROTID DUPLEX US BILATERAL')).toMatchObject({
+      lane: 'US',
+      cleanedProcedure: 'CAROTID DUPLEX US BILATERAL',
+    });
+    expect(__testParseModalityFirst('OB US LIMITED')).toMatchObject({
+      lane: 'US',
+      cleanedProcedure: 'OB US LIMITED',
+    });
+    expect(__testParseModalityFirst('SPECT/CT SINGLE AREA')).toMatchObject({
+      lane: 'NM_PET',
+      cleanedProcedure: 'SPECT/CT SINGLE AREA',
+    });
+  });
+
+  test('keeps Orbit-only titles in the Orbit fallback tier', () => {
+    expect(__testDeterministicCptCodesFor('XR Chest 3 Views')).toEqual([]);
+    expect(__testDeterministicCptCodesFor('XR Ribs Bilateral 3 Views')).toEqual([]);
+    expect(__testDeterministicCptCodesFor('XR T-Spine 4+ Views')).toEqual([]);
+    expect(findOrbitCmeSeedMapping('XR Chest 3 Views')?.cptCode).toBe('71047');
+    expect(findOrbitCmeSeedMapping('XR Ribs Bilateral 3 Views')?.cptCode).toBe('71110');
+    expect(findOrbitCmeSeedMapping('XR T-Spine 4+ Views')?.cptCode).toBe('72074');
+  });
+
+  test('ranks institution, learned title, Orbit, then reference data regardless of confidence', () => {
+    const candidate = (cptCode: string, confidence: number, source: string, method: 'alias_match' | 'radiology_match' = 'radiology_match') => ({
+      cptCode,
+      modifier: '26',
+      description: source,
+      workRvu: 1,
+      modality: 'XR' as Modality,
+      confidence,
+      method,
+      explanation: { rawText: 'XR LOCAL TITLE', normalizedText: 'xr local title', source, detail: source },
+    });
+    const ranked = __testRankCandidatesBySourcePriority([
+      candidate('70001', 0.99, 'ACR-active CMS fuzzy match'),
+      candidate('70002', 0.995, 'deterministic protocol mapping'),
+      candidate('70003', 0.93, 'Orbit CME seed mapping'),
+      candidate('70004', 0.95, 'learned alias', 'alias_match'),
+      candidate('70005', 0.985, 'Institution procedure dictionary'),
+    ]);
+
+    expect(ranked.map((item) => item.cptCode)).toEqual(['70005', '70004', '70003', '70002', '70001']);
+  });
+
+  test('deduplication retains the institution mapping when Orbit lists the same CPT', () => {
+    const base = {
+      cptCode: '71045',
+      modifier: '26',
+      description: 'XR chest portable',
+      workRvu: 1,
+      modality: 'XR' as Modality,
+      method: 'radiology_match' as const,
+    };
+    const ranked = __testRankCandidatesBySourcePriority([
+      { ...base, confidence: 0.93, explanation: { rawText: 'XR CHEST PORTABLE', normalizedText: 'xr chest portable', source: 'Orbit CME seed mapping', detail: 'Orbit' } },
+      { ...base, confidence: 0.985, explanation: { rawText: 'XR CHEST PORTABLE', normalizedText: 'xr chest portable', source: 'Institution procedure dictionary', detail: 'institution' } },
+    ]);
+
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0].explanation?.source).toBe('Institution procedure dictionary');
+  });
+
   test('normalizes XR views and deterministic plain film aliases', () => {
     expect(__testParseModalityFirst('XR CHEST PA AND LATERAL').cleanedProcedure).toBe('XR CHEST 2 VIEWS');
     expect(__testDeterministicCptCodesFor('XR CHEST PORTABLE')).toEqual(['71045']);
     expect(__testDeterministicCptCodesFor('XR CHEST PA AND LATERAL')).toEqual(['71046']);
     expect(__testDeterministicCptCodesFor('XR ABDOMEN AP')).toEqual(['74018']);
     expect(__testDeterministicCptCodesFor('XR WRIST RIGHT PA LATERAL AND OBLIQUE')).toEqual(['73110']);
+    expect(__testDeterministicCptCodesFor('XR TIBIA FIBULA LEFT AP AND LATERAL')).toEqual(['73590']);
+  });
+
+  test('repairs high-confidence OCR substitutions before modality routing', () => {
+    expect(__testParseModalityFirst('KR TIBIA FIBULA LEFT AP AND LATERAL')).toMatchObject({
+      lane: 'XR',
+      cleanedProcedure: 'XR TIBIA FIBULA LEFT 2 VIEWS',
+    });
+    expect(__testDeterministicCptCodesFor('KRTIBIA FIBULA LEFT AP AND LATERAL')).toEqual(['73590']);
+    expect(__testDeterministicCptCodesFor('CT ABDOMEN AND FELVIS W CONTRAST')).toEqual(['74177']);
+  });
+
+  test('keeps tibia/fibula out of the heel X-ray lane', () => {
+    const rows = [
+      cptRow('73590', 'Radiologic examination, tibia and fibula; 2 views', 'XR'),
+      cptRow('73650', 'Radiologic examination, calcaneus; minimum 2 views', 'XR'),
+    ];
+
+    const candidates = __testAutoMatchRowsFor('XR TIBIA FIBULA LEFT AP AND LATERAL', rows);
+    expect(candidates.map((row) => row.cptCode)).toEqual(['73590']);
   });
 
   test.each([
@@ -143,6 +229,13 @@ describe('modality-first CPT matching', () => {
 
   test('maps CT renal stone protocol deterministically', () => {
     expect(__testDeterministicCptCodesFor('CT RENAL STONE PROTOCOL')).toEqual(['74176']);
+  });
+
+  test('maps MRI wrist contrast variants and bilateral leg venous ultrasound deterministically', () => {
+    expect(__testDeterministicCptCodesFor('MRI WRIST WO CONTRAST')).toEqual(['73221']);
+    expect(__testDeterministicCptCodesFor('MRI WRIST W CONTRAST')).toEqual(['73222']);
+    expect(__testDeterministicCptCodesFor('MRI WRIST W WO CONTRAST')).toEqual(['73223']);
+    expect(__testDeterministicCptCodesFor('US LE VENOUS LOWER EXTREMITY BILATERAL')).toEqual(['93970']);
   });
 
   test('import pipeline supplies procedureName without exam or read dates', () => {
@@ -213,6 +306,55 @@ describe('modality-first CPT matching', () => {
     expect(__testInstitutionMappingReviewReason(exactWithExtra)).toBe('Multiple possible CPT matches');
   });
 
+  test('an Orbit comparison never displaces or blocks an exact institution mapping', () => {
+    const institution = {
+      cptCode: '73590',
+      modifier: '26',
+      description: 'XR tibia and fibula',
+      workRvu: 1,
+      modality: 'XR' as Modality,
+      confidence: 0.985,
+      method: 'radiology_match' as const,
+      explanation: { rawText: 'XR LOCAL LEG', normalizedText: 'xr local leg', source: 'Institution procedure dictionary', detail: 'institution exact' },
+    };
+    const orbitComparison = {
+      ...institution,
+      cptCode: '73650',
+      description: 'XR heel',
+      confidence: 0.93,
+      explanation: { ...institution.explanation, source: 'Orbit CME seed mapping', detail: 'Orbit comparison' },
+    };
+
+    expect(__testInstitutionMappingReviewReason([institution, orbitComparison])).toBeNull();
+  });
+
+  test('an exact deterministic reference match ignores weaker fuzzy alternatives', () => {
+    const candidates = [
+      {
+        cptCode: '73590',
+        modifier: '26',
+        description: 'XR tibia and fibula 2 views',
+        workRvu: 1,
+        modality: 'XR' as Modality,
+        confidence: 0.995,
+        method: 'radiology_match' as const,
+        explanation: { rawText: 'XR TIBIA FIBULA LEFT AP AND LATERAL', normalizedText: 'xr tibia fibula left ap and lateral', source: 'deterministic protocol mapping', detail: 'exact reference' },
+      },
+      {
+        cptCode: '73650',
+        modifier: '26',
+        description: 'XR heel',
+        workRvu: 1,
+        modality: 'XR' as Modality,
+        confidence: 0.84,
+        method: 'radiology_match' as const,
+        explanation: { rawText: 'XR TIBIA FIBULA LEFT AP AND LATERAL', normalizedText: 'xr tibia fibula left ap and lateral', source: 'ACR-active CMS fuzzy match', detail: 'weaker fuzzy result' },
+      },
+    ];
+
+    expect(__testInstitutionMappingReviewReason(candidates)).toBeNull();
+  });
+
   test('institution dictionary OCR corrections allow spelling and spacing repairs', () => {
     expect(__testHasClinicallyMeaningfulInstitutionDifference('XRCHESTPORTABLE', 'XR CHEST PORTABLE')).toBe(false);
     expect(__testHasClinicallyMeaningfulInstitutionDifference('XRCHESTFORTABLE', 'XR CHEST PORTABLE')).toBe(false);
@@ -264,6 +406,39 @@ describe('modality-first CPT matching', () => {
 
     expect(result.matchType).toBe('ambiguous_institution_match');
     expect(result.candidates.length).toBeGreaterThan(1);
+  });
+
+  test('resolves a unique ellipsis-truncated institutional title as exact', () => {
+    const entries = [
+      institutionEntry('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST LESION', ['19081'], 'MAMMO'),
+      institutionEntry('MAMMO DIAGNOSTIC BILATERAL', ['77066'], 'MAMMO'),
+    ];
+    const result = resolveInstitutionProcedure('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST…', entries);
+
+    expect(result.matchType).toBe('exact_institution_match');
+    expect(result.candidates[0]?.procedureType).toBe('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST LESION');
+    expect(result.candidates[0]?.truncatedPrefix).toBe(true);
+  });
+
+  test('keeps a shared truncated prefix ambiguous instead of fuzzy guessing', () => {
+    const entries = [
+      institutionEntry('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST LESION', ['19081'], 'MAMMO'),
+      institutionEntry('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST AND EACH ADDITIONAL LESION', ['19081'], 'MAMMO'),
+    ];
+    const result = resolveInstitutionProcedure('MAMMO BREAST BIOPSY DEVICE PLACE STEREOTACTIC 1ST…', entries);
+
+    expect(result.matchType).toBe('ambiguous_institution_match');
+    expect(result.candidates).toHaveLength(2);
+  });
+
+  test('resolves an institutional display name even before it has a CPT mapping', () => {
+    const result = resolveInstitutionProcedure('CT ANGIOGRAM CORONARY', [
+      institutionEntry('CT ANGIOGRAM CORONARY', [], 'CT'),
+    ]);
+
+    expect(result.matchType).toBe('exact_institution_match');
+    expect(result.candidates[0]?.procedureType).toBe('CT ANGIOGRAM CORONARY');
+    expect(result.candidates[0]?.entry.cptCodes).toEqual([]);
   });
 
   test('institution dictionary near matches do not cross clinical safety boundaries', () => {
