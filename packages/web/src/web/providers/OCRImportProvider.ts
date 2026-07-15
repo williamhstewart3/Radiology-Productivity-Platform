@@ -426,14 +426,26 @@ function applyColumnDateOverrides(row: ParsedLine, debugRow: ReassembledColumnRo
   if (!debugRow) return row;
   const parsedExam = parseDateTimeFromOcr(debugRow.rawExamDateColumnText);
   const parsedModified = parseDateTimeFromOcr(debugRow.rawModifiedDateColumnText);
-  const knownDate = parsedExam?.studyDate ?? parsedModified?.studyDate ?? row.examDate ?? row.modifiedDate ?? fallbackStudyDate;
-  const inferredExam = parsedExam?.studyDateTime ? null : parseVisibleTimeWithFallbackDate(debugRow.rawExamDateColumnText, knownDate);
-  const inferredModified = parsedModified?.studyDateTime ? null : parseVisibleTimeWithFallbackDate(debugRow.rawModifiedDateColumnText, knownDate);
+  const examFallbackDate = parsedExam?.studyDate ?? row.examDate ?? fallbackStudyDate;
+  const inferredExam = parsedExam?.studyDateTime ? null : parseVisibleTimeWithFallbackDate(debugRow.rawExamDateColumnText, examFallbackDate);
+  const reliableParsedModified = parsedModified && parsedModified.confidence >= 0.8 ? parsedModified : null;
+  const inferredModified = reliableParsedModified?.studyDateTime
+    ? null
+    : parseVisibleTimeWithFallbackDate(debugRow.rawModifiedDateColumnText, fallbackStudyDate);
   const exam = parsedExam?.studyDateTime ? parsedExam : inferredExam;
-  const modified = parsedModified?.studyDateTime ? parsedModified : inferredModified;
+  const modified = reliableParsedModified?.studyDateTime ? reliableParsedModified : inferredModified;
   const recoveredDate = Boolean(inferredExam || inferredModified);
   const examDateTime = exam?.studyDateTime ?? row.examDateTime;
-  const modifiedDateTime = modified?.studyDateTime ?? row.modifiedDateTime;
+  const hasDistinctCombinedModified = Boolean(
+    row.modifiedDateTime &&
+    row.modifiedDateTime !== row.examDateTime,
+  );
+  const modifiedDateTime = modified?.studyDateTime ?? (hasDistinctCombinedModified ? row.modifiedDateTime : null);
+  const modifiedDate = modified?.studyDate ??
+    reliableParsedModified?.studyDate ??
+    (hasDistinctCombinedModified ? row.modifiedDate : null) ??
+    fallbackStudyDate;
+  const assumedModifiedDate = !reliableParsedModified?.studyDate && !hasDistinctCombinedModified;
 
   return {
     ...row,
@@ -445,13 +457,17 @@ function applyColumnDateOverrides(row: ParsedLine, debugRow: ReassembledColumnRo
     examDateTime,
     studyDate: exam?.studyDate ?? row.studyDate,
     studyDateTime: examDateTime,
-    modifiedDate: modified?.studyDate ?? row.modifiedDate,
-    modifiedTime: modified?.studyTime ?? row.modifiedTime,
+    modifiedDate,
+    modifiedTime: modified?.studyTime ?? (hasDistinctCombinedModified ? row.modifiedTime : null),
     modifiedDateTime,
     dateTimeConfidence: Math.max(row.dateTimeConfidence, exam?.confidence ?? 0, modified?.confidence ?? 0),
-    needsReview: row.needsReview || recoveredDate,
-    reviewReason: recoveredDate
-      ? [row.reviewReason, 'Date token was unclear; paired the visible time with the selected reading date'].filter(Boolean).join(' | ')
+    needsReview: row.needsReview || recoveredDate || assumedModifiedDate,
+    reviewReason: recoveredDate || assumedModifiedDate
+      ? [
+          row.reviewReason,
+          recoveredDate ? 'Date token was unclear; paired the visible time with the selected reading date' : null,
+          assumedModifiedDate ? 'Modified date was unreadable; used the selected upload date' : null,
+        ].filter(Boolean).join(' | ')
       : row.reviewReason,
   };
 }
@@ -714,7 +730,7 @@ export class OCRImportProvider implements ImportProvider {
       const recoveredProcedure = procedureName !== p.procedureName;
       const recoveryNeedsReview = recoveredProcedure && !isAuthoritativeOrbitRecovery(p);
       const productivityDate = p.modifiedDate ?? this.studyDate;
-      const missingModifiedDate = !p.modifiedDateTime;
+      const missingModifiedTime = !p.modifiedDateTime;
       const powerScribeStatus = detectedStatuses[index] ?? 'unknown';
       const unsignedStatus = powerScribeStatus === 'arrow';
       const grammarFailure = powerScribeRowGrammarFailure({ ...p, procedureName });
@@ -777,8 +793,8 @@ export class OCRImportProvider implements ImportProvider {
         parserNeedsReview: p.needsReview || Boolean(grammarFailure) || recoveryNeedsReview || unsignedStatus,
         parserReviewReason: unsignedStatus
           ? [p.reviewReason, grammarFailure, recoveryNeedsReview ? 'Procedure title recovered before numeric date spillover' : null, 'Not signed yet — count it?'].filter(Boolean).join(' | ')
-          : missingModifiedDate
-          ? [p.reviewReason, grammarFailure, recoveryNeedsReview ? 'Procedure title recovered before numeric date spillover' : null, 'Productivity date will use selected log date unless corrected.'].filter(Boolean).join(' | ')
+          : missingModifiedTime
+          ? [p.reviewReason, grammarFailure, recoveryNeedsReview ? 'Procedure title recovered before numeric date spillover' : null, 'Modified date uses the selected upload date; Modified time was not readable.'].filter(Boolean).join(' | ')
           : [p.reviewReason, grammarFailure, recoveryNeedsReview ? 'Procedure title recovered before numeric date spillover' : null].filter(Boolean).join(' | ') || null,
         parserRawLine: p.rawText,
         ocrConfidence,

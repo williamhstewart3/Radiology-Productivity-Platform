@@ -191,6 +191,49 @@ describe('PowerScribe column OCR row reassembly', () => {
     expect(powerScribeRowGrammarFailure(result)).toBeNull();
   });
 
+  test('assumes the selected upload date when the Modified column is missing', () => {
+    const [parsed] = parseOcrLines(['XR ABDOMEN AP 7/1/2026 8:28 PM']);
+    const result = __testApplyColumnDateOverrides(parsed, {
+      line: parsed.rawText,
+      rawProcedureColumnText: 'XR ABDOMEN AP',
+      rawExamDateColumnText: '7/1/2026 8:28 PM',
+      rawModifiedDateColumnText: '',
+    }, '2026-07-09');
+
+    expect(result.examDateTime).toBe('2026-07-01T20:28:00');
+    expect(result.modifiedDate).toBe('2026-07-09');
+    expect(result.modifiedDateTime).toBeNull();
+    expect(result.modifiedTime).toBeNull();
+    expect(result.reviewReason).toContain('used the selected upload date');
+  });
+
+  test('pairs a readable Modified time with the selected upload date when its date is damaged', () => {
+    const [parsed] = parseOcrLines(['CT HEAD WO CONTRAST 7/1/2026 8:28 PM']);
+    const result = __testApplyColumnDateOverrides(parsed, {
+      line: parsed.rawText,
+      rawProcedureColumnText: 'CT HEAD WO CONTRAST',
+      rawExamDateColumnText: '7/1/2026 8:28 PM',
+      rawModifiedDateColumnText: '24M 1:17 PM',
+    }, '2026-07-09');
+
+    expect(result.modifiedDate).toBe('2026-07-09');
+    expect(result.modifiedDateTime).toBe('2026-07-09T13:17:00');
+    expect(result.modifiedTime).toBe('13:17');
+  });
+
+  test('keeps a clearly read Modified date instead of replacing it with the selected upload date', () => {
+    const [parsed] = parseOcrLines(['XR CHEST PORTABLE 7/1/2026 5:18 PM 7/2/2026 7:59 AM']);
+    const result = __testApplyColumnDateOverrides(parsed, {
+      line: parsed.rawText,
+      rawProcedureColumnText: 'XR CHEST PORTABLE',
+      rawExamDateColumnText: '7/1/2026 5:18 PM',
+      rawModifiedDateColumnText: '7/2/2026 7:59 AM',
+    }, '2026-07-09');
+
+    expect(result.modifiedDate).toBe('2026-07-02');
+    expect(result.modifiedDateTime).toBe('2026-07-02T07:59:00');
+  });
+
   test('pairs legible times with the selected date when compact date tokens are damaged', () => {
     const [parsed] = parseOcrLines(['CT ANGIOGRAM PULMONARY EMBOLUS WWD']);
     const result = __testApplyColumnDateOverrides(parsed, {
