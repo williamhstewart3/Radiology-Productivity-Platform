@@ -135,8 +135,19 @@ function batchDuplicateKey(candidate: StudyCandidate): string | null {
   return isStrongDuplicateFingerprint(fingerprint) ? fingerprint : null;
 }
 
+function batchVisibleRowKey(candidate: StudyCandidate): string | null {
+  const normalizedExam = normalizeExamText(candidate.examNameRaw);
+  return candidate.rowIndex && normalizedExam
+    ? `${candidate.rowIndex}|${normalizedExam}`
+    : null;
+}
+
 export function __testBatchDuplicateKey(candidate: StudyCandidate): string | null {
   return batchDuplicateKey(candidate);
+}
+
+export function __testBatchVisibleRowKey(candidate: StudyCandidate): string | null {
+  return batchVisibleRowKey(candidate);
 }
 
 /** Converts an ISO datetime to "YYYY-MM-DD|HH:MM" minute bucket. */
@@ -283,6 +294,22 @@ export async function checkOneDuplicate(
 
     const normLog = normalizeExamText(log.examNameRaw);
     if (normCandidate && normLog === normCandidate) {
+      const sameVisibleRow = Boolean(
+        candidate.rowIndex &&
+        log.rowIndex &&
+        candidate.rowIndex === log.rowIndex,
+      );
+      const sameVisibleTimestamp =
+        sameMinute(candidate.modifiedDateTime ?? candidate.studyDateTime, log.studyDateTime) ||
+        sameMinute(candidate.performedDateTime ?? null, log.examDateTime ?? null);
+      if (sameVisibleRow && sameVisibleTimestamp) {
+        return {
+          confidence: 'exact',
+          existingLog: log,
+          reason: 'Same exam title, visible row number, and timestamp',
+        };
+      }
+
       if (sameMinute(candidate.studyDateTime, log.studyDateTime)) {
         return {
           confidence: 'possible',
@@ -394,6 +421,7 @@ export async function checkBatchDuplicates(
   const results: DuplicateCheckResult[] = [];
   // Track fingerprints seen so far in THIS batch to catch within-batch dupes
   const batchSeen = new Map<string, StudyCandidate>();
+  const batchVisibleRows = new Map<string, StudyCandidate>();
 
   for (const candidate of candidates) {
     const fp = buildFingerprint(
@@ -410,9 +438,12 @@ export async function checkBatchDuplicates(
       },
     );
     const batchKey = isStrongDuplicateFingerprint(fp) ? fp : null;
+    const visibleRowKey = batchVisibleRowKey(candidate);
 
     // Within-batch duplicate check
-    const batchPrior = batchKey ? batchSeen.get(batchKey) : null;
+    const fingerprintPrior = batchKey ? batchSeen.get(batchKey) : null;
+    const visibleRowPrior = visibleRowKey ? batchVisibleRows.get(visibleRowKey) : null;
+    const batchPrior = fingerprintPrior ?? visibleRowPrior;
     if (batchPrior) {
       results.push({
         candidate,
@@ -445,7 +476,9 @@ export async function checkBatchDuplicates(
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           } as StudyLog,
-          reason: 'Duplicate within this import batch',
+          reason: fingerprintPrior
+            ? 'Duplicate within this import batch'
+            : 'Same visible PowerScribe row repeated within this import batch',
         },
       });
       continue;
@@ -453,6 +486,9 @@ export async function checkBatchDuplicates(
 
     if (batchKey) {
       batchSeen.set(batchKey, candidate);
+    }
+    if (visibleRowKey) {
+      batchVisibleRows.set(visibleRowKey, candidate);
     }
 
     const candidateLogDate = candidate.logDate || logDate;

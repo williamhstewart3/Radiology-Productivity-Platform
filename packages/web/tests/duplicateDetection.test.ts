@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   __testBatchDuplicateKey,
+  __testBatchVisibleRowKey,
   checkOneDuplicate,
   isStrongDuplicateFingerprint,
   type StudyCandidate,
@@ -87,6 +88,44 @@ describe('strict duplicate detection', () => {
 
     expect(match?.confidence).toBe('possible');
     expect(__testBatchDuplicateKey(candidate({ studyDateTime: null, performedDateTime: null, modifiedDateTime: null }))).toBeNull();
+  });
+
+  test('visible row number plus one matching timestamp makes a recaptured row exact', async () => {
+    const match = await checkOneDuplicate(
+      candidate({
+        rowIndex: '17',
+        performedDateTime: '2026-07-07T08:19:00',
+        modifiedDateTime: null,
+        studyDateTime: null,
+      }),
+      [log({
+        rowIndex: '17',
+        examDateTime: '2026-07-07T08:19:00',
+        studyDateTime: '2026-07-07T09:00:00',
+      })],
+    );
+
+    expect(match?.confidence).toBe('exact');
+    expect(match?.reason).toContain('visible row number');
+  });
+
+  test('visible row number alone remains only a possible duplicate hint', async () => {
+    const match = await checkOneDuplicate(
+      candidate({ rowIndex: '17', performedDateTime: null, modifiedDateTime: null, studyDateTime: null }),
+      [log({ rowIndex: '17', examDateTime: null, studyDateTime: null })],
+    );
+
+    expect(match?.confidence).toBe('possible');
+  });
+
+  test('uses visible row identity only for the same normalized title inside one batch', () => {
+    const first = candidate({ rowIndex: '17', examNameRaw: 'XR CHEST  PORTABLE', studyDateTime: null });
+    const repeated = candidate({ rowIndex: '17', examNameRaw: 'XR CHEST PORTABLE', studyDateTime: null });
+    const neighboringRow = candidate({ rowIndex: '18', examNameRaw: 'XR CHEST PORTABLE', studyDateTime: null });
+
+    expect(__testBatchVisibleRowKey(first)).toBe(__testBatchVisibleRowKey(repeated));
+    expect(__testBatchVisibleRowKey(first)).not.toBe(__testBatchVisibleRowKey(neighboringRow));
+    expect(__testBatchVisibleRowKey(candidate({ rowIndex: null }))).toBeNull();
   });
 
   test('same accession is exact duplicate', async () => {

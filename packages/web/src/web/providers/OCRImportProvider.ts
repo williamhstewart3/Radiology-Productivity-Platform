@@ -34,7 +34,7 @@ import {
 } from '../utils/imageCrop';
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
 import type { ParsedLine } from '../utils/powerScribeParser';
-import type { OcrPositionedLine, OcrResult } from '../utils/ocrProvider';
+import type { OcrPositionedLine, OcrPositionedWord, OcrResult } from '../utils/ocrProvider';
 
 export interface OCRImportOptions {
   cropBeforeOcr?: boolean;
@@ -206,6 +206,81 @@ function normalizeProcedureColumnText(text: string): string {
     .replace(/[-–—:;,./|\s]+$/g, '')
     .replace(/\s+[ATF]$/i, '')
     .trim();
+}
+
+function visibleRowNumber(text: string): number | null {
+  const match = text.trim().match(/^[#|]?\s*(\d{1,4})[.:)]?$/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/**
+ * Associates the narrow number gutter from the full-image precheck with the
+ * geometric row bands. A sequence check is required before any number is
+ * trusted, which keeps dates and unrelated UI numbers out of row identity.
+ */
+export function detectPowerScribeVisibleRowNumbers(
+  words: OcrPositionedWord[],
+  rowBands: PowerScribeRowBand[],
+  procedureRect: RelativeCropRect,
+  imageWidth: number,
+  imageHeight: number,
+): Array<string | null> {
+  if (rowBands.length < 2 || imageWidth <= 0 || imageHeight <= 0) {
+    return rowBands.map(() => null);
+  }
+
+  const gutterLeft = Math.max(0, procedureRect.x - Math.max(0.035, procedureRect.width * 0.08));
+  const gutterRight = Math.min(1, procedureRect.x + Math.min(0.055, procedureRect.width * 0.16));
+  const candidates = rowBands.map((band) => {
+    const inBand = words
+      .map((word) => {
+        const value = visibleRowNumber(word.text);
+        if (value == null || !word.bbox || word.confidence < 0.3) return null;
+        const centerX = (word.bbox.x0 + word.bbox.x1) / 2 / imageWidth;
+        const centerY = (word.bbox.y0 + word.bbox.y1) / 2 / imageHeight;
+        const width = (word.bbox.x1 - word.bbox.x0) / imageWidth;
+        if (centerX < gutterLeft || centerX > gutterRight || width > 0.04) return null;
+        if (centerY < band.top || centerY > band.bottom) return null;
+        return { value, distance: Math.abs(centerX - procedureRect.x) };
+      })
+      .filter((candidate): candidate is { value: number; distance: number } => candidate != null)
+      .sort((a, b) => a.distance - b.distance);
+    return inBand[0]?.value ?? null;
+  });
+
+  const visible = candidates
+    .map((value, index) => value == null ? null : { value, index })
+    .filter((candidate): candidate is { value: number; index: number } => candidate != null);
+  if (visible.length < 2) return rowBands.map(() => null);
+
+  const modelCounts = new Map<string, number>();
+  for (const candidate of visible) {
+    const ascending = `asc:${candidate.value - candidate.index}`;
+    const descending = `desc:${candidate.value + candidate.index}`;
+    modelCounts.set(ascending, (modelCounts.get(ascending) ?? 0) + 1);
+    modelCounts.set(descending, (modelCounts.get(descending) ?? 0) + 1);
+  }
+  const best = [...modelCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+  if (!best || best[1] < 2 || best[1] / visible.length < 0.75) return rowBands.map(() => null);
+
+  const [direction, rawConstant] = best[0].split(':');
+  const constant = Number(rawConstant);
+  return rowBands.map((_, index) => {
+    const value = direction === 'asc' ? constant + index : constant - index;
+    return value > 0 && value <= 9999 ? String(value) : null;
+  });
+}
+
+export function __testDetectPowerScribeVisibleRowNumbers(
+  words: OcrPositionedWord[],
+  rowBands: PowerScribeRowBand[],
+  procedureRect: RelativeCropRect,
+  imageWidth: number,
+  imageHeight: number,
+): Array<string | null> {
+  return detectPowerScribeVisibleRowNumbers(words, rowBands, procedureRect, imageWidth, imageHeight);
 }
 
 function nearestLine(lines: OcrPositionedLine[], y: number, tolerance: number): OcrPositionedLine | null {
@@ -403,14 +478,17 @@ function textInRowSlot(result: OcrResult, slot: PowerScribeRowSlot): string {
 function reassembleColumnRowsBySlots(
   results: ColumnOcrResults,
   slots: PowerScribeRowSlot[],
+  visibleRowNumbers: Array<string | null> = [],
 ): ReassembledColumnRow[] {
   return slots.map((slot) => {
     const rawProcedureColumnText = textInRowSlot(results.procedure, slot);
     const rawExamDateColumnText = textInRowSlot(results.examDate, slot);
     const rawModifiedDateColumnText = textInRowSlot(results.modifiedDate, slot);
     const combined = [rawProcedureColumnText, rawExamDateColumnText, rawModifiedDateColumnText].filter(Boolean).join(' ').trim();
+    const line = combined || 'UNCLEAR POWERSCRIBE ROW';
+    const visibleRowNumber = visibleRowNumbers[slot.index] ?? null;
     return {
-      line: combined || 'UNCLEAR POWERSCRIBE ROW',
+      line: visibleRowNumber ? `${visibleRowNumber} ${line}` : line,
       rawProcedureColumnText,
       rawExamDateColumnText,
       rawModifiedDateColumnText,
@@ -421,8 +499,9 @@ function reassembleColumnRowsBySlots(
 export function __testReassembleColumnRowsBySlots(
   results: ColumnOcrResults,
   slots: PowerScribeRowSlot[],
+  visibleRowNumbers: Array<string | null> = [],
 ): ReassembledColumnRow[] {
-  return reassembleColumnRowsBySlots(results, slots);
+  return reassembleColumnRowsBySlots(results, slots, visibleRowNumbers);
 }
 
 export function __testApplyColumnDateOverrides(
@@ -533,9 +612,19 @@ export class OCRImportProvider implements ImportProvider {
         columnResults[column.name] = await provider.extractText(column.blob, COLUMN_OCR_PARAMS[column.name]);
       }
     }
+    const procedureRect = preprocessed?.columns.find((column) => column.name === 'procedure')?.rect ?? null;
+    const visibleRowNumbers = preprocessed && procedureRect
+      ? detectPowerScribeVisibleRowNumbers(
+          passOne?.positionedWords ?? [],
+          preprocessed.rowBands,
+          procedureRect,
+          preprocessed.accounting.imageWidth,
+          preprocessed.accounting.imageHeight,
+        )
+      : [];
     let columnDebugRows = columnResults
       ? preprocessed?.rowSlots.length
-        ? reassembleColumnRowsBySlots(columnResults, preprocessed.rowSlots)
+        ? reassembleColumnRowsBySlots(columnResults, preprocessed.rowSlots, visibleRowNumbers)
         : reassembleColumnRowsWithDebug(columnResults)
       : [];
     let rowLines = columnResults ? columnDebugRows.map((row) => row.line) : result?.lines ?? [];

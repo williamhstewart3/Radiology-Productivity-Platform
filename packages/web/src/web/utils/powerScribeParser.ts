@@ -246,7 +246,7 @@ function replaceRanges(text: string, ranges: Array<{ index: number; endIndex: nu
 }
 
 function stripLeftTableJunk(text: string): { rowIndex: string | null; text: string } {
-  let working = stripUiText(text).replace(LEFT_STATUS_PATTERN, '').trim();
+  let working = stripUiText(text).trim();
   let rowIndex: string | null = null;
 
   const rowIndexResult = stripLeadingRowIndex(working);
@@ -254,6 +254,8 @@ function stripLeftTableJunk(text: string): { rowIndex: string | null; text: stri
     rowIndex = rowIndexResult.rowIndex;
     working = rowIndexResult.text;
   }
+
+  working = working.replace(LEFT_STATUS_PATTERN, '').trim();
 
   const modalityStart = firstModalityIndex(working);
   if (modalityStart > 0) {

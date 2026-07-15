@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { __testApplyColumnDateOverrides, __testReassembleColumnRows, __testReassembleColumnRowsBySlots, __testShouldUseUnreadablePowerScribeFallback, classifyPowerScribeStatusText, powerScribeRowGrammarFailure, recoverPowerScribeProcedureName } from '../src/web/providers/OCRImportProvider';
+import { __testApplyColumnDateOverrides, __testDetectPowerScribeVisibleRowNumbers, __testReassembleColumnRows, __testReassembleColumnRowsBySlots, __testShouldUseUnreadablePowerScribeFallback, classifyPowerScribeStatusText, powerScribeRowGrammarFailure, recoverPowerScribeProcedureName } from '../src/web/providers/OCRImportProvider';
 import { parseOcrLines } from '../src/web/utils/powerScribeParser';
 
 function ocrResult(lines: Array<{ text: string; y0: number; y1: number; x0?: number; x1?: number }>) {
@@ -22,6 +22,68 @@ function ocrResult(lines: Array<{ text: string; y0: number; y1: number; x0?: num
 }
 
 describe('PowerScribe column OCR row reassembly', () => {
+  test('uses a validated far-left number sequence as capture row identity', () => {
+    const rowBands = [
+      { top: 0.2, bottom: 0.3 },
+      { top: 0.3, bottom: 0.4 },
+      { top: 0.4, bottom: 0.5 },
+    ];
+    const words = [17, 18, 19].map((value, index) => ({
+      text: String(value),
+      confidence: 0.95,
+      bbox: { x0: 180, x1: 195, y0: 210 + index * 100, y1: 230 + index * 100 },
+    }));
+
+    expect(__testDetectPowerScribeVisibleRowNumbers(
+      words,
+      rowBands,
+      { x: 0.2, y: 0.2, width: 0.4, height: 0.3 },
+      1000,
+      1000,
+    )).toEqual(['17', '18', '19']);
+  });
+
+  test('fills one missed gutter number only after the surrounding sequence validates it', () => {
+    const rowBands = [
+      { top: 0.2, bottom: 0.3 },
+      { top: 0.3, bottom: 0.4 },
+      { top: 0.4, bottom: 0.5 },
+    ];
+    const words = [
+      { text: '17', confidence: 0.95, bbox: { x0: 180, x1: 195, y0: 210, y1: 230 } },
+      { text: '19', confidence: 0.95, bbox: { x0: 180, x1: 195, y0: 410, y1: 430 } },
+    ];
+
+    expect(__testDetectPowerScribeVisibleRowNumbers(
+      words,
+      rowBands,
+      { x: 0.2, y: 0.2, width: 0.4, height: 0.3 },
+      1000,
+      1000,
+    )).toEqual(['17', '18', '19']);
+  });
+
+  test('rejects isolated or non-sequential numbers in the left gutter', () => {
+    const rowBands = [
+      { top: 0.2, bottom: 0.3 },
+      { top: 0.3, bottom: 0.4 },
+      { top: 0.4, bottom: 0.5 },
+    ];
+    const words = [17, 42, 19].map((value, index) => ({
+      text: String(value),
+      confidence: 0.95,
+      bbox: { x0: 180, x1: 195, y0: 210 + index * 100, y1: 230 + index * 100 },
+    }));
+
+    expect(__testDetectPowerScribeVisibleRowNumbers(
+      words,
+      rowBands,
+      { x: 0.2, y: 0.2, width: 0.4, height: 0.3 },
+      1000,
+      1000,
+    )).toEqual([null, null, null]);
+  });
+
   test('uses pre-OCR geometric row slots instead of nearest OCR-line alignment', () => {
     const rows = __testReassembleColumnRowsBySlots({
       procedure: ocrResult([
@@ -44,6 +106,20 @@ describe('PowerScribe column OCR row reassembly', () => {
     expect(rows).toHaveLength(2);
     expect(rows[0].line).toContain('XR CHEST PORTABLE 7/15/2026 8:01 AM 7/15/2026 8:09 AM');
     expect(rows[1].line).toContain('CT HEAD WO CONTRAST 7/15/2026 8:12 AM 7/15/2026 8:25 AM');
+  });
+
+  test('carries visible row numbers through parsing without contaminating the procedure title', () => {
+    const rows = __testReassembleColumnRowsBySlots({
+      procedure: ocrResult([{ text: 'XR CHEST PORTABLE', y0: 15, y1: 28 }]),
+      examDate: ocrResult([{ text: '7/15/2026 8:01 AM', y0: 15, y1: 28 }]),
+      modifiedDate: ocrResult([{ text: '7/15/2026 8:09 AM', y0: 15, y1: 28 }]),
+    }, [
+      { index: 0, top: 0.1, bottom: 0.2, compositeTop: 10, compositeBottom: 40 },
+    ], ['17']);
+    const [parsed] = parseOcrLines(rows.map((row) => row.line));
+
+    expect(parsed.rowIndex).toBe('17');
+    expect(parsed.procedureName).toBe('XR CHEST PORTABLE');
   });
 
   test('keeps a geometrically detected row visible when OCR returns no text in its slot', () => {
