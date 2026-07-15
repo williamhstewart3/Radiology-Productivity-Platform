@@ -104,6 +104,15 @@ describe('modality-first CPT matching', () => {
     expect(__testDeterministicCptCodesFor('XR TIBIA FIBULA LEFT AP AND LATERAL')).toEqual(['73590']);
   });
 
+  test('repairs high-confidence OCR substitutions before modality routing', () => {
+    expect(__testParseModalityFirst('KR TIBIA FIBULA LEFT AP AND LATERAL')).toMatchObject({
+      lane: 'XR',
+      cleanedProcedure: 'XR TIBIA FIBULA LEFT 2 VIEWS',
+    });
+    expect(__testDeterministicCptCodesFor('KRTIBIA FIBULA LEFT AP AND LATERAL')).toEqual(['73590']);
+    expect(__testDeterministicCptCodesFor('CT ABDOMEN AND FELVIS W CONTRAST')).toEqual(['74177']);
+  });
+
   test('keeps tibia/fibula out of the heel X-ray lane', () => {
     const rows = [
       cptRow('73590', 'Radiologic examination, tibia and fibula; 2 views', 'XR'),

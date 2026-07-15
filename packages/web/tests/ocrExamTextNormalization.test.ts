@@ -24,6 +24,11 @@ describe('OCR exam text normalization', () => {
     ['XR CHESTPORTABLE', 'XR CHEST PORTABLE'],
     ['XRCHEST PORTABLE', 'XR CHEST PORTABLE'],
     ['XR CHEST-PORTABLE', 'XR CHEST PORTABLE'],
+    ['KR TIBIA FIBULA LEFT AP AND LATERAL', 'XR TIBIA FIBULA LEFT AP AND LATERAL'],
+    ['KRTIBIA FIBULA LEFT AP AND LATERAL', 'XR TIBIA FIBULA LEFT AP AND LATERAL'],
+    ['KR CHEST PORTBLE', 'XR CHEST PORTABLE'],
+    ['CT ABDOMEN AND FELVIS W CONTRAST', 'CT ABDOMEN PELVIS W CONTRAST'],
+    ['CT ABD0MEN AND PE1VIS W CONTRAST', 'CT ABDOMEN PELVIS W CONTRAST'],
     ['XR ABDOMEN AP A2026 AT AM', 'XR ABDOMEN AP'],
     ['XR WRIST RIGHT PA LATERAL AND OBLIGUE T2026 212026', 'XR WRIST RIGHT PA LATERAL AND OBLIQUE'],
     ['CT HEAD WO CONTRAST T212026', 'CT HEAD WO CONTRAST'],
@@ -35,6 +40,10 @@ describe('OCR exam text normalization', () => {
 
   test('maps clear CT chest abdomen pelvis with contrast to split CPTs', () => {
     expect(getCommonRadiologyMappingCodes('v 8 CTCHEST ABDOMEN PELVIS W CONTRAST')).toEqual(['71260', '74177']);
+  });
+
+  test('maps a corrected abdomen and pelvis OCR title to the same CPT as clean text', () => {
+    expect(getCommonRadiologyMappingCodes('CT ABDOMEN AND FELVIS W CONTRAST')).toEqual(['74177']);
   });
 
   test('normalizes contrast and abdomen/pelvis variants consistently', () => {

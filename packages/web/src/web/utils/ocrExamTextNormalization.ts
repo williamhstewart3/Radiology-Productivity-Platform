@@ -9,6 +9,9 @@ const MODALITY_PREFIX_SPACING: Array<[RegExp, string]> = [
 ];
 
 const RADIOLOGY_OCR_CORRECTIONS: Array<[RegExp, string]> = [
+  // Only repair KR when it is immediately followed by an X-ray anatomy term.
+  // This covers a common X -> K OCR substitution without rewriting arbitrary words.
+  [/\bKR(?=\s*(?:CHEST|RIBS?|ABDOMEN|KUB|PELVIS|HIPS?|FEMUR|KNEE|TIBIA|FIBULA|ANKLE|FOOT|TOES?|CALCANEUS|HEEL|SHOULDER|HUMERUS|ELBOW|FOREARM|WRIST|HAND|FINGERS?|CLAVICLE|SCAPULA|CERVICAL|THORACIC|LUMBAR|SPINE|SACRUM|COCCYX|SKULL|FACIAL|SINUS|NECK)\b)/gi, 'XR '],
   [/\bXR\s*CHEST\s*[- ]?\s*(?:PORTABLE|PORFABLE|FORTABLE|PORTBLE)\b/gi, 'XR CHEST PORTABLE'],
   [/\bOBLIGUE\b/gi, 'OBLIQUE'],
   [/\bCONTRST\b/gi, 'CONTRAST'],
@@ -20,8 +23,11 @@ const RADIOLOGY_OCR_CORRECTIONS: Array<[RegExp, string]> = [
   [/\bCT\s*CHEST\s*ABDU?OMEN\b/gi, 'CT CHEST ABDOMEN'],
   [/\bABDCOMEN\b/gi, 'ABDOMEN'],
   [/\bABDUOMEN\b/gi, 'ABDOMEN'],
+  [/\bABD0MEN\b/gi, 'ABDOMEN'],
+  [/\bABDOMFN\b/gi, 'ABDOMEN'],
   [/\bCHEST\s*ABDU?OMEN\b/gi, 'CHEST ABDOMEN'],
   [/\bABDOMN\b/gi, 'ABDOMEN'],
+  [/\b(?:FELVIS|PE1VIS|PEIVIS)\b/gi, 'PELVIS'],
   [/\bPELVS\b/gi, 'PELVIS'],
   [/\bLATERL\b/gi, 'LATERAL'],
   [/\bLATRL\b/gi, 'LATERAL'],
