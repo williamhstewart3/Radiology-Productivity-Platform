@@ -25,7 +25,7 @@ import {
   persistActiveReviewSession,
   type TimelineEvent,
 } from '../services/reviewSessionService';
-import { inspectPowerScribeCapture, processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { getSavedPowerScribeManualGuides, inspectPowerScribeCapture, processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
 import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
@@ -391,6 +391,7 @@ function CapturePreview({
   onManualGuidesChange,
   rowBands,
   onRowBandsChange,
+  savedManualCropLoaded,
 }: {
   file: File;
   inspection: PowerScribeCapturePrecheck;
@@ -398,6 +399,7 @@ function CapturePreview({
   onManualGuidesChange: (guides: PowerScribeManualColumnGuides | null) => void;
   rowBands: PowerScribeRowBand[] | null;
   onRowBandsChange: (bands: PowerScribeRowBand[] | null) => void;
+  savedManualCropLoaded: boolean;
 }) {
   const [url, setUrl] = useState('');
   const [draggingGuide, setDraggingGuide] = useState<keyof PowerScribeManualColumnGuides | null>(null);
@@ -730,7 +732,7 @@ function CapturePreview({
           }}
           className="min-h-9 rounded-[8px] border border-rd-separator bg-rd-surface px-3 text-[12px] font-medium text-rd-label-primary"
         >
-          {manualGuides ? 'Use detected crop' : 'Adjust crop'}
+          {manualGuides ? (savedManualCropLoaded ? 'Reset saved crop' : 'Use detected crop') : 'Adjust crop'}
         </button>
       )}
       {(manualGuides || inspection.suggestedManualGuides) && (
@@ -778,7 +780,17 @@ function CapturePreview({
               </span>
             ) : null}
           </div>
+          <p className="text-[11px] text-rd-label-secondary">
+            {savedManualCropLoaded
+              ? `Saved crop applied for ${inspection.width} × ${inspection.height}. Drag to update it; changes are saved after Process.`
+              : `This crop will be reused for future ${inspection.width} × ${inspection.height} captures after Process.`}
+          </p>
         </div>
+      )}
+      {savedManualCropLoaded && !manualGuides && (
+        <p className="text-[11px] text-rd-label-secondary">
+          The saved crop will be cleared after Process; the detected table will be used instead.
+        </p>
       )}
     </div>
   );
@@ -799,6 +811,7 @@ export function Import({ onReviewReady }: ImportProps) {
   const [capturePreview, setCapturePreview] = useState<PowerScribeCapturePrecheck | null>(null);
   const [manualCropGuides, setManualCropGuides] = useState<PowerScribeManualColumnGuides | null>(null);
   const [manualRowBands, setManualRowBands] = useState<PowerScribeRowBand[] | null>(null);
+  const [savedManualCropLoaded, setSavedManualCropLoaded] = useState(false);
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   // Eagerly generated (not lazily inside the persist effect below) so that
   // effect only ever runs once per actual state change instead of twice per
@@ -868,6 +881,7 @@ export function Import({ onReviewReady }: ImportProps) {
         setCapturePreview(null);
         setManualCropGuides(null);
         setManualRowBands(null);
+        setSavedManualCropLoaded(false);
         lastClipboardImageHashRef.current = null;
       } else if (event.key === 'Enter') {
         event.preventDefault();
@@ -876,12 +890,14 @@ export function Import({ onReviewReady }: ImportProps) {
           'confirmed preview',
           manualCropGuides ? powerScribeManualColumnsFromGuides(manualCropGuides) : null,
           manualRowBands,
+          manualCropGuides,
+          savedManualCropLoaded && !manualCropGuides,
         );
       }
     }
     window.addEventListener('keydown', handlePreviewKey);
     return () => window.removeEventListener('keydown', handlePreviewKey);
-  }, [clipboardFile, processing, manualCropGuides, manualRowBands]);
+  }, [clipboardFile, processing, manualCropGuides, manualRowBands, savedManualCropLoaded]);
 
   useEffect(() => {
     if (mode !== 'ocr') return;
@@ -996,6 +1012,8 @@ export function Import({ onReviewReady }: ImportProps) {
     timelineSource: string,
     manualColumnCrops: PowerScribeManualColumnCrops | null = null,
     manualRows: PowerScribeRowBand[] | null = null,
+    manualGuidesToSave: PowerScribeManualColumnGuides | null = null,
+    clearSavedManualCrop = false,
   ) {
     setProcessing(true);
     setError(null);
@@ -1007,7 +1025,14 @@ export function Import({ onReviewReady }: ImportProps) {
         siteId: activePractice?.id ?? null,
         sessionId,
         logDate,
-      }, { filename: file.name, size: file.size, manualColumnCrops, manualRowBands: manualRows });
+      }, {
+        filename: file.name,
+        size: file.size,
+        manualColumnCrops,
+        manualColumnGuidesToSave: manualGuidesToSave,
+        clearSavedManualColumnGuides: clearSavedManualCrop,
+        manualRowBands: manualRows,
+      });
       pushToast('info', 'Matching CPT codes...', 'Running aliases, active CPT filters, and review checks.');
       setOcrDebug(processed.ocrDebug ?? null);
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
@@ -1051,6 +1076,8 @@ export function Import({ onReviewReady }: ImportProps) {
     timelineSource: string,
     manualColumnCrops: PowerScribeManualColumnCrops | null = null,
     manualRows: PowerScribeRowBand[] | null = null,
+    manualGuidesToSave: PowerScribeManualColumnGuides | null = null,
+    clearSavedManualCrop = false,
   ) {
     if (processingRef.current) return;
     setProcessing(true);
@@ -1060,13 +1087,14 @@ export function Import({ onReviewReady }: ImportProps) {
     setCapturePreview(null);
     setManualCropGuides(null);
     setManualRowBands(null);
+    setSavedManualCropLoaded(false);
     pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
     try {
       const usedStructuredHelper = manualColumnCrops
         ? false
         : await processWindowsClipboardCapture(file, timelineSource);
       if (!usedStructuredHelper) {
-        await processOcrFile(file, timelineSource, manualColumnCrops, manualRows);
+        await processOcrFile(file, timelineSource, manualColumnCrops, manualRows, manualGuidesToSave, clearSavedManualCrop);
       }
     } finally {
       setProcessing(false);
@@ -1080,14 +1108,31 @@ export function Import({ onReviewReady }: ImportProps) {
     pushToast('info', 'Screenshot captured', `PowerScribe image received from ${timelineSource}.`);
     const preview = await inspectPowerScribeCapture(file);
     const settings = await db.userSettings.get('default');
+    const cropKey = activeProfile?.id ?? 'default';
+    const savedManualGuides = getSavedPowerScribeManualGuides(
+      settings?.savedPowerScribeCropRegions?.[cropKey],
+      preview.width,
+      preview.height,
+    );
     if (shouldAutoProcessRecognizedCapture(preview.detected, settings)) {
-      pushToast('success', 'PowerScribe table detected — processing automatically', `${preview.width} × ${preview.height} · outlined table region accepted.`);
-      await processPowerScribeCapture(file, `${timelineSource} (auto-process)`);
+      pushToast(
+        'success',
+        'PowerScribe table detected — processing automatically',
+        `${preview.width} × ${preview.height} · ${savedManualGuides ? 'saved crop applied.' : 'outlined table region accepted.'}`,
+      );
+      await processPowerScribeCapture(
+        file,
+        `${timelineSource} (auto-process)`,
+        savedManualGuides ? powerScribeManualColumnsFromGuides(savedManualGuides) : null,
+        null,
+        savedManualGuides,
+      );
       return;
     }
     setCapturePreview(preview);
-    setManualCropGuides(preview.detected ? null : { ...DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES });
+    setManualCropGuides(savedManualGuides ?? (preview.detected ? null : { ...DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES }));
     setManualRowBands(null);
+    setSavedManualCropLoaded(Boolean(savedManualGuides));
     setClipboardFile(file);
     pushToast(
       preview.detected ? 'success' : 'warning',
@@ -1235,6 +1280,7 @@ export function Import({ onReviewReady }: ImportProps) {
                   onManualGuidesChange={setManualCropGuides}
                   rowBands={manualRowBands}
                   onRowBandsChange={setManualRowBands}
+                  savedManualCropLoaded={savedManualCropLoaded}
                 />
               )}
               <div className="flex flex-wrap gap-2">
@@ -1245,6 +1291,8 @@ export function Import({ onReviewReady }: ImportProps) {
                     'confirmed preview',
                     manualCropGuides ? powerScribeManualColumnsFromGuides(manualCropGuides) : null,
                     manualRowBands,
+                    manualCropGuides,
+                    savedManualCropLoaded && !manualCropGuides,
                   )}
                   disabled={processing}
                   className="min-h-11 rounded-[10px] bg-rd-label-primary px-3 text-[13px] font-semibold text-rd-bg disabled:opacity-40"
@@ -1258,6 +1306,7 @@ export function Import({ onReviewReady }: ImportProps) {
                     setCapturePreview(null);
                     setManualCropGuides(null);
                     setManualRowBands(null);
+                    setSavedManualCropLoaded(false);
                     lastClipboardImageHashRef.current = null;
                   }}
                   disabled={processing}

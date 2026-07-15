@@ -465,6 +465,15 @@ export interface UserSettings {
     height: number;
     imageWidth?: number;
     imageHeight?: number;
+    /** Exact user-adjusted PowerScribe column guides, reusable at the saved resolution. */
+    manualColumnGuides?: {
+      left: number;
+      procedureEnd: number;
+      examEnd: number;
+      right: number;
+      top: number;
+      bottom: number;
+    };
   }>;
 }
 

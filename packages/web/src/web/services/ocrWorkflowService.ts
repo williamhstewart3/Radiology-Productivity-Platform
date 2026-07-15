@@ -46,6 +46,21 @@ export function isSavedPowerScribeCropCompatible(
   return Boolean(crop && crop.imageWidth === imageWidth && crop.imageHeight === imageHeight);
 }
 
+export function getSavedPowerScribeManualGuides(
+  crop: SavedPowerScribeCrop | null | undefined,
+  imageWidth: number,
+  imageHeight: number,
+): PowerScribeManualColumnGuides | null {
+  if (!isSavedPowerScribeCropCompatible(crop, imageWidth, imageHeight)) return null;
+  const guides = crop?.manualColumnGuides;
+  if (!guides) return null;
+  const values = [guides.left, guides.procedureEnd, guides.examEnd, guides.right, guides.top, guides.bottom];
+  if (values.some((value) => !Number.isFinite(value) || value < 0 || value > 1)) return null;
+  if (!(guides.left < guides.procedureEnd && guides.procedureEnd < guides.examEnd && guides.examEnd < guides.right)) return null;
+  if (!(guides.top < guides.bottom)) return null;
+  return { ...guides };
+}
+
 async function imageDimensions(source: Blob): Promise<{ width: number; height: number }> {
   const bitmap = await createImageBitmap(source);
   try {
@@ -251,6 +266,8 @@ export async function processOcrImport(
     size?: number | null;
     cropAlreadyApplied?: boolean;
     manualColumnCrops?: PowerScribeManualColumnCrops | null;
+    manualColumnGuidesToSave?: PowerScribeManualColumnGuides | null;
+    clearSavedManualColumnGuides?: boolean;
     manualRowBands?: PowerScribeRowBand[] | null;
   },
 ): Promise<ProcessedImportResult> {
@@ -292,7 +309,35 @@ export async function processOcrImport(
     (count) => `Screenshot OCR completed (${count} extracted)`,
   );
   const debug = attachOcrMatchDebug(provider.getDebugInfo(), processed.result);
-  if (debug?.crop?.method === 'headerAnchors' && debug.accounting) {
+  if (metadata?.manualColumnGuidesToSave) {
+    const guides = metadata.manualColumnGuidesToSave;
+    await db.userSettings.put({
+      ...settings,
+      savedPowerScribeCropRegions: {
+        ...settings.savedPowerScribeCropRegions,
+        [cropKey]: {
+          x: guides.left,
+          y: guides.top,
+          width: guides.right - guides.left,
+          height: guides.bottom - guides.top,
+          imageWidth: dimensions.width,
+          imageHeight: dimensions.height,
+          manualColumnGuides: { ...guides },
+        },
+      },
+      updatedAt: new Date().toISOString(),
+    });
+  } else if (metadata?.clearSavedManualColumnGuides && savedCrop?.manualColumnGuides) {
+    const { manualColumnGuides: _manualColumnGuides, ...cropWithoutManualGuides } = savedCrop;
+    await db.userSettings.put({
+      ...settings,
+      savedPowerScribeCropRegions: {
+        ...settings.savedPowerScribeCropRegions,
+        [cropKey]: cropWithoutManualGuides,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+  } else if (debug?.crop?.method === 'headerAnchors' && debug.accounting) {
     await db.userSettings.put({
       ...settings,
       savedPowerScribeCropRegions: {
@@ -301,6 +346,9 @@ export async function processOcrImport(
           ...debug.crop.rect,
           imageWidth: debug.accounting.imageWidth,
           imageHeight: debug.accounting.imageHeight,
+          ...(compatibleSavedCrop?.manualColumnGuides
+            ? { manualColumnGuides: { ...compatibleSavedCrop.manualColumnGuides } }
+            : {}),
         },
       },
       updatedAt: new Date().toISOString(),
