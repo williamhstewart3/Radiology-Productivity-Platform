@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { classifyPowerScribeCaptureKind, inspectPowerScribeReportCapture, POWERSCRIBE_REPORT_HEADER_REGION } from '../src/web/services/captureClassifierService';
+import { getSavedPowerScribeReportCrop, inspectScreenshotCapture } from '../src/web/services/ocrWorkflowService';
 import { ReportCaptureImportProvider } from '../src/web/providers/ReportCaptureImportProvider';
 import { parsePowerScribeReportHeader } from '../src/web/utils/powerScribeReportHeader';
 import type { OcrEngine } from '../src/web/utils/ocrProvider';
@@ -68,6 +69,57 @@ describe('report classifier privacy boundary', () => {
     expect(ocrInput).toBe(headerBlob);
     expect(ocrInput).not.toBe(full);
     expect(result.detected).toBe(true);
+  });
+
+  test('uses the user-adjusted report crop instead of the default header region', async () => {
+    const customRect = { x: 0.12, y: 0.18, width: 0.74, height: 0.16 };
+    let croppedRect: unknown = null;
+    const engine: OcrEngine = {
+      name: 'tesseract.js',
+      async extractText() {
+        return {
+          rawText: 'EXAMINATION: MRI BRAIN W WO CONTRAST, 7/16/2026 9:15 AM CDT',
+          lines: [], positionedLines: [], positionedWords: [], confidence: 0.96,
+        };
+      },
+    };
+    const result = await inspectPowerScribeReportCapture(
+      new Blob(['full image']),
+      engine,
+      async (_source, rect) => {
+        croppedRect = rect;
+        return new Blob(['selected header']);
+      },
+      customRect,
+    );
+    expect(croppedRect).toEqual(customRect);
+    expect(result.headerRect).toEqual(customRect);
+    expect(result.detected).toBe(true);
+  });
+
+  test('reuses a saved report crop only for the same capture dimensions', () => {
+    const saved = { x: 0.1, y: 0.12, width: 0.8, height: 0.2, imageWidth: 1600, imageHeight: 900 };
+    expect(getSavedPowerScribeReportCrop(saved, 1600, 900)).toEqual({ x: 0.1, y: 0.12, width: 0.8, height: 0.2 });
+    expect(getSavedPowerScribeReportCrop(saved, 1920, 1080)).toBeNull();
+  });
+
+  test('an explicit worklist choice does not route through report-header detection', async () => {
+    let ocrCalls = 0;
+    const engine: OcrEngine = {
+      name: 'tesseract.js',
+      async extractText() {
+        ocrCalls += 1;
+        return { rawText: '', lines: [], positionedLines: [], positionedWords: [], confidence: 0.1 };
+      },
+    };
+    const result = await inspectScreenshotCapture(
+      new Blob(['worklist']),
+      engine,
+      async () => ({ width: 1600, height: 900 }),
+      { intendedKind: 'worklist' },
+    );
+    expect(result.kind).toBe('worklist');
+    expect(ocrCalls).toBe(1);
   });
 
   test('provider emits shared normalized metadata and never accepts an image', async () => {

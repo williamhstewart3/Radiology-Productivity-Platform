@@ -42,7 +42,15 @@ export interface PowerScribeCapturePrecheck {
   ocrConfidence?: number | null;
 }
 
+export type PowerScribeCaptureIntent = 'auto' | 'report' | 'worklist';
+
+export interface ScreenshotCaptureInspectionOptions {
+  intendedKind?: PowerScribeCaptureIntent;
+  reportHeaderRect?: RelativeCropRect;
+}
+
 type SavedPowerScribeCrop = NonNullable<Awaited<ReturnType<typeof ensureUserSettings>>['savedPowerScribeCropRegions'][string]>;
+type SavedPowerScribeReportCrop = NonNullable<Awaited<ReturnType<typeof ensureUserSettings>>['savedPowerScribeReportCropRegions'][string]>;
 
 export function isSavedPowerScribeCropCompatible(
   crop: SavedPowerScribeCrop | null | undefined,
@@ -65,6 +73,19 @@ export function getSavedPowerScribeManualGuides(
   if (!(guides.left < guides.procedureEnd && guides.procedureEnd < guides.examEnd && guides.examEnd < guides.right)) return null;
   if (!(guides.top < guides.bottom)) return null;
   return { ...guides };
+}
+
+export function getSavedPowerScribeReportCrop(
+  crop: SavedPowerScribeReportCrop | null | undefined,
+  imageWidth: number,
+  imageHeight: number,
+): RelativeCropRect | null {
+  if (!crop || crop.imageWidth !== imageWidth || crop.imageHeight !== imageHeight) return null;
+  const values = [crop.x, crop.y, crop.width, crop.height];
+  if (values.some((value) => !Number.isFinite(value))) return null;
+  if (crop.x < 0 || crop.y < 0 || crop.width < 0.05 || crop.height < 0.05) return null;
+  if (crop.x + crop.width > 1 || crop.y + crop.height > 1) return null;
+  return { x: crop.x, y: crop.y, width: crop.width, height: crop.height };
 }
 
 async function imageDimensions(source: Blob): Promise<{ width: number; height: number }> {
@@ -168,14 +189,24 @@ export async function inspectScreenshotCapture(
   source: Blob,
   engine: OcrEngine = getDefaultOcrEngine(),
   getDimensions: (source: Blob) => Promise<{ width: number; height: number }> = imageDimensions,
+  options: ScreenshotCaptureInspectionOptions = {},
 ): Promise<PowerScribeCapturePrecheck> {
+  if (options.intendedKind === 'worklist') {
+    const worklist = await inspectPowerScribeCapture(source, engine, getDimensions);
+    return {
+      ...worklist,
+      kind: 'worklist',
+      reportHeader: null,
+      ocrConfidence: null,
+    };
+  }
   const [report, dimensions] = await Promise.all([
-    inspectPowerScribeReportCapture(source, engine),
+    inspectPowerScribeReportCapture(source, engine, undefined, options.reportHeaderRect),
     getDimensions(source),
   ]);
-  if (report.detected) {
+  if (report.detected || options.intendedKind === 'report') {
     return {
-      detected: true,
+      detected: report.detected,
       kind: 'report',
       method: 'reportHeader',
       width: dimensions.width,
@@ -236,6 +267,34 @@ export async function processReportCaptureImport(
       reviewRows: processed.result.reviewRows.length,
       skippedRows: processed.result.skippedRows.length,
     }),
+  });
+  return processed;
+}
+
+export async function processReportCaptureImageImport(
+  source: Blob,
+  headerRect: RelativeCropRect,
+  context: WorkflowContext,
+  engine: OcrEngine = getDefaultOcrEngine(),
+): Promise<ProcessedImportResult> {
+  const inspection = await inspectPowerScribeReportCapture(source, engine, undefined, headerRect);
+  if (!inspection.detected || !inspection.header.examTitleRaw) {
+    throw new Error('The EXAMINATION header was not readable inside the selected report crop. Adjust the crop and try again.');
+  }
+  const processed = await processReportCaptureImport(inspection.header, inspection.ocrConfidence, context);
+  const [settings, dimensions] = await Promise.all([ensureUserSettings(), imageDimensions(source)]);
+  const cropKey = context.profileId ?? 'default';
+  await db.userSettings.put({
+    ...settings,
+    savedPowerScribeReportCropRegions: {
+      ...settings.savedPowerScribeReportCropRegions,
+      [cropKey]: {
+        ...headerRect,
+        imageWidth: dimensions.width,
+        imageHeight: dimensions.height,
+      },
+    },
+    updatedAt: new Date().toISOString(),
   });
   return processed;
 }

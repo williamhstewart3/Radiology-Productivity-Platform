@@ -5,6 +5,7 @@ import { importRvuFile } from '../utils/rvuFileImporter';
 import { dedupeCptRvuRowsForBulkPut } from '../utils/cptRowDeduplication';
 import { buildSeedCptRows } from '../data/seedCptData';
 import { normalizeExamText } from '../utils/textMatching';
+import { stripOcrSquareBrackets } from '../utils/ocrExamTextNormalization';
 import {
   importInstitutionProcedureMappings,
   type InstitutionProcedureMappingSummary,
@@ -187,7 +188,7 @@ export function Settings({ onNavigate }: SettingsProps) {
 
   async function handleSaveAlias() {
     if (!editingAlias) return;
-    const trimmed = editRaw.trim();
+    const trimmed = stripOcrSquareBrackets(editRaw);
     if (!trimmed) return;
     await db.examAliases.update(editingAlias.id, {
       aliasTextRaw: trimmed,

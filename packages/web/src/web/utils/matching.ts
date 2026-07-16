@@ -7,7 +7,7 @@ import {
   getCommonRadiologyMappingCodes,
   normalizeRadiologyDescription,
 } from './radiologyDescriptionNormalization';
-import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
+import { normalizeOcrExamTextForMatching, stripOcrSquareBrackets } from './ocrExamTextNormalization';
 import { detectMultipleModalityStarts } from './powerScribeParser';
 import { findOrbitCmeSeedMapping } from '../data/orbitCmeSeedMappings';
 import { classifyModality } from '../data/modalityClassifier';
@@ -1300,6 +1300,17 @@ export async function learnAlias(
   } else {
     payload = payloadOrRaw;
   }
+
+  const cleanedRawText = stripOcrSquareBrackets(payload.rawText);
+  if (!cleanedRawText) return;
+  const cleanedCanonicalExamName = payload.canonicalExamName
+    ? stripOcrSquareBrackets(payload.canonicalExamName)
+    : null;
+  payload = {
+    ...payload,
+    rawText: cleanedRawText,
+    canonicalExamName: cleanedCanonicalExamName || null,
+  };
 
   const candidates = payload.candidates.filter((candidate) =>
     candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0,

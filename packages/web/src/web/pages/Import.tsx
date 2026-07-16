@@ -25,7 +25,7 @@ import {
   persistActiveReviewSession,
   type TimelineEvent,
 } from '../services/reviewSessionService';
-import { getSavedPowerScribeManualGuides, inspectScreenshotCapture, processOcrImport, processReportCaptureImport, processStructuredPowerScribeOcrImport, processTextImport, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { getSavedPowerScribeManualGuides, getSavedPowerScribeReportCrop, inspectScreenshotCapture, processOcrImport, processReportCaptureImageImport, processStructuredPowerScribeOcrImport, processTextImport, type PowerScribeCaptureIntent, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
 import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
@@ -38,7 +38,9 @@ import {
   type PowerScribeManualColumnCrops,
   type PowerScribeManualColumnGuides,
   type PowerScribeRowBand,
+  type RelativeCropRect,
 } from '../utils/imageCrop';
+import { POWERSCRIBE_REPORT_HEADER_REGION } from '../services/captureClassifierService';
 
 function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocrDebug']; imageFile?: File | Blob | null }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -392,6 +394,9 @@ function CapturePreview({
   rowBands,
   onRowBandsChange,
   savedManualCropLoaded,
+  reportCrop,
+  onReportCropChange,
+  savedReportCropLoaded,
 }: {
   file: File;
   inspection: PowerScribeCapturePrecheck;
@@ -400,10 +405,14 @@ function CapturePreview({
   rowBands: PowerScribeRowBand[] | null;
   onRowBandsChange: (bands: PowerScribeRowBand[] | null) => void;
   savedManualCropLoaded: boolean;
+  reportCrop: RelativeCropRect | null;
+  onReportCropChange: (rect: RelativeCropRect | null) => void;
+  savedReportCropLoaded: boolean;
 }) {
   const [url, setUrl] = useState('');
   const [draggingGuide, setDraggingGuide] = useState<keyof PowerScribeManualColumnGuides | null>(null);
   const [draggingRowBoundary, setDraggingRowBoundary] = useState<number | null>(null);
+  const [draggingReportEdge, setDraggingReportEdge] = useState<'left' | 'right' | 'top' | 'bottom' | null>(null);
   const [detectingRows, setDetectingRows] = useState(false);
   const [rowDetectionMessage, setRowDetectionMessage] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -414,6 +423,7 @@ function CapturePreview({
   }, [file]);
 
   const manualColumns = manualGuides ? powerScribeManualColumnsFromGuides(manualGuides) : null;
+  const activeReportCrop = inspection.kind === 'report' ? reportCrop ?? inspection.tableRect : null;
   const overlays = manualColumns
     ? [
         { name: 'procedure' as const, label: 'Procedure', color: '#2563eb', fill: 'rgba(37, 99, 235, 0.12)' },
@@ -432,6 +442,37 @@ function CapturePreview({
     if (name === 'top') next.top = Math.max(0, Math.min(nextValue, next.bottom - 0.1));
     if (name === 'bottom') next.bottom = Math.max(next.top + 0.1, Math.min(1, nextValue));
     onManualGuidesChange(next);
+  }
+
+  function updateReportEdge(edge: 'left' | 'right' | 'top' | 'bottom', nextValue: number) {
+    if (!activeReportCrop) return;
+    const minimumSize = 0.04;
+    const right = activeReportCrop.x + activeReportCrop.width;
+    const bottom = activeReportCrop.y + activeReportCrop.height;
+    if (edge === 'left') {
+      const x = Math.max(0, Math.min(nextValue, right - minimumSize));
+      onReportCropChange({ ...activeReportCrop, x, width: right - x });
+    } else if (edge === 'right') {
+      const nextRight = Math.max(activeReportCrop.x + minimumSize, Math.min(1, nextValue));
+      onReportCropChange({ ...activeReportCrop, width: nextRight - activeReportCrop.x });
+    } else if (edge === 'top') {
+      const y = Math.max(0, Math.min(nextValue, bottom - minimumSize));
+      onReportCropChange({ ...activeReportCrop, y, height: bottom - y });
+    } else {
+      const nextBottom = Math.max(activeReportCrop.y + minimumSize, Math.min(1, nextValue));
+      onReportCropChange({ ...activeReportCrop, height: nextBottom - activeReportCrop.y });
+    }
+  }
+
+  function updateReportEdgeFromPointer(edge: 'left' | 'right' | 'top' | 'bottom', event: ReactPointerEvent<HTMLButtonElement>) {
+    const bounds = previewRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    updateReportEdge(
+      edge,
+      edge === 'top' || edge === 'bottom'
+        ? (event.clientY - bounds.top) / bounds.height
+        : (event.clientX - bounds.left) / bounds.width,
+    );
   }
 
   const rowBoundaries = rowBands?.length
@@ -534,7 +575,7 @@ function CapturePreview({
     next.splice(rowIndex, 1, { top: band.top, bottom: value }, { top: value, bottom: band.bottom });
     onRowBandsChange(normalizePowerScribeRowBands(next));
   }
-  const previewWidth = manualGuides
+  const previewWidth = manualGuides || activeReportCrop
     ? 'min(100%, 960px)'
     : `min(100%, ${(320 * inspection.width) / inspection.height}px)`;
 
@@ -547,7 +588,7 @@ function CapturePreview({
         style={{ aspectRatio: `${inspection.width} / ${inspection.height}`, width: previewWidth }}
       >
         {url && <img src={url} alt="Capture waiting for review" draggable={false} className="absolute inset-0 size-full select-none object-contain" />}
-        {!manualColumns && inspection.tableRect && (
+        {!manualColumns && !activeReportCrop && inspection.tableRect && (
           <span
             aria-label="Detected table region"
             className="pointer-events-none absolute border-2 border-rd-positive bg-rd-positive/10"
@@ -559,6 +600,74 @@ function CapturePreview({
             }}
           />
         )}
+        {activeReportCrop && (
+          <span
+            aria-label="Report header crop"
+            className="pointer-events-none absolute border-2 border-sky-500 bg-sky-500/10"
+            style={{
+              left: `${activeReportCrop.x * 100}%`,
+              top: `${activeReportCrop.y * 100}%`,
+              width: `${activeReportCrop.width * 100}%`,
+              height: `${activeReportCrop.height * 100}%`,
+            }}
+          >
+            <span className="absolute left-0 top-0 bg-sky-700 px-1 py-0.5 text-[9px] font-semibold text-white">
+              EXAMINATION header
+            </span>
+          </span>
+        )}
+        {activeReportCrop && (['left', 'right', 'top', 'bottom'] as const).map((edge) => {
+          const vertical = edge === 'left' || edge === 'right';
+          const position = edge === 'left'
+            ? activeReportCrop.x
+            : edge === 'right'
+              ? activeReportCrop.x + activeReportCrop.width
+              : edge === 'top'
+                ? activeReportCrop.y
+                : activeReportCrop.y + activeReportCrop.height;
+          return (
+            <button
+              key={`report-${edge}`}
+              type="button"
+              aria-label={`Report crop ${edge} edge, ${Math.round(position * 100)} percent. Drag to adjust.`}
+              title={`Report crop ${edge} edge · drag to adjust`}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                setDraggingReportEdge(edge);
+                updateReportEdgeFromPointer(edge, event);
+              }}
+              onPointerMove={(event) => {
+                if (draggingReportEdge === edge) updateReportEdgeFromPointer(edge, event);
+              }}
+              onPointerUp={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                setDraggingReportEdge(null);
+              }}
+              onPointerCancel={() => setDraggingReportEdge(null)}
+              onKeyDown={(event) => {
+                const decreaseKey = vertical ? 'ArrowLeft' : 'ArrowUp';
+                const increaseKey = vertical ? 'ArrowRight' : 'ArrowDown';
+                if (event.key !== decreaseKey && event.key !== increaseKey) return;
+                event.preventDefault();
+                updateReportEdge(edge, position + (event.key === increaseKey ? 1 : -1) * (event.shiftKey ? 0.01 : 0.0025));
+              }}
+              className="absolute z-30 rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              style={vertical
+                ? {
+                    left: `${position * 100}%`, top: `${activeReportCrop.y * 100}%`, width: '24px',
+                    height: `${activeReportCrop.height * 100}%`, transform: 'translateX(-50%)', cursor: 'col-resize', touchAction: 'none',
+                  }
+                : {
+                    left: `${activeReportCrop.x * 100}%`, top: `${position * 100}%`, width: `${activeReportCrop.width * 100}%`,
+                    height: '24px', transform: 'translateY(-50%)', cursor: 'row-resize', touchAction: 'none',
+                  }}
+            >
+              <span className="pointer-events-none absolute rounded-full border-2 border-white bg-sky-500 shadow-[0_0_0_1px_rgba(0,0,0,0.7)]"
+                style={vertical ? { left: '10px', top: 0, width: '4px', height: '100%' } : { left: 0, top: '10px', width: '100%', height: '4px' }} />
+            </button>
+          );
+        })}
         {overlays.map((overlay) => {
           const rect = manualColumns![overlay.name];
           return (
@@ -716,11 +825,27 @@ function CapturePreview({
             ? `${rowBands.length} geometric row crops will be applied before OCR.`
             : 'Drag the crop edges so each colored band contains only its named column.'
           : inspection.kind === 'report'
-          ? 'This looks like a PowerScribe report; only the outlined EXAMINATION header will be read.'
+          ? 'Report pathway selected. Drag the blue rectangle edges so the EXAMINATION title and date are inside the crop.'
           : inspection.detected
           ? 'This looks like a PowerScribe worklist; the outlined region is the candidate table.'
           : 'No table outline was detected. If this is the PowerScribe worklist, you can still process it for review.'}
       </p>
+      {inspection.kind === 'report' && activeReportCrop && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onReportCropChange({ ...POWERSCRIBE_REPORT_HEADER_REGION })}
+            className="min-h-9 rounded-[8px] border border-rd-separator bg-rd-surface px-3 text-[12px] font-medium text-rd-label-primary"
+          >
+            Reset report crop
+          </button>
+          <p className="text-[11px] text-rd-label-secondary">
+            {savedReportCropLoaded
+              ? `Saved report crop applied for ${inspection.width} × ${inspection.height}; changes are saved after Process.`
+              : `This report crop will be reused for future ${inspection.width} × ${inspection.height} captures after Process.`}
+          </p>
+        </div>
+      )}
       {inspection.detected && inspection.kind !== 'report' && (
         <button
           type="button"
@@ -815,6 +940,10 @@ export function Import({ onReviewReady }: ImportProps) {
   const [manualCropGuides, setManualCropGuides] = useState<PowerScribeManualColumnGuides | null>(null);
   const [manualRowBands, setManualRowBands] = useState<PowerScribeRowBand[] | null>(null);
   const [savedManualCropLoaded, setSavedManualCropLoaded] = useState(false);
+  const [reportCropRect, setReportCropRect] = useState<RelativeCropRect | null>(null);
+  const [savedReportCropLoaded, setSavedReportCropLoaded] = useState(false);
+  const [captureIntent, setCaptureIntent] = useState<Exclude<PowerScribeCaptureIntent, 'auto'>>('worklist');
+  const captureIntentRef = useRef<Exclude<PowerScribeCaptureIntent, 'auto'>>('worklist');
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   // Eagerly generated (not lazily inside the persist effect below) so that
   // effect only ever runs once per actual state change instead of twice per
@@ -887,6 +1016,8 @@ export function Import({ onReviewReady }: ImportProps) {
         setManualCropGuides(null);
         setManualRowBands(null);
         setSavedManualCropLoaded(false);
+        setReportCropRect(null);
+        setSavedReportCropLoaded(false);
         lastClipboardImageHashRef.current = null;
       } else if (event.key === 'Enter') {
         event.preventDefault();
@@ -897,12 +1028,13 @@ export function Import({ onReviewReady }: ImportProps) {
           manualRowBands,
           manualCropGuides,
           savedManualCropLoaded && !manualCropGuides,
+          reportCropRect,
         );
       }
     }
     window.addEventListener('keydown', handlePreviewKey);
     return () => window.removeEventListener('keydown', handlePreviewKey);
-  }, [clipboardFile, processing, manualCropGuides, manualRowBands, savedManualCropLoaded]);
+  }, [clipboardFile, processing, manualCropGuides, manualRowBands, savedManualCropLoaded, reportCropRect]);
 
   useEffect(() => {
     if (mode !== 'ocr') return;
@@ -1083,9 +1215,11 @@ export function Import({ onReviewReady }: ImportProps) {
     manualRows: PowerScribeRowBand[] | null = null,
     manualGuidesToSave: PowerScribeManualColumnGuides | null = null,
     clearSavedManualCrop = false,
+    reportCropToUse: RelativeCropRect | null = null,
   ) {
     if (processingRef.current) return;
     const inspection = capturePreviewRef.current ?? capturePreview;
+    const reportCropWasSaved = savedReportCropLoaded;
     capturePreviewRef.current = null;
     setProcessing(true);
     setError(null);
@@ -1095,26 +1229,46 @@ export function Import({ onReviewReady }: ImportProps) {
     setManualCropGuides(null);
     setManualRowBands(null);
     setSavedManualCropLoaded(false);
+    setReportCropRect(null);
+    setSavedReportCropLoaded(false);
     pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
     try {
-      if (inspection?.kind === 'report' && inspection.reportHeader) {
-        const processed = await processReportCaptureImport(
-          inspection.reportHeader,
-          inspection.ocrConfidence ?? 0,
-          {
+      if (inspection?.kind === 'report') {
+        const selectedCrop = reportCropToUse ?? inspection.tableRect;
+        if (!selectedCrop) {
+          const message = 'Choose the EXAMINATION header crop before processing this report.';
+          setError(message);
+          pushToast('danger', 'Report crop required', message);
+          capturePreviewRef.current = inspection;
+          setCapturePreview(inspection);
+          setClipboardFile(file);
+          setSavedReportCropLoaded(reportCropWasSaved);
+          return;
+        }
+        try {
+          const processed = await processReportCaptureImageImport(file, selectedCrop, {
             profileId: activeProfile?.id ?? null,
             siteId: activePractice?.id ?? null,
             sessionId,
             logDate,
-          },
-        );
-        appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
-        const autoCounted = processed.result.reviewRows.some((row) => row.autoApproved);
-        pushToast(
-          autoCounted ? 'success' : 'info',
-          autoCounted ? 'Known report counted' : 'Report capture added to Inbox',
-          'Only the EXAMINATION header region was read; the report image was not saved.',
-        );
+          });
+          appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
+          const autoCounted = processed.result.reviewRows.some((row) => row.autoApproved);
+          pushToast(
+            autoCounted ? 'success' : 'info',
+            autoCounted ? 'Known report counted' : 'Report capture added to Inbox',
+            'Only the selected EXAMINATION header crop was read; the report image was not saved.',
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'The selected report crop could not be read.';
+          setError(message);
+          pushToast('danger', 'Report header not read', message);
+          capturePreviewRef.current = inspection;
+          setCapturePreview(inspection);
+          setClipboardFile(file);
+          setReportCropRect(selectedCrop);
+          setSavedReportCropLoaded(reportCropWasSaved);
+        }
         return;
       }
       const usedStructuredHelper = manualColumnCrops
@@ -1133,10 +1287,23 @@ export function Import({ onReviewReady }: ImportProps) {
     if (hash === lastClipboardImageHashRef.current) return;
     lastClipboardImageHashRef.current = hash;
     pushToast('info', 'Screenshot captured', `PowerScribe image received from ${timelineSource}.`);
-    const preview = await inspectScreenshotCapture(file);
-    capturePreviewRef.current = preview;
     const settings = await db.userSettings.get('default');
     const cropKey = activeProfile?.id ?? 'default';
+    let preview = await inspectScreenshotCapture(file, undefined, undefined, {
+      intendedKind: captureIntentRef.current,
+    });
+    const savedReportCrop = preview.kind === 'report' ? getSavedPowerScribeReportCrop(
+      settings?.savedPowerScribeReportCropRegions?.[cropKey],
+      preview.width,
+      preview.height,
+    ) : null;
+    if (preview.kind === 'report' && savedReportCrop) {
+      preview = await inspectScreenshotCapture(file, undefined, undefined, {
+        intendedKind: 'report',
+        reportHeaderRect: savedReportCrop,
+      });
+    }
+    capturePreviewRef.current = preview;
     const savedManualGuides = preview.kind === 'worklist' ? getSavedPowerScribeManualGuides(
       settings?.savedPowerScribeCropRegions?.[cropKey],
       preview.width,
@@ -1145,8 +1312,8 @@ export function Import({ onReviewReady }: ImportProps) {
     if (shouldAutoProcessRecognizedCapture(preview.detected, settings)) {
       pushToast(
         'success',
-        'PowerScribe table detected — processing automatically',
-        `${preview.width} × ${preview.height} · ${savedManualGuides ? 'saved crop applied.' : 'outlined table region accepted.'}`,
+        preview.kind === 'report' ? 'PowerScribe report detected — processing automatically' : 'PowerScribe table detected — processing automatically',
+        `${preview.width} × ${preview.height} · ${savedManualGuides || savedReportCrop ? 'saved crop applied.' : 'outlined region accepted.'}`,
       );
       await processPowerScribeCapture(
         file,
@@ -1154,6 +1321,8 @@ export function Import({ onReviewReady }: ImportProps) {
         savedManualGuides ? powerScribeManualColumnsFromGuides(savedManualGuides) : null,
         null,
         savedManualGuides,
+        false,
+        savedReportCrop ?? (preview.kind === 'report' ? preview.tableRect : null),
       );
       return;
     }
@@ -1161,12 +1330,31 @@ export function Import({ onReviewReady }: ImportProps) {
     setManualCropGuides(preview.kind === 'report' ? null : savedManualGuides ?? (preview.detected ? null : { ...DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES }));
     setManualRowBands(null);
     setSavedManualCropLoaded(Boolean(savedManualGuides));
+    setReportCropRect(preview.kind === 'report' ? savedReportCrop ?? preview.tableRect : null);
+    setSavedReportCropLoaded(Boolean(savedReportCrop));
     setClipboardFile(file);
     pushToast(
       preview.detected ? 'success' : 'warning',
-      preview.kind === 'report' ? 'PowerScribe report detected' : preview.detected ? 'PowerScribe reports table detected' : 'PowerScribe capture type uncertain',
+      preview.kind === 'report'
+        ? preview.detected ? 'PowerScribe report detected' : 'Report header not found in the current crop'
+        : preview.detected ? 'PowerScribe reports table detected' : 'PowerScribe worklist anchors not found',
       'Review the image, then press Enter to process or Esc to discard.',
     );
+  }
+
+  function chooseCaptureIntent(intent: Exclude<PowerScribeCaptureIntent, 'auto'>) {
+    captureIntentRef.current = intent;
+    setCaptureIntent(intent);
+    setClipboardFile(null);
+    setCapturePreview(null);
+    capturePreviewRef.current = null;
+    setManualCropGuides(null);
+    setManualRowBands(null);
+    setSavedManualCropLoaded(false);
+    setReportCropRect(null);
+    setSavedReportCropLoaded(false);
+    lastClipboardImageHashRef.current = null;
+    setError(null);
   }
 
   async function handlePasteProcess() {
@@ -1294,6 +1482,38 @@ export function Import({ onReviewReady }: ImportProps) {
 
       {mode === 'ocr' && (
         <Card className="space-y-4">
+          <fieldset className="space-y-2">
+            <legend className="text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">What are you capturing?</legend>
+            <div className="grid grid-cols-2 gap-2 rounded-[10px] bg-rd-bg p-1">
+              <button
+                type="button"
+                aria-pressed={captureIntent === 'report'}
+                onClick={() => chooseCaptureIntent('report')}
+                className={cn(
+                  'min-h-11 rounded-[8px] px-3 text-[13px] font-semibold transition-colors',
+                  captureIntent === 'report' ? 'bg-rd-surface text-rd-label-primary shadow-sm' : 'text-rd-label-secondary',
+                )}
+              >
+                Current report
+              </button>
+              <button
+                type="button"
+                aria-pressed={captureIntent === 'worklist'}
+                onClick={() => chooseCaptureIntent('worklist')}
+                className={cn(
+                  'min-h-11 rounded-[8px] px-3 text-[13px] font-semibold transition-colors',
+                  captureIntent === 'worklist' ? 'bg-rd-surface text-rd-label-primary shadow-sm' : 'text-rd-label-secondary',
+                )}
+              >
+                Worklist
+              </button>
+            </div>
+            <p className="text-[11px] text-rd-label-secondary">
+              {captureIntent === 'report'
+                ? 'Reads one EXAMINATION header from an adjustable crop.'
+                : 'Reads the Procedure, Exam Date, and Modified columns from the worklist.'}
+            </p>
+          </fieldset>
           {clipboardFile && !processing && (
             <div className="space-y-3 rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
               <p className="text-[13px] font-semibold text-rd-label-primary">Review capture before processing</p>
@@ -1312,6 +1532,9 @@ export function Import({ onReviewReady }: ImportProps) {
                   rowBands={manualRowBands}
                   onRowBandsChange={setManualRowBands}
                   savedManualCropLoaded={savedManualCropLoaded}
+                  reportCrop={reportCropRect}
+                  onReportCropChange={setReportCropRect}
+                  savedReportCropLoaded={savedReportCropLoaded}
                 />
               )}
               <div className="flex flex-wrap gap-2">
@@ -1324,6 +1547,7 @@ export function Import({ onReviewReady }: ImportProps) {
                     manualRowBands,
                     manualCropGuides,
                     savedManualCropLoaded && !manualCropGuides,
+                    reportCropRect,
                   )}
                   disabled={processing}
                   className="min-h-11 rounded-[10px] bg-rd-label-primary px-3 text-[13px] font-semibold text-rd-bg disabled:opacity-40"
@@ -1339,6 +1563,8 @@ export function Import({ onReviewReady }: ImportProps) {
                     setManualCropGuides(null);
                     setManualRowBands(null);
                     setSavedManualCropLoaded(false);
+                    setReportCropRect(null);
+                    setSavedReportCropLoaded(false);
                     lastClipboardImageHashRef.current = null;
                   }}
                   disabled={processing}
@@ -1352,12 +1578,12 @@ export function Import({ onReviewReady }: ImportProps) {
           {processing && <CaptureProcessingState />}
           <div>
             <label htmlFor="ocr-file-input" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
-              Paste or upload PowerScribe window grab
+              Paste or upload PowerScribe {captureIntent === 'report' ? 'current report' : 'worklist'}
             </label>
             <input
               ref={fileRef}
               id="ocr-file-input"
-              aria-label="Upload PowerScribe window grab"
+              aria-label={`Upload PowerScribe ${captureIntent === 'report' ? 'current report' : 'worklist'}`}
               type="file"
               accept="image/*"
               className="hidden"
@@ -1407,8 +1633,9 @@ export function Import({ onReviewReady }: ImportProps) {
           <div className="rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
             <p className="text-[12px] font-medium text-rd-label-primary">Capture tips</p>
             <p className="mt-1 text-[12px] text-rd-label-secondary">
-              Capture the PowerScribe study list with Procedure, Exam Date, and Modified columns visible.
-              The screenshot is cropped, parsed, matched, and checked locally. Already-imported studies are auto-skipped.
+              {captureIntent === 'report'
+                ? 'Capture the current PowerScribe report with the EXAMINATION title and date visible. Adjust the blue crop before processing; the full report image is never saved.'
+                : 'Capture the PowerScribe study list with Procedure, Exam Date, and Modified columns visible. The screenshot is cropped, parsed, matched, and checked locally. Already-imported studies are auto-skipped.'}
             </p>
           </div>
           <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />

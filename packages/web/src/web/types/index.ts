@@ -476,6 +476,15 @@ export interface UserSettings {
       bottom: number;
     };
   }>;
+  /** User-adjusted EXAMINATION-header crop for the single-report pathway. */
+  savedPowerScribeReportCropRegions: Record<string, {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    imageWidth?: number;
+    imageHeight?: number;
+  }>;
 }
 
 /** Color accent for a radiologist profile, practice, or org. */

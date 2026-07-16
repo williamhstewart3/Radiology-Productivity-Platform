@@ -59,8 +59,20 @@ function stripTrailingOcrDateTimeGarbage(raw: string): string {
   return text;
 }
 
+/**
+ * PowerScribe selection/status glyphs are sometimes OCR'd as square brackets.
+ * Keep the words inside the brackets, but never let the bracket glyphs become
+ * part of matching keys or learned display aliases.
+ */
+export function stripOcrSquareBrackets(raw: string): string {
+  return raw
+    .replace(/[\u005B\u005D［］【】]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function normalizeOcrExamTextForMatching(raw: string): string {
-  let text = raw
+  let text = stripOcrSquareBrackets(raw)
     .replace(/[✓✔☑☒●•·]/g, ' ')
     .replace(/[\u2010-\u2015]/g, '-')
     .replace(/&/g, ' AND ')

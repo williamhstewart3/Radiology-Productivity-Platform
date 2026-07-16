@@ -6,6 +6,7 @@ import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNorm
 import type { MatchCandidate, StudyLog, DuplicateStatus } from '../types';
 import type { ImportedStudy, ImportSource } from '../types/importProvider';
 import type { StudyCandidate } from '../utils/duplicateDetection';
+import { stripOcrSquareBrackets } from '../utils/ocrExamTextNormalization';
 
 export interface PipelineReviewRow {
   tempId: string;
@@ -226,7 +227,9 @@ export function resolvePowerScribeProductivityDates(study: ImportedStudy, fallba
 }
 
 function procedureNameFor(study: ImportedStudy): string {
-  return (study.procedureName ?? study.cleanedExamName ?? study.cleanedText ?? study.examTitle).trim();
+  return stripOcrSquareBrackets(
+    study.procedureName ?? study.cleanedExamName ?? study.cleanedText ?? study.examTitle,
+  );
 }
 
 export function __testProcedureNameFor(study: ImportedStudy): string {

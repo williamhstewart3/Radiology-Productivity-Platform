@@ -34,6 +34,8 @@ describe('OCR exam text normalization', () => {
     ['CT HEAD WO CONTRAST T212026', 'CT HEAD WO CONTRAST'],
     ['XR ABDOMEN AP 1112026', 'XR ABDOMEN AP'],
     ['XR CHEST PORTABLE 819AM', 'XR CHEST PORTABLE'],
+    ['[] [CT CHEST W CONTRAST]', 'CT CHEST W CONTRAST'],
+    ['【MRI BRAIN WO CONTRAST】', 'MRI BRAIN WO CONTRAST'],
   ])('%s', (raw, expected) => {
     expect(normalizeOcrExamTextForMatching(raw)).toBe(expected);
   });

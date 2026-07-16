@@ -19,6 +19,7 @@ import type {
 } from '../types';
 import { ACR_CY2026_MPFS_IMPACT_TABLE_SOURCE, isRadiologyActiveCpt } from '../data/acrRadiologyActiveCptSet';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import { stripOcrSquareBrackets } from '../utils/ocrExamTextNormalization';
 
 /**
  * Local-first database. Phase 1 uses IndexedDB via Dexie exclusively.
@@ -457,6 +458,47 @@ export class RvuDatabase extends Dexie {
         if (!('siteId' in session)) session.siteId = session.profileId ? siteByProfile.get(session.profileId) ?? null : null;
       });
     });
+
+    // v22: separate, reusable crop for PowerScribe single-report headers.
+    this.version(22).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, siteId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      ocrLearningEntries: 'id, profileId, siteId, normalizedOcrText, matchedCpt, lastUsedAt',
+      activeReviewSessions: 'id, profileId, siteId, readingDate, status, updatedAt',
+      auditLogEntries: 'id, profileId, siteId, sessionId, logDate, action, createdAt',
+      hospitalComparisonReports: 'id, profileId, siteId, reportDate, createdAt',
+      memorySuggestions: 'id, profileId, siteId, normalizedKey, status, createdAt',
+      feedbackEvents: 'id, profileId, sessionId, category, severity, status, createdAt',
+      correctionActions: 'id, feedbackEventId, targetRowId, actionType, createdAt, appliedAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade(async (trans) => {
+      await trans.table('userSettings').toCollection().modify((settings) => {
+        if (!('savedPowerScribeReportCropRegions' in settings)) settings.savedPowerScribeReportCropRegions = {};
+      });
+      await trans.table('examAliases').toCollection().modify((alias) => {
+        const cleanedRaw = stripOcrSquareBrackets(alias.aliasTextRaw ?? '');
+        if (cleanedRaw) {
+          alias.aliasTextRaw = cleanedRaw;
+          alias.aliasText = normalizeRadiologyDescription(cleanedRaw);
+        }
+        if (alias.canonicalExamName) {
+          alias.canonicalExamName = stripOcrSquareBrackets(alias.canonicalExamName) || null;
+        }
+      });
+      await trans.table('examDictionary').toCollection().modify((entry) => {
+        if (Array.isArray(entry.powerScribeNames)) {
+          entry.powerScribeNames = Array.from(new Set(
+            entry.powerScribeNames.map((name: string) => stripOcrSquareBrackets(name)).filter(Boolean),
+          ));
+        }
+      });
+    });
   }
 }
 
@@ -496,6 +538,7 @@ export async function ensureUserSettings(): Promise<UserSettings> {
     alwaysProcessPowerScribeClipboard: false,
     clearClipboardAfterImport: false,
     savedPowerScribeCropRegions: {},
+    savedPowerScribeReportCropRegions: {},
   };
   await db.userSettings.put(defaults);
   return defaults;

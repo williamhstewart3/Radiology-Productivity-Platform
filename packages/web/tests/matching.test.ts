@@ -250,6 +250,16 @@ describe('modality-first CPT matching', () => {
     expect(__testProcedureNameFor(study)).toBe('CT CHEST ABDOMEN PELVIS W CONTRAST');
   });
 
+  test('import pipeline removes OCR square brackets before display and alias learning', () => {
+    const study = {
+      source: 'ocr',
+      examTitle: '[] [XR CHEST PORTABLE]',
+      procedureName: '[] [XR CHEST PORTABLE]',
+    } as ImportedStudy;
+
+    expect(__testProcedureNameFor(study)).toBe('XR CHEST PORTABLE');
+  });
+
   test('exact institution multi-CPT mapping is not treated as generic CPT ambiguity', () => {
     const candidates = [
       {

@@ -34,8 +34,9 @@ export async function inspectPowerScribeReportCapture(
   source: Blob,
   engine: OcrEngine = getDefaultOcrEngine(),
   crop: (source: Blob, rect: RelativeCropRect) => Promise<Blob> = cropImageBlob,
+  headerRect: RelativeCropRect = POWERSCRIBE_REPORT_HEADER_REGION,
 ): Promise<ReportCaptureInspection> {
-  const headerBlob = await crop(source, POWERSCRIBE_REPORT_HEADER_REGION);
+  const headerBlob = await crop(source, headerRect);
   const result = await engine.extractText(headerBlob, {
     pageSegMode: PSM.SINGLE_BLOCK,
     preserveInterwordSpaces: true,
@@ -45,7 +46,7 @@ export async function inspectPowerScribeReportCapture(
   const header = parsePowerScribeReportHeader(result.rawText);
   return {
     detected: header.matched,
-    headerRect: POWERSCRIBE_REPORT_HEADER_REGION,
+    headerRect,
     header,
     ocrConfidence: result.confidence,
   };
