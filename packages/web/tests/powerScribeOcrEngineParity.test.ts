@@ -112,7 +112,7 @@ describe('browser and Windows PowerScribe OCR grammar parity', () => {
 
   test('keeps per-column OCR alphabets constrained and dictionary correction disabled', () => {
     const params = __testColumnOcrParams();
-    expect(params.procedure.charWhitelist).toBe('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /+&()-.');
+    expect(params.procedure.charWhitelist).toBe('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /+&()-.…');
     expect(params.examDate.charWhitelist).toBe('0123456789/: APM');
     expect(params.modifiedDate.charWhitelist).toBe('0123456789/: APM');
     expect(params.procedure.dictionaryCorrection).toBe(false);

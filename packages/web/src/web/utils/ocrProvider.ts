@@ -47,23 +47,33 @@ export interface OcrEngineParams {
 
 export interface OcrEngine {
   readonly name: 'tesseract.js' | 'text-detector';
+  prepare?(): Promise<void>;
   extractText(image: File | Blob, params?: OcrEngineParams): Promise<OcrResult>;
 }
 
 let tesseractWorker: Worker | null = null;
 let lastAppliedParams: Required<OcrEngineParams> | null = null;
 
+async function ensureTesseractWorker(): Promise<Worker> {
+  if (!tesseractWorker) {
+    tesseractWorker = await createWorker('eng', undefined, {
+      workerPath: '/ocr/tesseract/worker.min.js',
+      corePath: '/ocr/tesseract/core',
+      langPath: '/ocr/tesseract/lang',
+    });
+  }
+  return tesseractWorker;
+}
+
 export class TesseractProvider implements OcrEngine {
   readonly name = 'tesseract.js' as const;
 
+  async prepare(): Promise<void> {
+    await ensureTesseractWorker();
+  }
+
   async extractText(image: File | Blob, params: OcrEngineParams = {}): Promise<OcrResult> {
-    if (!tesseractWorker) {
-      tesseractWorker = await createWorker('eng', undefined, {
-        workerPath: '/ocr/tesseract/worker.min.js',
-        corePath: '/ocr/tesseract/core',
-        langPath: '/ocr/tesseract/lang',
-      });
-    }
+    const worker = await ensureTesseractWorker();
 
     const nextParams: Required<OcrEngineParams> = {
       pageSegMode: params.pageSegMode ?? PSM.AUTO,
@@ -79,7 +89,7 @@ export class TesseractProvider implements OcrEngine {
       lastAppliedParams?.dictionaryCorrection !== nextParams.dictionaryCorrection ||
       lastAppliedParams?.userDefinedDpi !== nextParams.userDefinedDpi
     ) {
-      await tesseractWorker.setParameters({
+      await worker.setParameters({
         tessedit_pageseg_mode: nextParams.pageSegMode,
         tessedit_char_whitelist: nextParams.charWhitelist,
         preserve_interword_spaces: nextParams.preserveInterwordSpaces ? '1' : '0',
@@ -90,7 +100,7 @@ export class TesseractProvider implements OcrEngine {
       lastAppliedParams = nextParams;
     }
 
-    const { data } = await tesseractWorker.recognize(image, {}, { text: true, blocks: true });
+    const { data } = await worker.recognize(image, {}, { text: true, blocks: true });
 
     const lines = data.text
       .split('\n')

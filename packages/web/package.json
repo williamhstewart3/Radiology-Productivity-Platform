@@ -10,6 +10,7 @@
     "dev": "vite",
     "start": "bun src/server.ts",
     "typecheck": "tsc -b",
+    "test:ocr-regression": "bun test tests/powerScribePreprocessing.test.ts tests/powerScribeOcrEngineParity.test.ts tests/ocrColumnReassembly.test.ts tests/matching.test.ts tests/powerScribeImportContract.test.ts tests/duplicateDetection.test.ts",
     "lint": "cd ../.. && oxlint packages/web --deny-warnings --no-error-on-unmatched-pattern",
     "preview": "bun run build && vite preview",
     "db:generate": "bun --env-file=../../.env drizzle-kit generate",

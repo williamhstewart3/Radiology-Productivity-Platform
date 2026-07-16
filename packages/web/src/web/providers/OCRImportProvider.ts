@@ -28,10 +28,17 @@ import {
   type PowerScribeCropAccounting,
   type PowerScribeColumnName,
   type PowerScribeManualColumnCrops,
+  type PowerScribePreprocessedCell,
   type PowerScribeRowBand,
   type PowerScribeRowSlot,
   type RelativeCropRect,
 } from '../utils/imageCrop';
+import type { PowerScribePreprocessConfig } from '../utils/powerScribePreprocessing';
+import {
+  POWERSCRIBE_PRODUCTION_OCR_CONFIGURATION,
+  powerScribeOcrParamsForColumn,
+  type PowerScribeOcrEngineConfig,
+} from '../utils/powerScribeOcrConfiguration';
 import type { ImportProvider, ImportedStudy } from '../types/importProvider';
 import type { ParsedLine } from '../utils/powerScribeParser';
 import type { OcrPositionedLine, OcrPositionedWord, OcrResult } from '../utils/ocrProvider';
@@ -43,6 +50,20 @@ export interface OCRImportOptions {
   manualRowBands?: PowerScribeRowBand[] | null;
   savedCropRegion?: RelativeCropRect | null;
   autoDetectPowerScribeTable?: boolean;
+  preprocessingConfig?: PowerScribePreprocessConfig;
+  ocrEngineConfiguration?: PowerScribeOcrEngineConfig;
+}
+
+export interface OCRImportDebugCell {
+  rowIndex: number;
+  column: PowerScribeColumnName;
+  sourceRect: RelativeCropRect;
+  rawText: string;
+  normalizedText: string;
+  confidence: number;
+  preprocessingVariant: string;
+  ocrEngineVariant: string;
+  validationStatus: 'valid' | 'review' | 'not_applicable';
 }
 
 export interface OCRImportDebugRow extends ParsedLine {
@@ -80,6 +101,23 @@ export interface OCRImportDebugInfo {
   excludedRowCount?: number;
   finalSavedRowCount?: number;
   columnText?: Record<PowerScribeColumnName, string>;
+  cellResults?: OCRImportDebugCell[];
+  preprocessedColumns?: Array<{
+    name: PowerScribeColumnName;
+    blob: Blob;
+    width: number;
+    height: number;
+  }>;
+  timings?: {
+    workerInitializationMs: number;
+    decodeMs: number;
+    cropSplitMs: number;
+    preprocessingMs: number;
+    columnOcrMs: Record<PowerScribeColumnName, number>;
+    recognitionMs: number;
+    parsingNormalizationMs: number;
+    totalMs: number;
+  };
   detectedRows: OCRImportDebugRow[];
   ocrConfidence: number;
   accounting?: PowerScribeCropAccounting;
@@ -94,32 +132,20 @@ interface ReassembledColumnRow {
   rawModifiedDateColumnText: string;
 }
 
-const COLUMN_OCR_PARAMS = {
-  procedure: {
-    pageSegMode: PSM.SINGLE_BLOCK,
-    charWhitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /+&()-.',
-    preserveInterwordSpaces: true,
-    dictionaryCorrection: false,
-    userDefinedDpi: 300,
-  },
-  examDate: {
-    pageSegMode: PSM.SINGLE_BLOCK,
-    charWhitelist: '0123456789/: APM',
-    preserveInterwordSpaces: true,
-    dictionaryCorrection: false,
-    userDefinedDpi: 300,
-  },
-  modifiedDate: {
-    pageSegMode: PSM.SINGLE_BLOCK,
-    charWhitelist: '0123456789/: APM',
-    preserveInterwordSpaces: true,
-    dictionaryCorrection: false,
-    userDefinedDpi: 300,
-  },
-} satisfies Record<PowerScribeColumnName, Parameters<ReturnType<typeof getDefaultOcrEngine>['extractText']>[1]>;
-
 export function __testColumnOcrParams() {
-  return COLUMN_OCR_PARAMS;
+  return Object.fromEntries(
+    (['procedure', 'examDate', 'modifiedDate'] as const).map((column) => [
+      column,
+      powerScribeOcrParamsForColumn(column),
+    ]),
+  ) as Record<PowerScribeColumnName, ReturnType<typeof powerScribeOcrParamsForColumn>>;
+}
+
+export function powerScribeColumnOcrParams(
+  column: PowerScribeColumnName,
+  configuration: PowerScribeOcrEngineConfig = POWERSCRIBE_PRODUCTION_OCR_CONFIGURATION,
+) {
+  return powerScribeOcrParamsForColumn(column, configuration);
 }
 
 const RADIOLOGY_PROCEDURE_SIGNAL = /\b(?:CT|CTA|MRI|MR|MRA|XR|X RAY|US|ULTRASOUND|SONOGRAM|NM|PET|MAMMO|FLUORO|IR|OB|ABDOMEN|PELVIS|CHEST|HEAD|NECK|BRAIN|SPINE|CERVICAL|THORACIC|LUMBAR|SACRUM|COCCYX|SHOULDER|CLAVICLE|SCAPULA|HUMERUS|ELBOW|FOREARM|WRIST|HAND|FINGER|HIP|FEMUR|KNEE|TIBIA|FIBULA|ANKLE|FOOT|TOE|CALCANEUS|HEEL|RENAL|KIDNEY|THYROID|BREAST|SCROTUM|TRANSVAGINAL|TRANSRECTAL|CAROTID|ARTERIAL|VENOUS|DUPLEX|DOPPLER|AORTA|IVC|ILIAC|DIALYSIS|FETAL|BIOPHYSICAL|MAMMOGRAM|BONE|SPECT|VQ|HIDA|GASTRIC|ESOPHAGRAM|BARIUM)\b/;
@@ -127,7 +153,7 @@ const RADIOLOGY_PROCEDURE_SIGNAL = /\b(?:CT|CTA|MRI|MR|MRA|XR|X RAY|US|ULTRASOUN
 export function powerScribeRowGrammarFailure(row: Pick<ParsedLine, 'procedureName' | 'examDateTime' | 'modifiedDateTime'>): string | null {
   const procedure = row.procedureName.trim();
   if (/\d/.test(procedure)) return 'Procedure contains numeric date or row spillover';
-  if (!/^[A-Z][A-Z /+&()\-.]{2,}$/.test(procedure) || !RADIOLOGY_PROCEDURE_SIGNAL.test(procedure)) {
+  if (!/^[A-Z][A-Z /+&()\-.…]{2,}$/.test(procedure) || !RADIOLOGY_PROCEDURE_SIGNAL.test(procedure)) {
     return 'Procedure is not a plausible all-caps RIS title';
   }
   if (!row.examDateTime) return 'Missing or unclear Exam Date';
@@ -149,7 +175,7 @@ export function recoverPowerScribeProcedureName(
     const normalized = normalizeOcrExamTextForMatching(withoutDateSpill);
     const orbitMapping = findOrbitCmeSeedMapping(normalized);
     if (orbitMapping) return normalizeOcrExamTextForMatching(orbitMapping.studyName).toUpperCase();
-    if (/^[A-Z][A-Z /+&()\-.]{2,}$/.test(normalized) && RADIOLOGY_PROCEDURE_SIGNAL.test(normalized)) {
+    if (/^[A-Z][A-Z /+&()\-.…]{2,}$/.test(normalized) && RADIOLOGY_PROCEDURE_SIGNAL.test(normalized)) {
       return normalized;
     }
   }
@@ -491,6 +517,47 @@ function textInRowSlot(result: OcrResult, slot: PowerScribeRowSlot): string {
     : '';
 }
 
+function confidenceInRowSlot(result: OcrResult, slot: PowerScribeRowSlot): number {
+  const confidences = result.positionedLines
+    .filter((line) => {
+      const center = lineCenterY(line);
+      return center != null && center >= slot.compositeTop && center <= slot.compositeBottom;
+    })
+    .map((line) => line.confidence)
+    .filter(Number.isFinite);
+  if (confidences.length === 0) return result.lines[slot.index] ? result.confidence : 0;
+  return confidences.reduce((sum, confidence) => sum + confidence, 0) / confidences.length;
+}
+
+function debugCellResult(
+  cell: PowerScribePreprocessedCell,
+  result: OcrResult,
+  slot: PowerScribeRowSlot,
+  preprocessingVariant: string,
+  ocrEngineVariant: string,
+): OCRImportDebugCell {
+  const rawText = textInRowSlot(result, slot);
+  const normalizedText = cell.column === 'procedure'
+    ? normalizeOcrExamTextForMatching(rawText)
+    : normalizeColumnLineText(rawText);
+  const parsedTimestamp = cell.column === 'procedure' ? null : parseDateTimeFromOcr(rawText);
+  return {
+    rowIndex: cell.rowIndex,
+    column: cell.column,
+    sourceRect: cell.sourceRect,
+    rawText,
+    normalizedText,
+    confidence: confidenceInRowSlot(result, slot),
+    preprocessingVariant,
+    ocrEngineVariant,
+    validationStatus: cell.column === 'procedure'
+      ? 'not_applicable'
+      : parsedTimestamp?.studyDateTime && parsedTimestamp.confidence >= 0.8
+        ? 'valid'
+        : 'review',
+  };
+}
+
 function reassembleColumnRowsBySlots(
   results: ColumnOcrResults,
   slots: PowerScribeRowSlot[],
@@ -544,7 +611,12 @@ export class OCRImportProvider implements ImportProvider {
   }
 
   async importStudies(): Promise<ImportedStudy[]> {
+    const importStartedAt = globalThis.performance?.now() ?? Date.now();
     const provider = getDefaultOcrEngine();
+    const engineConfiguration = this.options.ocrEngineConfiguration ?? POWERSCRIBE_PRODUCTION_OCR_CONFIGURATION;
+    const workerStartedAt = globalThis.performance?.now() ?? Date.now();
+    await provider.prepare?.();
+    const workerInitializationMs = (globalThis.performance?.now() ?? Date.now()) - workerStartedAt;
     const passOne = this.options.cropBeforeOcr === false
       ? null
       : await provider.extractText(this.file, { pageSegMode: PSM.AUTO, userDefinedDpi: 300 });
@@ -564,6 +636,7 @@ export class OCRImportProvider implements ImportProvider {
               ? this.options.cropRegion ?? DEFAULT_POWERSCRIBE_STUDY_LIST_CROP
               : this.options.cropRegion ?? null,
             savedCrop: this.options.savedCropRegion ?? null,
+            preprocessingConfig: this.options.preprocessingConfig,
             headerWords: (passOne?.positionedWords ?? [])
               .filter((word) => word.bbox != null)
               .map((word) => ({ text: word.text, confidence: word.confidence, bbox: word.bbox! })),
@@ -623,11 +696,22 @@ export class OCRImportProvider implements ImportProvider {
     const columnResults = preprocessed
       ? {} as ColumnOcrResults
       : null;
+    const columnOcrMs = {
+      procedure: 0,
+      examDate: 0,
+      modifiedDate: 0,
+    } satisfies Record<PowerScribeColumnName, number>;
     if (preprocessed && columnResults) {
       for (const column of preprocessed.columns) {
-        columnResults[column.name] = await provider.extractText(column.blob, COLUMN_OCR_PARAMS[column.name]);
+        const startedAt = globalThis.performance?.now() ?? Date.now();
+        columnResults[column.name] = await provider.extractText(
+          column.blob,
+          powerScribeOcrParamsForColumn(column.name, engineConfiguration),
+        );
+        columnOcrMs[column.name] = (globalThis.performance?.now() ?? Date.now()) - startedAt;
       }
     }
+    const parsingStartedAt = globalThis.performance?.now() ?? Date.now();
     const procedureRect = preprocessed?.columns.find((column) => column.name === 'procedure')?.rect ?? null;
     const visibleRowNumbers = preprocessed && procedureRect
       ? detectPowerScribeVisibleRowNumbers(
@@ -684,6 +768,16 @@ export class OCRImportProvider implements ImportProvider {
       ocrConfidence,
       enabled: false,
     });
+    const cellResults = preprocessed && columnResults
+      ? preprocessed.cells.map((cell) => debugCellResult(
+          cell,
+          columnResults[cell.column],
+          preprocessed.rowSlots[cell.rowIndex],
+          preprocessed.accounting.preprocessingVariant,
+          engineConfiguration.id,
+        ))
+      : undefined;
+    const parsingNormalizationMs = (globalThis.performance?.now() ?? Date.now()) - parsingStartedAt;
 
     this.debugInfo = {
       crop: preprocessed?.tableCrop ?? null,
@@ -713,12 +807,34 @@ export class OCRImportProvider implements ImportProvider {
             modifiedDate: columnResults.modifiedDate.rawText,
           }
         : undefined,
+      cellResults,
+      preprocessedColumns: import.meta.env.DEV && preprocessed
+        ? preprocessed.columns.map((column) => ({
+            name: column.name,
+            blob: column.blob,
+            width: column.outputWidth,
+            height: column.outputHeight,
+          }))
+        : undefined,
+      timings: preprocessed
+        ? {
+            workerInitializationMs,
+            decodeMs: preprocessed.accounting.decodeDurationMs,
+            cropSplitMs: preprocessed.accounting.cropSplitDurationMs,
+            preprocessingMs: preprocessed.accounting.preprocessingDurationMs,
+            columnOcrMs,
+            recognitionMs: Object.values(columnOcrMs).reduce((sum, duration) => sum + duration, 0),
+            parsingNormalizationMs,
+            totalMs: (globalThis.performance?.now() ?? Date.now()) - importStartedAt,
+          }
+        : undefined,
       detectedRows: parsed,
       ocrConfidence,
       accounting: preprocessed
           ? {
             ...preprocessed.accounting,
             engine: provider.name,
+            ocrConfigurationVariant: engineConfiguration.id,
             inputRowCount: rowLines.length,
             outputRowCount: parsed.length + parsedWithDebug.debug.rejectedRows.length,
           }

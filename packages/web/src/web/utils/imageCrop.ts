@@ -1,4 +1,10 @@
 import { detectPowerScribeDatetimeLayout, detectPowerScribeHeaderLayout, type PowerScribeOcrWord } from './powerScribeHeaderAnchors';
+import {
+  POWERSCRIBE_PRODUCTION_PREPROCESSING,
+  preprocessPowerScribeRgba,
+  resolvePowerScribePreprocessScale,
+  type PowerScribePreprocessConfig,
+} from './powerScribePreprocessing';
 
 export interface RelativeCropRect {
   x: number;
@@ -79,6 +85,16 @@ export interface PowerScribeColumnCrop {
   name: PowerScribeColumnName;
   blob: Blob;
   rect: RelativeCropRect;
+  outputWidth: number;
+  outputHeight: number;
+}
+
+export interface PowerScribePreprocessedCell {
+  rowIndex: number;
+  column: PowerScribeColumnName;
+  sourceRect: RelativeCropRect;
+  compositeTop: number;
+  compositeBottom: number;
 }
 
 export interface PowerScribeColumnPreprocessResult {
@@ -87,6 +103,7 @@ export interface PowerScribeColumnPreprocessResult {
   columns: PowerScribeColumnCrop[];
   rowBands: PowerScribeRowBand[];
   rowSlots: PowerScribeRowSlot[];
+  cells: PowerScribePreprocessedCell[];
   accounting: PowerScribeCropAccounting;
 }
 
@@ -99,6 +116,11 @@ export interface PowerScribeCropAccounting {
   detectedRowCount: number;
   bandPitch: number | null;
   preprocessScale: number;
+  preprocessingVariant: string;
+  ocrConfigurationVariant?: string;
+  decodeDurationMs: number;
+  cropSplitDurationMs: number;
+  preprocessingDurationMs: number;
   headerValleyDrift: number | null;
   inputRowCount: number;
   outputRowCount: number;
@@ -110,6 +132,7 @@ export interface PowerScribePreprocessOptions {
   manualRows?: PowerScribeRowBand[] | null;
   savedCrop?: RelativeCropRect | null;
   headerWords?: PowerScribeOcrWord[];
+  preprocessingConfig?: PowerScribePreprocessConfig;
 }
 
 export class PowerScribeTableNotFoundError extends Error {
@@ -689,52 +712,36 @@ export function __testDetectPowerScribeColumnLayoutFromProjection(projection: nu
   return detectPowerScribeColumnLayoutFromProjection(projection);
 }
 
-function adaptiveThreshold(imageData: ImageData, width: number, height: number): ImageData {
-  const source = imageData.data;
-  const gray = new Uint8ClampedArray(width * height);
-  const integral = new Float64Array((width + 1) * (height + 1));
+function nowMs(): number {
+  return globalThis.performance?.now() ?? Date.now();
+}
 
-  for (let y = 0; y < height; y++) {
-    let rowSum = 0;
-    for (let x = 0; x < width; x++) {
-      const offset = (y * width + x) * 4;
-      const raw = source[offset] * 0.299 + source[offset + 1] * 0.587 + source[offset + 2] * 0.114;
-      const contrasted = Math.max(0, Math.min(255, (raw - 128) * 1.55 + 128));
-      gray[y * width + x] = contrasted;
-      rowSum += contrasted;
-      integral[(y + 1) * (width + 1) + x + 1] = integral[y * (width + 1) + x + 1] + rowSum;
-    }
-  }
-
-  const output = new ImageData(width, height);
-  const target = output.data;
-  const radius = 14;
-  for (let y = 0; y < height; y++) {
-    const y0 = Math.max(0, y - radius);
-    const y1 = Math.min(height - 1, y + radius);
-    for (let x = 0; x < width; x++) {
-      const x0 = Math.max(0, x - radius);
-      const x1 = Math.min(width - 1, x + radius);
-      const area = (x1 - x0 + 1) * (y1 - y0 + 1);
-      const sum =
-        integral[(y1 + 1) * (width + 1) + x1 + 1] -
-        integral[y0 * (width + 1) + x1 + 1] -
-        integral[(y1 + 1) * (width + 1) + x0] +
-        integral[y0 * (width + 1) + x0];
-      const threshold = sum / area - 7;
-      const value = gray[y * width + x] < threshold ? 0 : 255;
-      const offset = (y * width + x) * 4;
-      target[offset] = value;
-      target[offset + 1] = value;
-      target[offset + 2] = value;
-      target[offset + 3] = 255;
-    }
-  }
-
+function applyPreprocessing(imageData: ImageData, config: PowerScribePreprocessConfig): ImageData {
+  const processed = preprocessPowerScribeRgba({
+    data: imageData.data,
+    width: imageData.width,
+    height: imageData.height,
+  }, config);
+  const output = new ImageData(processed.width, processed.height);
+  output.data.set(processed.data);
   return output;
 }
 
-async function preprocessedBlobFromBitmapCrop(bitmap: ImageBitmap, cropRect: RelativeCropRect, outputType: string, scale: number): Promise<Blob> {
+interface RenderedPreprocessedImage {
+  blob: Blob;
+  width: number;
+  height: number;
+  durationMs: number;
+}
+
+async function preprocessedBlobFromBitmapCrop(
+  bitmap: ImageBitmap,
+  cropRect: RelativeCropRect,
+  outputType: string,
+  scale: number,
+  config: PowerScribePreprocessConfig,
+): Promise<RenderedPreprocessedImage> {
+  const startedAt = nowMs();
   const source = absoluteRectFromRelative(cropRect, bitmap.width, bitmap.height);
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(source.width * scale));
@@ -742,30 +749,39 @@ async function preprocessedBlobFromBitmapCrop(bitmap: ImageBitmap, cropRect: Rel
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('Canvas is not available for OCR preprocessing');
 
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = scale !== 1 && config.imageSmoothingEnabled;
+  ctx.imageSmoothingQuality = config.imageSmoothingQuality;
   ctx.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, canvas.width, canvas.height);
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  ctx.putImageData(adaptiveThreshold(imageData, canvas.width, canvas.height), 0, 0);
+  ctx.putImageData(applyPreprocessing(imageData, config), 0, 0);
 
-  return await new Promise<Blob>((resolve, reject) => {
+  const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) resolve(blob);
       else reject(new Error('Canvas preprocessing export failed'));
     }, outputType);
   });
+  return { blob, width: canvas.width, height: canvas.height, durationMs: nowMs() - startedAt };
 }
 
 function buildPowerScribeRowSlots(
   bands: PowerScribeRowBand[],
   imageHeight: number,
   scale: number,
+  cellPaddingPx: number,
 ): PowerScribeRowSlot[] {
   const padding = Math.max(8, Math.round(scale * 4));
+  const sourcePadding = Math.max(0, cellPaddingPx) / Math.max(1, imageHeight);
   let cursor = padding;
   return bands.map((band, index) => {
-    const slotHeight = Math.max(8, Math.round((band.bottom - band.top) * imageHeight * scale));
+    const previousBoundary = index === 0 ? 0 : (bands[index - 1].bottom + band.top) / 2;
+    const nextBoundary = index === bands.length - 1 ? 1 : (band.bottom + bands[index + 1].top) / 2;
+    const top = Math.max(previousBoundary, band.top - sourcePadding);
+    const bottom = Math.min(nextBoundary, band.bottom + sourcePadding);
+    const slotHeight = Math.max(8, Math.round((bottom - top) * imageHeight * scale));
     const slot: PowerScribeRowSlot = {
-      ...band,
+      top,
+      bottom,
       index,
       compositeTop: cursor,
       compositeBottom: cursor + slotHeight,
@@ -781,7 +797,9 @@ async function preprocessedStackedRowsBlob(
   rowSlots: PowerScribeRowSlot[],
   outputType: string,
   scale: number,
-): Promise<Blob> {
+  config: PowerScribePreprocessConfig,
+): Promise<RenderedPreprocessedImage> {
+  const startedAt = nowMs();
   const column = absoluteRectFromRelative(columnRect, bitmap.width, bitmap.height);
   const padding = Math.max(8, Math.round(scale * 4));
   const canvas = document.createElement('canvas');
@@ -791,7 +809,8 @@ async function preprocessedStackedRowsBlob(
   if (!ctx) throw new Error('Canvas is not available for row OCR preprocessing');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = scale !== 1 && config.imageSmoothingEnabled;
+  ctx.imageSmoothingQuality = config.imageSmoothingQuality;
 
   for (const slot of rowSlots) {
     const sourceY = Math.max(0, Math.round(slot.top * bitmap.height));
@@ -810,15 +829,16 @@ async function preprocessedStackedRowsBlob(
       targetHeight,
     );
     const cellData = ctx.getImageData(0, slot.compositeTop, canvas.width, targetHeight);
-    ctx.putImageData(adaptiveThreshold(cellData, canvas.width, targetHeight), 0, slot.compositeTop);
+    ctx.putImageData(applyPreprocessing(cellData, config), 0, slot.compositeTop);
   }
 
-  return await new Promise<Blob>((resolve, reject) => {
+  const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) resolve(blob);
       else reject(new Error('Row OCR preprocessing export failed'));
     }, outputType);
   });
+  return { blob, width: canvas.width, height: canvas.height, durationMs: nowMs() - startedAt };
 }
 
 export async function cropPowerScribeScreenshotWithDebug(
@@ -843,8 +863,12 @@ export async function preprocessPowerScribeColumnsForOcr(
   options: PowerScribePreprocessOptions = {},
   outputType = 'image/png',
 ): Promise<PowerScribeColumnPreprocessResult> {
+  const decodeStartedAt = nowMs();
   const bitmap = await createImageBitmap(image);
+  const decodeDurationMs = nowMs() - decodeStartedAt;
+  const cropSplitStartedAt = nowMs();
   try {
+    const preprocessingConfig = options.preprocessingConfig ?? POWERSCRIBE_PRODUCTION_PREPROCESSING;
     const headerLayout = detectPowerScribeHeaderLayout(options.headerWords ?? [], bitmap.width, bitmap.height);
     const datetimeLayout = headerLayout
       ? null
@@ -929,18 +953,44 @@ export async function preprocessPowerScribeColumnsForOcr(
       ? normalizePowerScribeRowBands(options.manualRows, rowRange)
       : detectPowerScribeRowBandsFromBitmap(bitmap, columnRects);
     const pitch = structuralLayout?.bandPitch ?? null;
-    const preprocessScale = pitch == null ? 3 : Math.max(1.5, Math.min(4, 36 / Math.max(9, pitch * 0.55)));
+    const preprocessScale = resolvePowerScribePreprocessScale(preprocessingConfig, pitch);
     const rowBands = detectedRows.length >= 2 ? detectedRows : [];
-    const rowSlots = buildPowerScribeRowSlots(rowBands, bitmap.height, preprocessScale);
+    const rowSlots = buildPowerScribeRowSlots(
+      rowBands,
+      bitmap.height,
+      preprocessScale,
+      preprocessingConfig.cellPaddingPx,
+    );
+    const cropSplitDurationMs = nowMs() - cropSplitStartedAt;
     const columns: PowerScribeColumnCrop[] = [];
+    const cells: PowerScribePreprocessedCell[] = [];
+    let preprocessingDurationMs = 0;
     for (const column of columnDefinitions) {
+      const rendered = rowSlots.length > 0
+        ? await preprocessedStackedRowsBlob(bitmap, column.rect, rowSlots, outputType, preprocessScale, preprocessingConfig)
+        : await preprocessedBlobFromBitmapCrop(bitmap, column.rect, outputType, preprocessScale, preprocessingConfig);
+      preprocessingDurationMs += rendered.durationMs;
       columns.push({
         name: column.name,
         rect: column.rect,
-        blob: rowSlots.length > 0
-          ? await preprocessedStackedRowsBlob(bitmap, column.rect, rowSlots, outputType, preprocessScale)
-          : await preprocessedBlobFromBitmapCrop(bitmap, column.rect, outputType, preprocessScale),
+        blob: rendered.blob,
+        outputWidth: rendered.width,
+        outputHeight: rendered.height,
       });
+      for (const slot of rowSlots) {
+        cells.push({
+          rowIndex: slot.index,
+          column: column.name,
+          sourceRect: {
+            x: column.rect.x,
+            y: slot.top,
+            width: column.rect.width,
+            height: slot.bottom - slot.top,
+          },
+          compositeTop: slot.compositeTop,
+          compositeBottom: slot.compositeBottom,
+        });
+      }
     }
     const headerValleyDrift = !manualColumns && structuralLayout && valleyLayout.method === 'detected'
       ? Math.max(
@@ -954,6 +1004,7 @@ export async function preprocessPowerScribeColumnsForOcr(
       columns,
       rowBands,
       rowSlots,
+      cells,
       accounting: {
         engine: 'tesseract.js',
         cropMethod: tableCrop.method,
@@ -963,6 +1014,10 @@ export async function preprocessPowerScribeColumnsForOcr(
         detectedRowCount: rowBands.length,
         bandPitch: pitch,
         preprocessScale,
+        preprocessingVariant: preprocessingConfig.id,
+        decodeDurationMs,
+        cropSplitDurationMs,
+        preprocessingDurationMs,
         headerValleyDrift,
         inputRowCount: 0,
         outputRowCount: 0,

@@ -42,6 +42,7 @@ import {
 
 function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocrDebug']; imageFile?: File | Blob | null }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [preprocessedUrls, setPreprocessedUrls] = useState<Array<{ name: string; url: string; width: number; height: number }>>([]);
   useEffect(() => {
     if (!imageFile) {
       setPreviewUrl(null);
@@ -51,6 +52,16 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [imageFile]);
+  useEffect(() => {
+    const urls = (debug?.preprocessedColumns ?? []).map((column) => ({
+      name: column.name,
+      url: URL.createObjectURL(column.blob),
+      width: column.width,
+      height: column.height,
+    }));
+    setPreprocessedUrls(urls);
+    return () => urls.forEach((item) => URL.revokeObjectURL(item.url));
+  }, [debug?.preprocessedColumns]);
 
   if (!debug) return null;
   const debugStats = [
@@ -58,6 +69,15 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
     ['Engine', debug.accounting?.engine ?? debug.ocrProvider],
     ['Crop tier', debug.accounting?.cropMethod ?? debug.crop?.method ?? 'none'],
     ['OCR scale', debug.accounting ? `${debug.accounting.preprocessScale.toFixed(2)}x` : 'n/a'],
+    ['Preprocessing', debug.accounting?.preprocessingVariant ?? 'n/a'],
+    ['OCR configuration', debug.accounting?.ocrConfigurationVariant ?? 'n/a'],
+    ['Worker initialization', debug.timings ? `${Math.round(debug.timings.workerInitializationMs)} ms` : 'n/a'],
+    ['Image decode', debug.timings ? `${Math.round(debug.timings.decodeMs)} ms` : 'n/a'],
+    ['Crop / split', debug.timings ? `${Math.round(debug.timings.cropSplitMs)} ms` : 'n/a'],
+    ['Preprocess time', debug.timings ? `${Math.round(debug.timings.preprocessingMs)} ms` : 'n/a'],
+    ['OCR time', debug.timings ? `${Math.round(debug.timings.recognitionMs)} ms` : 'n/a'],
+    ['Parse / normalize', debug.timings ? `${Math.round(debug.timings.parsingNormalizationMs)} ms` : 'n/a'],
+    ['Total OCR pipeline', debug.timings ? `${Math.round(debug.timings.totalMs)} ms` : 'n/a'],
     ['Header/valley drift', debug.accounting?.headerValleyDrift == null ? 'n/a' : debug.accounting.headerValleyDrift.toFixed(3)],
     ['Raw lines', debug.rawLineCount ?? debug.ocrLines.length],
     ['Cleaned lines', debug.cleanedLineCount ?? debug.ocrLines.length],
@@ -127,6 +147,61 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
                     height: `${column.rect.height * 100}%`,
                   }}
                 />
+              ))}
+              {debug.rowBands?.map((row, index) => {
+                const left = debug.threeColumnCrop?.rect.x ?? debug.crop!.rect.x;
+                const right = debug.threeColumnCrop
+                  ? debug.threeColumnCrop.rect.x + debug.threeColumnCrop.rect.width
+                  : debug.crop!.rect.x + debug.crop!.rect.width;
+                return (
+                  <div
+                    key={`debug-row-${index}`}
+                    className="absolute border-y border-cyan-300/80 bg-cyan-300/5"
+                    title={`OCR row ${index + 1}; column intersections are the individual cell crops`}
+                    style={{
+                      left: `${left * 100}%`,
+                      top: `${row.top * 100}%`,
+                      width: `${(right - left) * 100}%`,
+                      height: `${(row.bottom - row.top) * 100}%`,
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <p className="mt-1 text-[11px] text-rd-label-secondary">
+              Cyan row bands intersect the three colored columns to show every individual source cell crop.
+            </p>
+          </div>
+        )}
+        {preprocessedUrls.length > 0 && (
+          <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+            <p className="font-medium text-rd-label-primary">Final local images sent to OCR</p>
+            <p className="mt-1 text-[11px] text-rd-label-secondary">
+              Development-only, generated in memory from the original screenshot pixels. Nothing here is persisted.
+            </p>
+            <div className="mt-2 grid gap-2 md:grid-cols-3">
+              {preprocessedUrls.map((column) => (
+                <div key={column.name} className="overflow-hidden rounded-[6px] border border-rd-separator bg-white p-1">
+                  <p className="mb-1 font-mono text-[10px] text-black">
+                    {column.name} · {column.width} × {column.height}
+                  </p>
+                  <div className="max-h-64 overflow-auto">
+                    <img src={column.url} alt={`Preprocessed ${column.name} OCR input`} className="block h-auto max-w-none" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {debug.cellResults && debug.cellResults.length > 0 && (
+          <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+            <p className="font-medium text-rd-label-primary">Cell OCR results</p>
+            <div className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+              {debug.cellResults.map((cell) => (
+                <p key={`${cell.rowIndex}-${cell.column}`} className="font-mono text-[10px] leading-relaxed text-rd-label-secondary">
+                  Row {cell.rowIndex + 1} · {cell.column} · {Math.round(cell.confidence * 100)}% · {cell.validationStatus}
+                  {` · ${cell.preprocessingVariant} · ${cell.ocrEngineVariant} · raw "${cell.rawText}" · normalized "${cell.normalizedText}"`}
+                </p>
               ))}
             </div>
           </div>

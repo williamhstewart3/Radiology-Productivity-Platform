@@ -252,6 +252,14 @@ describe('PowerScribe column OCR row reassembly', () => {
 });
 
 describe('PowerScribe strict row grammar', () => {
+  test('keeps a visibly truncated ellipsis title readable for the existing institutional ladder', () => {
+    expect(powerScribeRowGrammarFailure({
+      procedureName: 'MRI CERVICAL SPINE W…',
+      examDateTime: '2026-07-16T08:15:00',
+      modifiedDateTime: '2026-07-16T08:42:00',
+    })).toBeNull();
+  });
+
   test('keeps a readable procedure title when only its dates are missing', () => {
     const [row] = parseOcrLines(['CT CHEST ABDOMEN PELVIS W CONTRAST']);
 
