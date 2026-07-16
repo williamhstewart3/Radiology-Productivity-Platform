@@ -7,6 +7,7 @@ import {
   shouldShowAccession,
   shouldAutoProcessPowerScribeCaptures,
   shouldAutoProcessRecognizedCapture,
+  shouldAutoProcessCapturePreview,
   approvalButtonLabel,
   buildUserApprovalPatch,
   canApproveReviewRow,
@@ -128,6 +129,14 @@ describe('import review date-time formatting', () => {
     expect(shouldAutoProcessRecognizedCapture(true, { alwaysProcessPowerScribeClipboard: true })).toBe(true);
     expect(shouldAutoProcessRecognizedCapture(false, { alwaysProcessPowerScribeClipboard: true })).toBe(false);
     expect(shouldAutoProcessRecognizedCapture(true, { alwaysProcessPowerScribeClipboard: false })).toBe(false);
+  });
+
+  test('report auto-process requires both a saved crop and a readable report header', () => {
+    const enabled = { alwaysProcessPowerScribeClipboard: true };
+    expect(shouldAutoProcessCapturePreview({ kind: 'report', detected: true }, false, enabled)).toBe(false);
+    expect(shouldAutoProcessCapturePreview({ kind: 'report', detected: false }, true, enabled)).toBe(false);
+    expect(shouldAutoProcessCapturePreview({ kind: 'report', detected: true }, true, enabled)).toBe(true);
+    expect(shouldAutoProcessCapturePreview({ kind: 'worklist', detected: true }, false, enabled)).toBe(true);
   });
 });
 

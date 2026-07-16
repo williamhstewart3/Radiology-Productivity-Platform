@@ -8,6 +8,19 @@ export interface ReportCaptureContext {
   ocrConfidence: number;
 }
 
+function localCaptureDateTime(timestamp: string): { date: string; time: string; dateTime: string } {
+  const parsed = new Date(timestamp);
+  const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const localDate = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const localTime = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return {
+    date: localDate,
+    time: localTime,
+    dateTime: `${localDate}T${localTime}:${pad(date.getSeconds())}`,
+  };
+}
+
 /** Converts already-cropped, local header OCR into the shared study contract. */
 export class ReportCaptureImportProvider implements ImportProvider {
   readonly name = 'PowerScribe Report Capture';
@@ -21,21 +34,22 @@ export class ReportCaptureImportProvider implements ImportProvider {
   async importStudies(): Promise<ImportedStudy[]> {
     if (!this.header.matched || !this.header.examTitleRaw) return [];
     const importedAt = this.context.captureTimestamp ?? new Date().toISOString();
+    const captured = localCaptureDateTime(importedAt);
     return [{
       examTitle: this.header.examTitleRaw,
       procedureName: this.header.examTitleNormalized,
       canonicalExam: null,
       cpt: null,
       workRvu: null,
-      studyDate: this.header.examDate ?? importedAt.slice(0, 10),
+      studyDate: captured.date,
       examDate: this.header.examDate,
       examTime: this.header.examTime,
       examDateTime: this.header.examDateTime,
       examTimeZone: this.header.timeZone,
-      studyTime: null,
-      modifiedDate: null,
-      modifiedTime: null,
-      modifiedDateTime: null,
+      studyTime: captured.dateTime,
+      modifiedDate: captured.date,
+      modifiedTime: captured.time,
+      modifiedDateTime: captured.dateTime,
       modality: null,
       accessionNumber: null,
       patientMRN: null,

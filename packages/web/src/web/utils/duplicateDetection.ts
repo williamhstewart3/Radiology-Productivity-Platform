@@ -57,6 +57,8 @@ export interface StudyCandidate {
   accessionNumber: string | null;
   rowIndex: string | null;
   modality: string | null;
+  /** Report captures use their exact clipboard-capture second as the read identity. */
+  isReportCapture?: boolean;
 }
 
 export interface DuplicateCheckResult {
@@ -85,6 +87,7 @@ export function buildFingerprint(
     cptCodes?: string[] | null;
     performedDateTime?: string | null;
     modifiedDateTime?: string | null;
+    exactModifiedTimestamp?: boolean;
   },
 ): string {
   // Tier 1: accession number — strongest possible identity
@@ -96,7 +99,9 @@ export function buildFingerprint(
   const normExam = normalizeExamText(examNameRaw);
   const cptSet = normalizeCptSet(identity?.cptCodes?.length ? identity.cptCodes : cptCode ? [cptCode] : []);
   const performedBucket = isoToExactMinuteBucket(identity?.performedDateTime ?? null);
-  const modifiedBucket = isoToExactMinuteBucket(identity?.modifiedDateTime ?? studyDateTime ?? null);
+  const modifiedBucket = identity?.exactModifiedTimestamp
+    ? isoToExactSecondBucket(identity.modifiedDateTime ?? studyDateTime ?? null)
+    : isoToExactMinuteBucket(identity?.modifiedDateTime ?? studyDateTime ?? null);
   const date = logDate;
 
   // Tier 2: strict OCR/import identity. Missing either timestamp is not strong enough to auto-skip.
@@ -130,6 +135,7 @@ function batchDuplicateKey(candidate: StudyCandidate): string | null {
       cptCodes: candidate.cptCodes,
       performedDateTime: candidate.performedDateTime,
       modifiedDateTime: candidate.modifiedDateTime ?? candidate.studyDateTime,
+      exactModifiedTimestamp: candidate.isReportCapture,
     },
   );
   return isStrongDuplicateFingerprint(fingerprint) ? fingerprint : null;
@@ -184,6 +190,17 @@ function isoToExactMinuteBucket(iso: string | null): string | null {
   const date = isoToDate(iso);
   const minute = isoToMinuteBucket(iso);
   return date && minute ? `${date}T${minute}` : null;
+}
+
+function isoToExactSecondBucket(iso: string | null): string | null {
+  if (!iso) return null;
+  const date = isoToDate(iso);
+  const parsed = new Date(iso);
+  if (!date || Number.isNaN(parsed.getTime())) return null;
+  const hour = String(parsed.getHours()).padStart(2, '0');
+  const minute = String(parsed.getMinutes()).padStart(2, '0');
+  const second = String(parsed.getSeconds()).padStart(2, '0');
+  return `${date}T${hour}:${minute}:${second}`;
 }
 
 function normalizeCptSet(cptCodes: Array<string | null | undefined>): string | null {
@@ -256,6 +273,7 @@ export async function checkOneDuplicate(
       cptCodes: candidate.cptCodes,
       performedDateTime: candidate.performedDateTime,
       modifiedDateTime: candidate.modifiedDateTime ?? candidate.studyDateTime,
+      exactModifiedTimestamp: candidate.isReportCapture,
     },
   );
 
@@ -291,6 +309,11 @@ export async function checkOneDuplicate(
         reason: 'Same CPT set, performed time, and read time',
       };
     }
+
+    // A single-report capture intentionally uses its capture clock as Modified.
+    // Only an identical capture-second fingerprint is a duplicate; generic
+    // same-title/same-minute heuristics would collapse separately captured reports.
+    if (candidate.isReportCapture) continue;
 
     const normLog = normalizeExamText(log.examNameRaw);
     if (normCandidate && normLog === normCandidate) {
@@ -436,6 +459,7 @@ export async function checkBatchDuplicates(
         cptCodes: candidate.cptCodes,
         performedDateTime: candidate.performedDateTime,
         modifiedDateTime: candidate.modifiedDateTime ?? candidate.studyDateTime,
+        exactModifiedTimestamp: candidate.isReportCapture,
       },
     );
     const batchKey = isStrongDuplicateFingerprint(fp) ? fp : null;

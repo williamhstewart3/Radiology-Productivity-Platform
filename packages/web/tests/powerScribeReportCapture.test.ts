@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { classifyPowerScribeCaptureKind, inspectPowerScribeReportCapture, POWERSCRIBE_REPORT_HEADER_REGION } from '../src/web/services/captureClassifierService';
-import { getSavedPowerScribeReportCrop, inspectScreenshotCapture } from '../src/web/services/ocrWorkflowService';
+import { getSavedPowerScribeReportCrop, getSavedPowerScribeReportCropForCapture, inspectScreenshotCapture, powerScribeReportCropStorageKey } from '../src/web/services/ocrWorkflowService';
 import { ReportCaptureImportProvider } from '../src/web/providers/ReportCaptureImportProvider';
 import { parsePowerScribeReportHeader } from '../src/web/utils/powerScribeReportHeader';
 import type { OcrEngine } from '../src/web/utils/ocrProvider';
+import { buildFingerprint } from '../src/web/utils/duplicateDetection';
 
 describe('PowerScribe report header parser', () => {
   test.each([
@@ -103,6 +104,18 @@ describe('report classifier privacy boundary', () => {
     expect(getSavedPowerScribeReportCrop(saved, 1920, 1080)).toBeNull();
   });
 
+  test('keeps separate report crop presets for each profile and screenshot size', () => {
+    const small = { x: 0.1, y: 0.12, width: 0.8, height: 0.2, imageWidth: 1600, imageHeight: 900 };
+    const large = { x: 0.16, y: 0.2, width: 0.7, height: 0.14, imageWidth: 1920, imageHeight: 1080 };
+    const crops = {
+      [powerScribeReportCropStorageKey('profile-a', 1600, 900)]: small,
+      [powerScribeReportCropStorageKey('profile-a', 1920, 1080)]: large,
+    };
+    expect(getSavedPowerScribeReportCropForCapture(crops, 'profile-a', 1600, 900)).toEqual({ x: 0.1, y: 0.12, width: 0.8, height: 0.2 });
+    expect(getSavedPowerScribeReportCropForCapture(crops, 'profile-a', 1920, 1080)).toEqual({ x: 0.16, y: 0.2, width: 0.7, height: 0.14 });
+    expect(getSavedPowerScribeReportCropForCapture(crops, 'profile-b', 1600, 900)).toBeNull();
+  });
+
   test('an explicit worklist choice does not route through report-header detection', async () => {
     let ocrCalls = 0;
     const engine: OcrEngine = {
@@ -125,12 +138,33 @@ describe('report classifier privacy boundary', () => {
   test('provider emits shared normalized metadata and never accepts an image', async () => {
     const header = parsePowerScribeReportHeader('EXAMINATION: CT CHEST W CONTRAST, 7/16/2026 8:47 AM CDT');
     const studies = await new ReportCaptureImportProvider(header, {
-      profileId: 'profile-a', siteId: 'site-a', ocrConfidence: 0.97, captureTimestamp: '2026-07-16T09:00:00.000Z',
+      profileId: 'profile-a', siteId: 'site-a', ocrConfidence: 0.97, captureTimestamp: '2026-07-16T09:00:00',
     }).importStudies();
     expect(studies[0]).toMatchObject({
       source: 'report_capture', procedureName: 'CT CHEST W CONTRAST', examDateTime: '2026-07-16T08:47:00',
-      examTimeZone: 'CDT', captureProfileId: 'profile-a', captureSiteId: 'site-a', ocrConfidence: 0.97,
+      examTimeZone: 'CDT', modifiedDate: '2026-07-16', modifiedTime: '09:00', modifiedDateTime: '2026-07-16T09:00:00',
+      studyTime: '2026-07-16T09:00:00', captureProfileId: 'profile-a', captureSiteId: 'site-a', ocrConfidence: 0.97,
     });
     expect(JSON.stringify(studies[0])).not.toContain('image');
+  });
+
+  test('capture time gives repeated report titles distinct strict identities', async () => {
+    const header = parsePowerScribeReportHeader('EXAMINATION: CT CHEST W CONTRAST, 7/16/2026 8:47 AM CDT');
+    const first = (await new ReportCaptureImportProvider(header, {
+      profileId: 'profile-a', siteId: 'site-a', ocrConfidence: 0.97, captureTimestamp: '2026-07-16T09:00:05',
+    }).importStudies())[0];
+    const second = (await new ReportCaptureImportProvider(header, {
+      profileId: 'profile-a', siteId: 'site-a', ocrConfidence: 0.97, captureTimestamp: '2026-07-16T09:00:10',
+    }).importStudies())[0];
+    const fingerprint = (study: typeof first) => buildFingerprint(
+      study.procedureName ?? study.examTitle,
+      '71260',
+      study.modifiedDate ?? study.studyDate ?? '2026-07-16',
+      study.modifiedDateTime ?? null,
+      null,
+      null,
+      { cptCodes: ['71260'], performedDateTime: study.examDateTime, modifiedDateTime: study.modifiedDateTime, exactModifiedTimestamp: true },
+    );
+    expect(fingerprint(first)).not.toBe(fingerprint(second));
   });
 });

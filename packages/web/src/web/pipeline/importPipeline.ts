@@ -277,6 +277,7 @@ export async function runImportPipeline(
     accessionNumber: study.accessionNumber,
     rowIndex: study.rowIndex ?? null,
     modality: study.modality ?? candidates[0]?.modality ?? null,
+    isReportCapture: study.source === 'report_capture',
   }));
 
   const dupeResults = await checkBatchDuplicates(dupeCandidates, logDate, profileId ?? null);
@@ -423,6 +424,7 @@ export async function commitPipelineResults(
           cptCodes: selectedCandidates.map((candidate) => candidate.cptCode),
           performedDateTime: study.examDateTime ?? null,
           modifiedDateTime,
+          exactModifiedTimestamp: study.source === 'report_capture',
         },
       );
 

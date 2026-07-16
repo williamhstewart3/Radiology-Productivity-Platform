@@ -80,6 +80,25 @@ describe('strict duplicate detection', () => {
     expect(match?.confidence).not.toBe('exact');
   });
 
+  test('separate report captures in the same minute use their capture seconds and are not duplicates', async () => {
+    const report = candidate({
+      isReportCapture: true,
+      modifiedDateTime: '2026-07-07T09:00:10',
+      studyDateTime: '2026-07-07T09:00:10',
+    });
+    const match = await checkOneDuplicate(report, [log({
+      examDateTime: '2026-07-07T08:19:00',
+      studyDateTime: '2026-07-07T09:00:05',
+    })]);
+
+    expect(match).toBeNull();
+    expect(__testBatchDuplicateKey(report)).not.toBe(__testBatchDuplicateKey(candidate({
+      isReportCapture: true,
+      modifiedDateTime: '2026-07-07T09:00:05',
+      studyDateTime: '2026-07-07T09:00:05',
+    })));
+  });
+
   test('same CPT/title and same date with missing time is not exact', async () => {
     const match = await checkOneDuplicate(
       candidate({ studyDateTime: null, performedDateTime: null, modifiedDateTime: null }),

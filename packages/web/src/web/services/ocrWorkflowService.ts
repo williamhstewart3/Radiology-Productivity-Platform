@@ -88,6 +88,30 @@ export function getSavedPowerScribeReportCrop(
   return { x: crop.x, y: crop.y, width: crop.width, height: crop.height };
 }
 
+export function powerScribeReportCropStorageKey(
+  profileId: string | null | undefined,
+  imageWidth: number,
+  imageHeight: number,
+): string {
+  return `${profileId ?? 'default'}::${imageWidth}x${imageHeight}`;
+}
+
+export function getSavedPowerScribeReportCropForCapture(
+  crops: Record<string, SavedPowerScribeReportCrop> | null | undefined,
+  profileId: string | null | undefined,
+  imageWidth: number,
+  imageHeight: number,
+): RelativeCropRect | null {
+  if (!crops) return null;
+  const dimensionKey = powerScribeReportCropStorageKey(profileId, imageWidth, imageHeight);
+  const legacyProfileKey = profileId ?? 'default';
+  return getSavedPowerScribeReportCrop(
+    crops[dimensionKey] ?? crops[legacyProfileKey],
+    imageWidth,
+    imageHeight,
+  );
+}
+
 async function imageDimensions(source: Blob): Promise<{ width: number; height: number }> {
   const bitmap = await createImageBitmap(source);
   try {
@@ -244,12 +268,14 @@ export async function processReportCaptureImport(
   header: ParsedPowerScribeReportHeader,
   ocrConfidence: number,
   context: WorkflowContext,
+  captureTimestamp?: string,
 ): Promise<ProcessedImportResult> {
   const processed = await processProvider(
     new ReportCaptureImportProvider(header, {
       profileId: context.profileId,
       siteId: context.siteId,
       ocrConfidence,
+      captureTimestamp,
     }),
     context,
     (count) => `Report header processed (${count} extracted)`,
@@ -277,13 +303,8 @@ export async function processReportCaptureImageImport(
   context: WorkflowContext,
   engine: OcrEngine = getDefaultOcrEngine(),
 ): Promise<ProcessedImportResult> {
-  const inspection = await inspectPowerScribeReportCapture(source, engine, undefined, headerRect);
-  if (!inspection.detected || !inspection.header.examTitleRaw) {
-    throw new Error('The EXAMINATION header was not readable inside the selected report crop. Adjust the crop and try again.');
-  }
-  const processed = await processReportCaptureImport(inspection.header, inspection.ocrConfidence, context);
   const [settings, dimensions] = await Promise.all([ensureUserSettings(), imageDimensions(source)]);
-  const cropKey = context.profileId ?? 'default';
+  const cropKey = powerScribeReportCropStorageKey(context.profileId, dimensions.width, dimensions.height);
   await db.userSettings.put({
     ...settings,
     savedPowerScribeReportCropRegions: {
@@ -296,7 +317,13 @@ export async function processReportCaptureImageImport(
     },
     updatedAt: new Date().toISOString(),
   });
-  return processed;
+  const inspection = await inspectPowerScribeReportCapture(source, engine, undefined, headerRect);
+  if (!inspection.detected || !inspection.header.examTitleRaw) {
+    throw new Error('The EXAMINATION header was not readable inside the selected report crop. Adjust the crop and try again.');
+  }
+  const sourceLastModified = 'lastModified' in source ? Number(source.lastModified) : Number.NaN;
+  const captureTimestamp = new Date(Number.isFinite(sourceLastModified) ? sourceLastModified : Date.now()).toISOString();
+  return processReportCaptureImport(inspection.header, inspection.ocrConfidence, context, captureTimestamp);
 }
 
 function attachOcrMatchDebug(debugInfo: OCRImportDebugInfo | null, result: PipelineResult): OCRImportDebugInfo | null {

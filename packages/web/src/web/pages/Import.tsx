@@ -14,7 +14,7 @@ import { Card } from '../components/ui/Card';
 import { useProfile } from '../hooks/useProfile';
 import { getDesktopAPI } from '../lib/desktop';
 import { todayDateString } from '../utils/calculations';
-import { db } from '../db/database';
+import { db, ensureUserSettings } from '../db/database';
 import {
   createTimelineEvent,
   getSelectedCandidateIndices,
@@ -25,7 +25,7 @@ import {
   persistActiveReviewSession,
   type TimelineEvent,
 } from '../services/reviewSessionService';
-import { getSavedPowerScribeManualGuides, getSavedPowerScribeReportCrop, inspectScreenshotCapture, processOcrImport, processReportCaptureImageImport, processStructuredPowerScribeOcrImport, processTextImport, type PowerScribeCaptureIntent, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { getSavedPowerScribeManualGuides, getSavedPowerScribeReportCropForCapture, inspectScreenshotCapture, processOcrImport, processReportCaptureImageImport, processStructuredPowerScribeOcrImport, processTextImport, type PowerScribeCaptureIntent, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
 import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
@@ -335,6 +335,17 @@ export function shouldAutoProcessRecognizedCapture(
   settings: Pick<UserSettings, 'alwaysProcessPowerScribeClipboard'> | null | undefined,
 ): boolean {
   return detected && shouldAutoProcessPowerScribeCaptures(settings);
+}
+
+export function shouldAutoProcessCapturePreview(
+  preview: Pick<PowerScribeCapturePrecheck, 'detected' | 'kind'>,
+  hasSavedReportCrop: boolean,
+  settings: Pick<UserSettings, 'alwaysProcessPowerScribeClipboard'> | null | undefined,
+): boolean {
+  const recognized = preview.kind === 'report'
+    ? preview.detected && hasSavedReportCrop
+    : preview.detected;
+  return shouldAutoProcessRecognizedCapture(recognized, settings);
 }
 
 interface ImportToast {
@@ -944,6 +955,7 @@ export function Import({ onReviewReady }: ImportProps) {
   const [savedReportCropLoaded, setSavedReportCropLoaded] = useState(false);
   const [captureIntent, setCaptureIntent] = useState<Exclude<PowerScribeCaptureIntent, 'auto'>>('worklist');
   const captureIntentRef = useRef<Exclude<PowerScribeCaptureIntent, 'auto'>>('worklist');
+  const [autoProcessRecognizedCaptures, setAutoProcessRecognizedCaptures] = useState(false);
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   // Eagerly generated (not lazily inside the persist effect below) so that
   // effect only ever runs once per actual state change instead of twice per
@@ -957,6 +969,11 @@ export function Import({ onReviewReady }: ImportProps) {
   const [toasts, setToasts] = useState<ImportToast[]>([]);
   const processingRef = useRef(false);
   const lastClipboardImageHashRef = useRef<string | null>(null);
+  useEffect(() => {
+    void ensureUserSettings().then((settings) => {
+      setAutoProcessRecognizedCaptures(Boolean(settings.alwaysProcessPowerScribeClipboard));
+    });
+  }, []);
   useEffect(() => subscribeGlobalCapture((payload) => {
     clearGlobalCapture(payload);
     if (payload.kind === 'text') {
@@ -1291,8 +1308,9 @@ export function Import({ onReviewReady }: ImportProps) {
     let preview = await inspectScreenshotCapture(file, undefined, undefined, {
       intendedKind: captureIntentRef.current,
     });
-    const savedReportCrop = preview.kind === 'report' ? getSavedPowerScribeReportCrop(
-      settings?.savedPowerScribeReportCropRegions?.[cropKey],
+    const savedReportCrop = preview.kind === 'report' ? getSavedPowerScribeReportCropForCapture(
+      settings?.savedPowerScribeReportCropRegions,
+      activeProfile?.id ?? null,
       preview.width,
       preview.height,
     ) : null;
@@ -1308,7 +1326,7 @@ export function Import({ onReviewReady }: ImportProps) {
       preview.width,
       preview.height,
     ) : null;
-    if (shouldAutoProcessRecognizedCapture(preview.detected, settings)) {
+    if (shouldAutoProcessCapturePreview(preview, Boolean(savedReportCrop), settings)) {
       pushToast(
         'success',
         preview.kind === 'report' ? 'PowerScribe report detected — processing automatically' : 'PowerScribe table detected — processing automatically',
@@ -1354,6 +1372,16 @@ export function Import({ onReviewReady }: ImportProps) {
     setSavedReportCropLoaded(false);
     lastClipboardImageHashRef.current = null;
     setError(null);
+  }
+
+  async function updateAutoProcessRecognizedCaptures(enabled: boolean) {
+    setAutoProcessRecognizedCaptures(enabled);
+    const settings = await ensureUserSettings();
+    await db.userSettings.put({
+      ...settings,
+      alwaysProcessPowerScribeClipboard: enabled,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   async function handlePasteProcess() {
@@ -1513,6 +1541,24 @@ export function Import({ onReviewReady }: ImportProps) {
                 : 'Reads the Procedure, Exam Date, and Modified columns from the worklist.'}
             </p>
           </fieldset>
+          <label htmlFor="auto-process-recognized-captures" className="flex cursor-pointer items-start gap-3 rounded-[10px] bg-rd-surface-2 px-3 py-2.5">
+            <input
+              id="auto-process-recognized-captures"
+              type="checkbox"
+              aria-label="Process recognized captures automatically"
+              checked={autoProcessRecognizedCaptures}
+              onChange={(event) => void updateAutoProcessRecognizedCaptures(event.target.checked)}
+              className="mt-0.5 size-4 accent-rd-label-primary"
+            />
+            <span>
+              <span className="block text-[12px] font-semibold text-rd-label-primary">Process recognized captures automatically</span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-rd-label-secondary">
+                {captureIntent === 'report'
+                  ? 'After one report crop is saved for this window size, a readable EXAMINATION header skips the image preview. CPT review rules still apply.'
+                  : 'A recognized worklist skips the image preview. CPT review rules still apply.'}
+              </span>
+            </span>
+          </label>
           {clipboardFile && !processing && (
             <div className="space-y-3 rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
               <p className="text-[13px] font-semibold text-rd-label-primary">Review capture before processing</p>
