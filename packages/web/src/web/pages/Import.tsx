@@ -955,7 +955,6 @@ export function Import({ onReviewReady }: ImportProps) {
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [toasts, setToasts] = useState<ImportToast[]>([]);
-  const fileRef = useRef<HTMLInputElement>(null);
   const processingRef = useRef(false);
   const lastClipboardImageHashRef = useRef<string | null>(null);
   useEffect(() => subscribeGlobalCapture((payload) => {
@@ -1576,46 +1575,14 @@ export function Import({ onReviewReady }: ImportProps) {
             </div>
           )}
           {processing && <CaptureProcessingState />}
-          <div>
-            <label htmlFor="ocr-file-input" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
-              Paste or upload PowerScribe {captureIntent === 'report' ? 'current report' : 'worklist'}
-            </label>
-            <input
-              ref={fileRef}
-              id="ocr-file-input"
-              aria-label={`Upload PowerScribe ${captureIntent === 'report' ? 'current report' : 'worklist'}`}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void queueClipboardImage(file, 'file upload');
-                e.target.value = '';
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className={cn(
-                'w-full cursor-pointer rounded-[16px] border-2 border-dashed p-8 text-center transition-colors',
-                clipboardFile ? 'border-rd-label-primary bg-rd-surface-2' : 'border-rd-separator hover:bg-rd-surface-2',
-              )}
-            >
-              {clipboardFile ? (
-                <div>
-                  <p className="font-medium text-rd-label-primary">{clipboardFile.name}</p>
-                  <p className="mt-1 text-[12px] text-rd-label-secondary">
-                    {(clipboardFile.size / 1024).toFixed(0)} KB · Waiting for review
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="mb-3 text-4xl">📸</p>
-                  <p className="text-[13px] font-medium text-rd-label-primary">Paste, drop, or click to upload</p>
-                  <p className="mt-1 text-[12px] text-rd-label-secondary">Copy the PowerScribe window, then paste here. Images are not stored.</p>
-                </div>
-              )}
-            </button>
+          <div className="py-1">
+            <p className="text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">Clipboard capture</p>
+            <p className="mt-1 text-[13px] font-medium text-rd-label-primary">
+              Press Alt + Print Screen in PowerScribe, then return here and press Ctrl + V.
+            </p>
+            <p className="mt-0.5 text-[12px] text-rd-label-secondary">
+              The captured image is processed in memory and is not stored.
+            </p>
           </div>
           <div>
             <label htmlFor="ocr-log-date" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
