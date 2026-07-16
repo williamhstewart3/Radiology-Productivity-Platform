@@ -107,8 +107,9 @@ interface TodayProps {
 
 export function Today({ onNavigate }: TodayProps) {
   const today = todayDateString();
-  const { activeProfile } = useOrg();
+  const { activeProfile, activePractice } = useOrg();
   const profileId = activeProfile?.id ?? null;
+  const siteId = activePractice?.id ?? null;
 
   const todayLogs = useLiveQuery(
     async () => {
@@ -196,9 +197,13 @@ export function Today({ onNavigate }: TodayProps) {
   const activeSession = useLiveQuery(
     async () => {
       const sessions = await db.activeReviewSessions.where('status').equals('active').reverse().sortBy('updatedAt');
-      return sessions.find((session) => session.profileId === profileId || session.profileId == null) ?? null;
+      return sessions.find((session) =>
+        session.profileId === profileId &&
+        (session.siteId ?? null) === siteId &&
+        session.readingDate === today,
+      ) ?? null;
     },
-    [profileId],
+    [profileId, siteId, today],
     null,
   );
 
@@ -218,13 +223,14 @@ export function Today({ onNavigate }: TodayProps) {
 
   const recalculate = useCallback(() => {
     if (!todayLogs) return;
-    const m = computeDailyPace(todayLogs, paceSettings, prevAchievedRef.current);
+    const m = computeDailyPace(todayLogs, paceSettings, prevAchievedRef.current, activeSession?.estimatedPendingWrvu ?? 0);
     setMetrics(m);
     if (m.goalJustAchieved) prevAchievedRef.current = true;
     if (m.currentRvu < m.dailyGoal) prevAchievedRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     todayLogs,
+    activeSession?.estimatedPendingWrvu,
     paceSettings.dailyRvuGoal,
     paceSettings.workdayStart,
     paceSettings.workdayEnd,
@@ -239,7 +245,7 @@ export function Today({ onNavigate }: TodayProps) {
 
   const { openMiniWindow } = useMiniPaceWindow();
 
-  const animatedRvu = useCountUp(metrics?.currentRvu ?? 0);
+  const animatedRvu = useCountUp(metrics?.projectedRvu ?? 0);
 
   if (!metrics || todayLogs === undefined) {
     return (
@@ -253,7 +259,7 @@ export function Today({ onNavigate }: TodayProps) {
   }
 
   // First-time empty state: never logged anything, ever.
-  if (everLoggedCount === 0) {
+  if (everLoggedCount === 0 && metrics.pendingRvu === 0) {
     return (
       <div className="mx-auto max-w-2xl space-y-10">
         <div className="sticky top-0 z-20 -mx-3 border-b border-rd-separator bg-rd-bg/95 px-3 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
@@ -331,7 +337,7 @@ export function Today({ onNavigate }: TodayProps) {
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="sticky top-0 z-20 -mx-3 border-b border-rd-separator bg-rd-bg/95 px-3 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
         <Readout parts={[
-          { text: `${metrics.currentRvu.toFixed(1)} wRVU` },
+          { text: `${metrics.projectedRvu.toFixed(1)} projected` },
           { text: pace.text, tone: paceTone },
           {
             text: attentionCount === 0
@@ -373,12 +379,17 @@ export function Today({ onNavigate }: TodayProps) {
       )}
 
       <div className="flex flex-col items-center gap-3 py-4">
-        <Ring percent={metrics.actualPercent} size={220} label={`${metrics.currentRvu.toFixed(1)} of ${metrics.dailyGoal} wRVU goal`}>
+        <Ring percent={metrics.actualPercent} projectedPercent={metrics.projectedPercent} size={220} label={`${metrics.currentRvu.toFixed(1)} confirmed plus ${metrics.pendingRvu.toFixed(1)} pending of ${metrics.dailyGoal} wRVU goal`}>
           <span className="text-[52px] font-bold leading-none text-rd-label-primary [font-variant-numeric:tabular-nums]">
             {animatedRvu.toFixed(1)}
           </span>
           <span className="mt-1 text-[13px] text-rd-label-secondary">of {metrics.dailyGoal} goal</span>
         </Ring>
+        {metrics.pendingRvu > 0 && (
+          <p className="text-[13px] text-rd-label-secondary [font-variant-numeric:tabular-nums]">
+            {metrics.currentRvu.toFixed(1)} confirmed · {metrics.pendingRvu.toFixed(1)} pending · {metrics.projectedRvu.toFixed(1)} projected
+          </p>
+        )}
         {metrics.status !== 'before_work' && metrics.status !== 'goal_achieved' && (
           <p className="text-[13px] text-rd-label-secondary">
             {formatMinutes(metrics.elapsedWorkMinutes)} elapsed · {formatMinutes(metrics.remainingWorkMinutes)} remaining

@@ -25,7 +25,7 @@ import {
   persistActiveReviewSession,
   type TimelineEvent,
 } from '../services/reviewSessionService';
-import { getSavedPowerScribeManualGuides, inspectPowerScribeCapture, processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { getSavedPowerScribeManualGuides, inspectScreenshotCapture, processOcrImport, processReportCaptureImport, processStructuredPowerScribeOcrImport, processTextImport, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
 import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
@@ -715,11 +715,13 @@ function CapturePreview({
           ? rowBands?.length
             ? `${rowBands.length} geometric row crops will be applied before OCR.`
             : 'Drag the crop edges so each colored band contains only its named column.'
+          : inspection.kind === 'report'
+          ? 'This looks like a PowerScribe report; only the outlined EXAMINATION header will be read.'
           : inspection.detected
           ? 'This looks like a PowerScribe worklist; the outlined region is the candidate table.'
           : 'No table outline was detected. If this is the PowerScribe worklist, you can still process it for review.'}
       </p>
-      {inspection.detected && (
+      {inspection.detected && inspection.kind !== 'report' && (
         <button
           type="button"
           onClick={() => {
@@ -735,7 +737,7 @@ function CapturePreview({
           {manualGuides ? (savedManualCropLoaded ? 'Reset saved crop' : 'Use detected crop') : 'Adjust crop'}
         </button>
       )}
-      {(manualGuides || inspection.suggestedManualGuides) && (
+      {inspection.kind !== 'report' && (manualGuides || inspection.suggestedManualGuides) && (
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -809,6 +811,7 @@ export function Import({ onReviewReady }: ImportProps) {
   const [error, setError]         = useState<string | null>(null);
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
   const [capturePreview, setCapturePreview] = useState<PowerScribeCapturePrecheck | null>(null);
+  const capturePreviewRef = useRef<PowerScribeCapturePrecheck | null>(null);
   const [manualCropGuides, setManualCropGuides] = useState<PowerScribeManualColumnGuides | null>(null);
   const [manualRowBands, setManualRowBands] = useState<PowerScribeRowBand[] | null>(null);
   const [savedManualCropLoaded, setSavedManualCropLoaded] = useState(false);
@@ -845,7 +848,7 @@ export function Import({ onReviewReady }: ImportProps) {
   }), []);
 
   useEffect(() => {
-    loadActiveReviewSession(activeProfile?.id ?? null).then((session) => {
+    loadActiveReviewSession(activeProfile?.id ?? null, activePractice?.id ?? null).then((session) => {
       if (!session || reviewRows.length > 0) return;
       setSessionId(session.sessionId);
       setReviewRows(session.rows);
@@ -854,19 +857,20 @@ export function Import({ onReviewReady }: ImportProps) {
       setLogDate(session.readingDate);
       setStep('review');
     });
-  }, [activeProfile?.id]);
+  }, [activeProfile?.id, activePractice?.id]);
 
   useEffect(() => {
     if (step !== 'review' || reviewRows.length === 0) return;
     void persistActiveReviewSession({
       sessionId,
       profileId: activeProfile?.id ?? null,
+      siteId: activePractice?.id ?? null,
       readingDate: logDate,
       rows: reviewRows,
       skippedRows,
       timeline,
     }).then(onReviewReady);
-  }, [step, reviewRows, skippedRows, timeline, logDate, activeProfile?.id, sessionId, onReviewReady]);
+  }, [step, reviewRows, skippedRows, timeline, logDate, activeProfile?.id, activePractice?.id, sessionId, onReviewReady]);
 
   useEffect(() => {
     processingRef.current = processing;
@@ -879,6 +883,7 @@ export function Import({ onReviewReady }: ImportProps) {
         event.preventDefault();
         setClipboardFile(null);
         setCapturePreview(null);
+        capturePreviewRef.current = null;
         setManualCropGuides(null);
         setManualRowBands(null);
         setSavedManualCropLoaded(false);
@@ -1080,9 +1085,11 @@ export function Import({ onReviewReady }: ImportProps) {
     clearSavedManualCrop = false,
   ) {
     if (processingRef.current) return;
+    const inspection = capturePreviewRef.current ?? capturePreview;
+    capturePreviewRef.current = null;
     setProcessing(true);
     setError(null);
-    setOcrFile(file);
+    if (inspection?.kind !== 'report') setOcrFile(file);
     setClipboardFile(null);
     setCapturePreview(null);
     setManualCropGuides(null);
@@ -1090,6 +1097,26 @@ export function Import({ onReviewReady }: ImportProps) {
     setSavedManualCropLoaded(false);
     pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
     try {
+      if (inspection?.kind === 'report' && inspection.reportHeader) {
+        const processed = await processReportCaptureImport(
+          inspection.reportHeader,
+          inspection.ocrConfidence ?? 0,
+          {
+            profileId: activeProfile?.id ?? null,
+            siteId: activePractice?.id ?? null,
+            sessionId,
+            logDate,
+          },
+        );
+        appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
+        const autoCounted = processed.result.reviewRows.some((row) => row.autoApproved);
+        pushToast(
+          autoCounted ? 'success' : 'info',
+          autoCounted ? 'Known report counted' : 'Report capture added to Inbox',
+          'Only the EXAMINATION header region was read; the report image was not saved.',
+        );
+        return;
+      }
       const usedStructuredHelper = manualColumnCrops
         ? false
         : await processWindowsClipboardCapture(file, timelineSource);
@@ -1106,14 +1133,15 @@ export function Import({ onReviewReady }: ImportProps) {
     if (hash === lastClipboardImageHashRef.current) return;
     lastClipboardImageHashRef.current = hash;
     pushToast('info', 'Screenshot captured', `PowerScribe image received from ${timelineSource}.`);
-    const preview = await inspectPowerScribeCapture(file);
+    const preview = await inspectScreenshotCapture(file);
+    capturePreviewRef.current = preview;
     const settings = await db.userSettings.get('default');
     const cropKey = activeProfile?.id ?? 'default';
-    const savedManualGuides = getSavedPowerScribeManualGuides(
+    const savedManualGuides = preview.kind === 'worklist' ? getSavedPowerScribeManualGuides(
       settings?.savedPowerScribeCropRegions?.[cropKey],
       preview.width,
       preview.height,
-    );
+    ) : null;
     if (shouldAutoProcessRecognizedCapture(preview.detected, settings)) {
       pushToast(
         'success',
@@ -1130,13 +1158,13 @@ export function Import({ onReviewReady }: ImportProps) {
       return;
     }
     setCapturePreview(preview);
-    setManualCropGuides(savedManualGuides ?? (preview.detected ? null : { ...DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES }));
+    setManualCropGuides(preview.kind === 'report' ? null : savedManualGuides ?? (preview.detected ? null : { ...DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES }));
     setManualRowBands(null);
     setSavedManualCropLoaded(Boolean(savedManualGuides));
     setClipboardFile(file);
     pushToast(
       preview.detected ? 'success' : 'warning',
-      preview.detected ? 'PowerScribe reports table detected' : 'PowerScribe table outline not detected',
+      preview.kind === 'report' ? 'PowerScribe report detected' : preview.detected ? 'PowerScribe reports table detected' : 'PowerScribe capture type uncertain',
       'Review the image, then press Enter to process or Esc to discard.',
     );
   }
@@ -1270,7 +1298,10 @@ export function Import({ onReviewReady }: ImportProps) {
             <div className="space-y-3 rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
               <p className="text-[13px] font-semibold text-rd-label-primary">Review capture before processing</p>
               <p className="text-[12px] text-rd-label-secondary">
-                Only the local table pre-check has run—no import pipeline or saved data yet. {CAPTURE_PRIVACY_COPY}
+                {capturePreview?.kind === 'report'
+                  ? 'Only the local EXAMINATION-header pre-check has run—no matching, commit, or saved data yet. '
+                  : 'Only the local table pre-check has run—no import pipeline or saved data yet. '}
+                {CAPTURE_PRIVACY_COPY}
               </p>
               {capturePreview && (
                 <CapturePreview
@@ -1304,6 +1335,7 @@ export function Import({ onReviewReady }: ImportProps) {
                   onClick={() => {
                     setClipboardFile(null);
                     setCapturePreview(null);
+                    capturePreviewRef.current = null;
                     setManualCropGuides(null);
                     setManualRowBands(null);
                     setSavedManualCropLoaded(false);

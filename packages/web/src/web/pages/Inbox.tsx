@@ -26,8 +26,9 @@ function parseRows(rowsJson: string | undefined): PipelineReviewRow[] {
 }
 
 export function Inbox() {
-  const { activeProfile } = useOrg();
+  const { activeProfile, activePractice } = useOrg();
   const profileId = activeProfile?.id ?? null;
+  const siteId = activePractice?.id ?? null;
   const [activeIndex, setActiveIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
@@ -36,8 +37,8 @@ export function Inbox() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const session = useLiveQuery(async () => {
     const sessions = await db.activeReviewSessions.where('status').equals('active').reverse().sortBy('updatedAt');
-    return sessions.find((item) => item.profileId === profileId || item.profileId == null) ?? null;
-  }, [profileId], null);
+    return sessions.find((item) => item.profileId === profileId && (item.siteId ?? null) === siteId) ?? null;
+  }, [profileId, siteId], null);
 
   const pending = useMemo(
     () => parseRows(session?.rowsJson).filter((row) => row.included && row.needsReview),
@@ -94,7 +95,7 @@ export function Inbox() {
     setBusy(true);
     const snapshot = await snapshotCaptureState();
     try {
-      const result = await resolveInboxRows({ profileId, rowIds, action });
+      const result = await resolveInboxRows({ profileId, siteId, rowIds, action });
       setUndoSnapshot(snapshot);
       setReceipt(
         action === 'accept' ? `+${result.addedWrvu.toFixed(2)} wRVU · ${result.remainingAttention} remaining`
@@ -105,7 +106,7 @@ export function Inbox() {
     } finally {
       setBusy(false);
     }
-  }, [busy, profileId]);
+  }, [busy, profileId, siteId]);
 
   const undo = useCallback(async () => {
     if (!undoSnapshot) return;
@@ -119,7 +120,7 @@ export function Inbox() {
     setBusy(true);
     const snapshot = await snapshotCaptureState();
     try {
-      const splitCount = await applyInboxRowSplit(profileId, rowId, candidates);
+      const splitCount = await applyInboxRowSplit(profileId, rowId, candidates, siteId);
       if (splitCount > 1) {
         setUndoSnapshot(snapshot);
         setReceipt(`Split into ${splitCount} studies; verify each one before accepting`);
@@ -128,7 +129,7 @@ export function Inbox() {
     } finally {
       setBusy(false);
     }
-  }, [busy, profileId]);
+  }, [busy, profileId, siteId]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -203,7 +204,7 @@ export function Inbox() {
         onClose={() => setPickerOpen(false)}
         onCommit={(candidates) => {
           if (!current) return;
-          void applyInboxCandidateSelection(profileId, current.tempId, candidates);
+          void applyInboxCandidateSelection(profileId, current.tempId, candidates, siteId);
         }}
         onSplit={(candidates) => {
           if (!current) return;

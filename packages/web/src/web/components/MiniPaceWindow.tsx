@@ -103,8 +103,9 @@ interface MiniPaceWindowProps {
 
 export function MiniPaceWindow({ embedded = false, targetWindow, onNavigate }: MiniPaceWindowProps) {
   const today = todayDateString();
-  const { activeProfile } = useProfile();
+  const { activeProfile, activePractice } = useProfile();
   const profileId = activeProfile?.id ?? null;
+  const siteId = activePractice?.id ?? null;
 
   const todayLogs = useLiveQuery(
     async () => {
@@ -115,10 +116,19 @@ export function MiniPaceWindow({ embedded = false, targetWindow, onNavigate }: M
     [today, profileId],
     [],
   );
-  const inboxCount = useLiveQuery(async () => {
+  const pendingSnapshot = useLiveQuery(async () => {
     const sessions = await db.activeReviewSessions.where('status').equals('active').toArray();
-    return sessions.filter((session) => session.profileId === profileId || session.profileId == null).reduce((sum, session) => sum + session.needsReviewCount, 0);
-  }, [profileId], 0);
+    const scoped = sessions.filter((session) =>
+      session.profileId === profileId &&
+      (session.siteId ?? null) === siteId &&
+      session.readingDate === today,
+    );
+    return {
+      count: scoped.reduce((sum, session) => sum + session.needsReviewCount, 0),
+      wrvu: scoped.reduce((sum, session) => sum + session.estimatedPendingWrvu, 0),
+    };
+  }, [profileId, siteId, today], { count: 0, wrvu: 0 });
+  const inboxCount = pendingSnapshot.count;
   const settings = useLiveQuery(() => db.userSettings.get('default'), [], undefined);
   const watcherArmed = settings?.autoImportClipboardScreenshots === true;
 
@@ -140,12 +150,12 @@ export function MiniPaceWindow({ embedded = false, targetWindow, onNavigate }: M
 
   const recalculate = useCallback(() => {
     if (!todayLogs) return;
-    const m = computeDailyPace(todayLogs, paceSettings, prevAchievedRef.current);
+    const m = computeDailyPace(todayLogs, paceSettings, prevAchievedRef.current, pendingSnapshot.wrvu);
     setMetrics(m);
     setNowTick(Date.now());
     if (m.goalJustAchieved) prevAchievedRef.current = true;
     if (m.currentRvu < m.dailyGoal) prevAchievedRef.current = false;
-  }, [todayLogs, paceSettings]);
+  }, [todayLogs, paceSettings, pendingSnapshot.wrvu]);
 
   useEffect(() => {
     recalculate();
@@ -155,7 +165,7 @@ export function MiniPaceWindow({ embedded = false, targetWindow, onNavigate }: M
 
   useEffect(() => {
     const targetDocument = targetWindow?.document ?? document;
-    targetDocument.title = metrics ? `${metrics.currentRvu.toFixed(1)} / ${metrics.dailyGoal} wRVU` : 'wRVU Pace';
+    targetDocument.title = metrics ? `${metrics.projectedRvu.toFixed(1)} / ${metrics.dailyGoal} wRVU` : 'wRVU Pace';
   }, [metrics, targetWindow]);
 
   const recentStudies = useMemo(
@@ -212,6 +222,7 @@ export function MiniPaceWindow({ embedded = false, targetWindow, onNavigate }: M
 
   const [color, colorDark] = paceColors(metrics.status);
   const goalPercent = Math.max(0, Math.min(100, metrics.actualPercent));
+  const projectedGoalPercent = Math.max(goalPercent, Math.min(100, metrics.projectedPercent));
   const elapsedSinceCapture = lastCaptureAt ? Math.max(0, (nowTick - new Date(lastCaptureAt).getTime()) / 60_000) : null;
 
   return (
@@ -237,18 +248,25 @@ export function MiniPaceWindow({ embedded = false, targetWindow, onNavigate }: M
         style={{ border: 0, padding: 0, background: 'transparent', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}
       >
         <span style={{ fontSize: 34, fontWeight: 700, color: HUD_LABEL_PRIMARY, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-          {metrics.currentRvu.toFixed(1)}
+          {metrics.projectedRvu.toFixed(1)}
         </span>
         <span style={{ fontSize: 15, fontWeight: 600, color, fontVariantNumeric: 'tabular-nums' }}>{deltaText(metrics)}</span>
       </button>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>of {metrics.dailyGoal}</span>
-        <div style={{ flex: 1, height: 6, borderRadius: 3, background: HUD_SURFACE, overflow: 'hidden' }}>
-          <div style={{ width: `${goalPercent}%`, height: '100%', borderRadius: 3, background: `linear-gradient(to right, ${colorDark}, ${color})` }} />
+        <div style={{ position: 'relative', flex: 1, height: 6, borderRadius: 3, background: HUD_SURFACE, overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', width: `${projectedGoalPercent}%`, height: '100%', borderRadius: 3, background: color, opacity: 0.28 }} />
+          <div style={{ position: 'absolute', width: `${goalPercent}%`, height: '100%', borderRadius: 3, background: `linear-gradient(to right, ${colorDark}, ${color})` }} />
         </div>
-        <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{goalPercent.toFixed(0)}%</span>
+        <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{projectedGoalPercent.toFixed(0)}%</span>
       </div>
+
+      {metrics.pendingRvu > 0 && (
+        <span style={{ fontSize: 11, color: HUD_LABEL_SECONDARY, fontVariantNumeric: 'tabular-nums' }}>
+          {metrics.currentRvu.toFixed(1)} confirmed · {metrics.pendingRvu.toFixed(1)} pending
+        </span>
+      )}
 
       <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY, fontVariantNumeric: 'tabular-nums' }}>{expectedProjectedText(metrics)}</span>
       <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY, fontVariantNumeric: 'tabular-nums' }}>{rateText(metrics)}</span>

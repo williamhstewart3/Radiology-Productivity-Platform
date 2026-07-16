@@ -309,7 +309,11 @@ async function getModifier26Rows(cptCode: string): Promise<CptRvuRow[]> {
   return rows.filter(isProductivityRelevantModifier26);
 }
 
-async function candidatesForAlias(alias: ExamAlias, confidence?: number): Promise<MatchCandidate[]> {
+async function candidatesForAlias(
+  alias: ExamAlias,
+  confidence?: number,
+  provenance: 'exact confirmed alias' | 'exact unconfirmed alias' | 'fuzzy learned alias' = 'exact confirmed alias',
+): Promise<MatchCandidate[]> {
   const serializedCodes = alias.cptCodes?.length
     ? alias.cptCodes
     : [alias.modifier ? `${alias.cptCode}-${alias.modifier}` : alias.cptCode];
@@ -319,14 +323,18 @@ async function candidatesForAlias(alias: ExamAlias, confidence?: number): Promis
     const { cptCode } = parseAliasCode(serialized);
     const rows = await getModifier26Rows(cptCode);
     for (const row of rows) {
-      candidates.push(rowToCandidate(
+      const candidate = rowToCandidate(
         alias.aliasTextRaw,
         row,
         confidence ?? aliasConfidence(alias),
         'alias_match',
-        alias.siteId ? 'site alias' : 'learned alias',
+        provenance,
         alias.canonicalExamName ?? alias.aliasTextRaw,
-      ));
+      );
+      if (candidate.explanation) {
+        candidate.explanation.detail = `${candidate.explanation.detail}; aliasCptSet=${serializedCodes.join('|')}`;
+      }
+      candidates.push(candidate);
     }
   }
   return candidates;
@@ -990,7 +998,10 @@ export async function findMatchCandidates(
   // next, then Orbit CME fills a title that is not known locally. Reference
   // rules and ACR/CMS descriptions remain lower-tier fallbacks.
   candidates.push(...await candidatesForInstitutionMappings(matchInput, maxResults));
-  if (exactAlias) candidates.push(...await candidatesForAlias(exactAlias));
+  if (exactAlias) {
+    const provenance = exactAlias.source === 'seed' ? 'exact unconfirmed alias' : 'exact confirmed alias';
+    candidates.push(...await candidatesForAlias(exactAlias, undefined, provenance));
+  }
   candidates.push(...await candidatesForDictionary(matchInput, maxResults));
   candidates.push(...await candidatesForOcrLearning(matchInput, profileId));
   candidates.push(...await candidatesForOrbitCmeSeed(matchInput));
@@ -1038,7 +1049,7 @@ export async function findMatchCandidates(
       .slice(0, maxResults);
 
     for (const { alias, score } of fuzzyAliasScored) {
-      candidates.push(...await candidatesForAlias(alias, Math.min(aliasConfidence(alias), score * 0.9)));
+      candidates.push(...await candidatesForAlias(alias, Math.min(aliasConfidence(alias), score * 0.9), 'fuzzy learned alias'));
     }
   }
 

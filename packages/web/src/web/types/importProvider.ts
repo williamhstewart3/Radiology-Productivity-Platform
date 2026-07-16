@@ -31,7 +31,7 @@ import type { Modality } from './index';
 
 // ─── Canonical study model returned by every provider ──────────────────────
 
-export type ImportSource = 'manual' | 'ocr' | 'csv' | 'powerscribe';
+export type ImportSource = 'manual' | 'ocr' | 'csv' | 'powerscribe' | 'report_capture';
 
 /**
  * One study as emitted by any ImportProvider.
@@ -81,6 +81,9 @@ export interface ImportedStudy {
 
   /** Full ISO datetime for the performed exam, exposed with PowerScribe column naming. */
   examDateTime?: string | null;
+
+  /** Timezone abbreviation printed beside a report-header exam datetime. */
+  examTimeZone?: string | null;
 
   /**
    * Full ISO 8601 datetime for the performed exam if the source provides it.
@@ -151,6 +154,10 @@ export interface ImportedStudy {
 
   /** Which provider emitted this study. Set by the provider itself. */
   source: ImportSource;
+
+  /** Capture context frozen at intake so background processing cannot drift profiles/sites. */
+  captureProfileId?: string | null;
+  captureSiteId?: string | null;
 
   /** ISO timestamp of when this study was ingested by the provider. */
   importedAt: string;

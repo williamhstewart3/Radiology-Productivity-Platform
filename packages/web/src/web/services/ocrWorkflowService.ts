@@ -1,6 +1,7 @@
 import { CSVImportProvider } from '../providers/CSVImportProvider';
 import { OCRImportProvider, type OCRImportDebugInfo } from '../providers/OCRImportProvider';
 import { StructuredPowerScribeOcrImportProvider } from '../providers/StructuredPowerScribeOcrImportProvider';
+import { ReportCaptureImportProvider } from '../providers/ReportCaptureImportProvider';
 import { runImportPipeline, type PipelineResult, type PipelineReviewRow } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
 import { ensureUserSettings } from '../db/database';
@@ -12,8 +13,10 @@ import { getDefaultOcrEngine, type OcrEngine } from '../utils/ocrProvider';
 import { PSM } from 'tesseract.js';
 import { detectPowerScribeDatetimeLayout, detectPowerScribeHeaderLayout } from '../utils/powerScribeHeaderAnchors';
 import type { PowerScribeManualColumnCrops, PowerScribeManualColumnGuides, PowerScribeRowBand, RelativeCropRect } from '../utils/imageCrop';
+import { classifyPowerScribeCaptureKind, inspectPowerScribeReportCapture } from './captureClassifierService';
+import type { ParsedPowerScribeReportHeader } from '../utils/powerScribeReportHeader';
 
-interface WorkflowContext {
+export interface WorkflowContext {
   profileId: string | null;
   siteId: string | null;
   sessionId: string | null;
@@ -29,11 +32,14 @@ export interface ProcessedImportResult {
 
 export interface PowerScribeCapturePrecheck {
   detected: boolean;
-  method: 'headerAnchors' | 'datetimeColumns' | 'none';
+  method: 'headerAnchors' | 'datetimeColumns' | 'reportHeader' | 'none';
   width: number;
   height: number;
   tableRect: RelativeCropRect | null;
   suggestedManualGuides: PowerScribeManualColumnGuides | null;
+  kind?: 'worklist' | 'report' | 'unknown';
+  reportHeader?: ParsedPowerScribeReportHeader | null;
+  ocrConfidence?: number | null;
 }
 
 type SavedPowerScribeCrop = NonNullable<Awaited<ReturnType<typeof ensureUserSettings>>['savedPowerScribeCropRegions'][string]>;
@@ -157,18 +163,81 @@ export async function inspectPowerScribeCapture(
   };
 }
 
+/** Header-first extensible router. Worklist inspection remains unchanged. */
+export async function inspectScreenshotCapture(
+  source: Blob,
+  engine: OcrEngine = getDefaultOcrEngine(),
+  getDimensions: (source: Blob) => Promise<{ width: number; height: number }> = imageDimensions,
+): Promise<PowerScribeCapturePrecheck> {
+  const [report, dimensions] = await Promise.all([
+    inspectPowerScribeReportCapture(source, engine),
+    getDimensions(source),
+  ]);
+  if (report.detected) {
+    return {
+      detected: true,
+      kind: 'report',
+      method: 'reportHeader',
+      width: dimensions.width,
+      height: dimensions.height,
+      tableRect: report.headerRect,
+      suggestedManualGuides: null,
+      reportHeader: report.header,
+      ocrConfidence: report.ocrConfidence,
+    };
+  }
+  const worklist = await inspectPowerScribeCapture(source, engine, async () => dimensions);
+  return {
+    ...worklist,
+    kind: classifyPowerScribeCaptureKind(false, worklist.detected),
+    reportHeader: null,
+    ocrConfidence: report.ocrConfidence,
+  };
+}
+
 async function processProvider(
   provider: ImportProvider,
   context: WorkflowContext,
   timelineLabel: (extractedCount: number) => string,
 ): Promise<ProcessedImportResult> {
   const studies = await provider.importStudies();
-  const result = await runImportPipeline(studies, context.logDate, context.profileId);
+  const result = await runImportPipeline(studies, context.logDate, context.profileId, context.siteId);
   return {
     result,
     extractedCount: studies.length,
     timelineLabel: timelineLabel(studies.length),
   };
+}
+
+export async function processReportCaptureImport(
+  header: ParsedPowerScribeReportHeader,
+  ocrConfidence: number,
+  context: WorkflowContext,
+): Promise<ProcessedImportResult> {
+  const processed = await processProvider(
+    new ReportCaptureImportProvider(header, {
+      profileId: context.profileId,
+      siteId: context.siteId,
+      ocrConfidence,
+    }),
+    context,
+    (count) => `Report header processed (${count} extracted)`,
+  );
+  await recordAuditEvent({
+    profileId: context.profileId,
+    siteId: context.siteId,
+    sessionId: context.sessionId,
+    logDate: context.logDate,
+    action: 'ocr_completed',
+    summary: `Local report-header OCR processed ${processed.extractedCount} study`,
+    detailsJson: JSON.stringify({
+      source: 'report_capture',
+      imagePersisted: false,
+      reviewRows: processed.result.reviewRows.length,
+      skippedRows: processed.result.skippedRows.length,
+    }),
+  });
+  return processed;
 }
 
 function attachOcrMatchDebug(debugInfo: OCRImportDebugInfo | null, result: PipelineResult): OCRImportDebugInfo | null {

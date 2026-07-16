@@ -185,6 +185,7 @@ export interface ExamDictionaryEntry {
 export interface ActiveReviewSession {
   id: string;
   profileId: string | null;
+  siteId?: string | null;
   readingDate: string;
   status: 'active' | 'finalized' | 'discarded';
   rowsJson: string;

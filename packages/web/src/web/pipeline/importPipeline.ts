@@ -6,7 +6,6 @@ import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNorm
 import type { MatchCandidate, StudyLog, DuplicateStatus } from '../types';
 import type { ImportedStudy, ImportSource } from '../types/importProvider';
 import type { StudyCandidate } from '../utils/duplicateDetection';
-import { effectiveAutoCommitThreshold } from '../services/automationSettings';
 
 export interface PipelineReviewRow {
   tempId: string;
@@ -23,6 +22,8 @@ export interface PipelineReviewRow {
   autoSkipped: boolean;
   autoApproved: boolean;
   autoApprovalLevel: 'silent' | 'learned' | null;
+  matchCertainty?: 'deterministic' | 'high_confidence' | 'ambiguous' | 'unmatched';
+  commitDecisionReason?: string | null;
   approvalStatus?: 'pending' | 'manual_approved' | 'approved_as_new' | 'auto_approved' | 'excluded' | 'exact_duplicate_skipped' | 'existing_updated';
   reviewReason: string | null;
   /** Caller-supplied note (e.g. manual entry's optional notes field). Overrides the auto-generated combined-CPT note. */
@@ -85,7 +86,91 @@ function isInstitutionMappingCandidate(candidate: MatchCandidate): boolean {
 }
 
 function isExactInstitutionMappingCandidate(candidate: MatchCandidate): boolean {
-  return isInstitutionMappingCandidate(candidate) && candidate.confidence >= 0.98;
+  return isInstitutionMappingCandidate(candidate) &&
+    candidate.confidence >= 0.98 &&
+    /(?:exact_institution_match|institution exact)/i.test(candidate.explanation?.detail ?? '');
+}
+
+function isExactConfirmedAliasCandidate(candidate: MatchCandidate): boolean {
+  return candidate.method === 'alias_match' && candidate.explanation?.source === 'exact confirmed alias';
+}
+
+function isTrustedDirectCandidate(study: ImportedStudy, candidate: MatchCandidate): boolean {
+  return Boolean(study.cpt) && candidate.method === 'manual_cpt' && study.source !== 'ocr' && study.source !== 'report_capture';
+}
+
+function validReportIdentityTimestamp(study: ImportedStudy): boolean {
+  if (study.source !== 'report_capture') return true;
+  return Boolean(
+    study.examDateTime &&
+    study.dateTimeConfidence != null &&
+    study.dateTimeConfidence >= 0.9 &&
+    !Number.isNaN(new Date(study.examDateTime).getTime()),
+  );
+}
+
+export interface CommitDecision {
+  certainty: 'deterministic' | 'high_confidence' | 'ambiguous' | 'unmatched';
+  autoCommit: boolean;
+  reason: string | null;
+}
+
+/** One provenance-based decision point shared by every capture source. */
+export function evaluateCommitDecision(input: {
+  study: ImportedStudy;
+  candidates: MatchCandidate[];
+  selectedCandidates: MatchCandidate[];
+  duplicateStatus: DuplicateStatus;
+  parserNeedsReview: boolean;
+  matchReviewReason: string | null;
+  profileId: string | null;
+  siteId: string | null;
+}): CommitDecision {
+  const { study, candidates, selectedCandidates, duplicateStatus, parserNeedsReview, matchReviewReason, profileId, siteId } = input;
+  if (selectedCandidates.length === 0) return { certainty: 'unmatched', autoCommit: false, reason: matchReviewReason ?? 'No usable CPT match' };
+  if (duplicateStatus) return { certainty: 'ambiguous', autoCommit: false, reason: matchReviewReason ?? 'Possible duplicate conflict' };
+  if (!validReportIdentityTimestamp(study)) return { certainty: 'ambiguous', autoCommit: false, reason: 'Exam datetime is required before this report capture can be counted' };
+  if (study.captureProfileId !== undefined && study.captureProfileId !== profileId) {
+    return { certainty: 'ambiguous', autoCommit: false, reason: 'Capture profile no longer matches the active profile' };
+  }
+  if (study.captureSiteId !== undefined && study.captureSiteId !== siteId) {
+    return { certainty: 'ambiguous', autoCommit: false, reason: 'Capture location no longer matches the active location' };
+  }
+  if (parserNeedsReview) return { certainty: 'ambiguous', autoCommit: false, reason: study.parserReviewReason ?? 'Capture text requires review' };
+  if (selectedCandidates.some((candidate) => !productivityRelevant(candidate))) {
+    return { certainty: 'ambiguous', autoCommit: false, reason: 'A selected CPT has no valid professional wRVU snapshot' };
+  }
+
+  const selectedCodes = [...new Set(selectedCandidates.map((candidate) => candidate.cptCode))].sort().join('|');
+  const exactAliasCodes = [...new Set(candidates.filter(isExactConfirmedAliasCandidate).map((candidate) => candidate.cptCode))].sort().join('|');
+  const expectedAliasCodes = candidates
+    .filter(isExactConfirmedAliasCandidate)
+    .map((candidate) => candidate.explanation?.detail.match(/aliasCptSet=([^;]+)/)?.[1] ?? '')
+    .find(Boolean)
+    ?.split('|')
+    .map((code) => code.replace(/-26$/, ''))
+    .sort()
+    .join('|') ?? exactAliasCodes;
+  const exactInstitutionCodes = [...new Set(candidates.filter(isExactInstitutionMappingCandidate).map((candidate) => candidate.cptCode))].sort().join('|');
+  if (exactAliasCodes && expectedAliasCodes !== exactAliasCodes) {
+    return { certainty: 'ambiguous', autoCommit: false, reason: 'Confirmed alias has an incomplete or invalid professional CPT set' };
+  }
+  if (exactAliasCodes && exactInstitutionCodes && exactAliasCodes !== exactInstitutionCodes) {
+    return { certainty: 'ambiguous', autoCommit: false, reason: 'Confirmed alias conflicts with the current institutional mapping' };
+  }
+
+  const deterministic =
+    (selectedCandidates.every(isExactConfirmedAliasCandidate) && selectedCodes === exactAliasCodes) ||
+    (selectedCandidates.every(isExactInstitutionMappingCandidate) && selectedCodes === exactInstitutionCodes) ||
+    selectedCandidates.every(isDeterministicProtocolCandidate) ||
+    selectedCandidates.every((candidate) => isTrustedDirectCandidate(study, candidate));
+  if (deterministic && !matchReviewReason) return { certainty: 'deterministic', autoCommit: true, reason: null };
+
+  const plausible = candidates.filter((candidate) => productivityRelevant(candidate) && candidate.confidence >= 0.65);
+  if (plausible.length > selectedCandidates.length || matchReviewReason?.includes('Multiple')) {
+    return { certainty: 'ambiguous', autoCommit: false, reason: matchReviewReason ?? 'Multiple plausible CPT matches' };
+  }
+  return { certainty: 'high_confidence', autoCommit: false, reason: matchReviewReason };
 }
 
 function selectedDuplicateCptCodes(candidates: MatchCandidate[], directCpt: string | null): string[] {
@@ -152,14 +237,13 @@ export async function runImportPipeline(
   studies: ImportedStudy[],
   logDate: string,
   profileId?: string | null,
+  siteId?: string | null,
 ): Promise<PipelineResult> {
   if (studies.length === 0) {
     return { reviewRows: [], skippedRows: [], sources: [], profileId: profileId ?? null };
   }
 
   const sources = [...new Set(studies.map((s) => s.source))];
-  const userSettings = await db.userSettings.get('default');
-  const autoCommitThreshold = effectiveAutoCommitThreshold(userSettings?.lowConfidenceThreshold);
   const matched: Array<{ study: ImportedStudy; candidates: MatchCandidate[] }> = [];
 
   for (const originalStudy of studies) {
@@ -192,7 +276,7 @@ export async function runImportPipeline(
     modality: study.modality ?? candidates[0]?.modality ?? null,
   }));
 
-  const dupeResults = await checkBatchDuplicates(dupeCandidates, logDate);
+  const dupeResults = await checkBatchDuplicates(dupeCandidates, logDate, profileId ?? null);
   const reviewRows: PipelineReviewRow[] = [];
   const skippedRows: PipelineReviewRow[] = [];
 
@@ -220,13 +304,21 @@ export async function runImportPipeline(
           .map((candidate, index) => (isExactInstitutionMappingCandidate(candidate) && productivityRelevant(candidate) ? index : -1))
           .filter((index) => index >= 0)
       : [];
+    const aliasSelectedIndices = top && isExactConfirmedAliasCandidate(top)
+      ? candidates
+          .map((candidate, index) => (isExactConfirmedAliasCandidate(candidate) && productivityRelevant(candidate) ? index : -1))
+          .filter((index) => index >= 0)
+      : [];
     const selectedIndex =
       institutionSelectedIndices[0] ??
+      aliasSelectedIndices[0] ??
       deterministicSelectedIndices[0] ??
       (top && top.confidence >= 0.75 && productivityRelevant(top) ? 0 : null);
     const selectedCandidateIndices =
       institutionSelectedIndices.length > 0
         ? institutionSelectedIndices
+        : aliasSelectedIndices.length > 0
+        ? aliasSelectedIndices
         : deterministicSelectedIndices.length > 0
         ? deterministicSelectedIndices
         : selectedIndex === null ? [] : [selectedIndex];
@@ -235,24 +327,21 @@ export async function runImportPipeline(
       .filter((candidate): candidate is MatchCandidate => Boolean(candidate));
     const matchReviewReason = reviewReasonFor(top, candidates, dupStatus, dupReason);
     const reviewReason = study.parserReviewReason ?? matchReviewReason;
-    const exactInstitutionAutoAccept =
-      !parserNeedsReview &&
-      dupStatus === null &&
-      institutionSelectedIndices.length > 0 &&
-      selectedCandidates.length === institutionSelectedIndices.length &&
-      selectedCandidates.every((candidate) => isExactInstitutionMappingCandidate(candidate) && productivityRelevant(candidate)) &&
-      !matchReviewReason;
-    const autoApprovalLevel =
-      exactInstitutionAutoAccept
-        ? 'learned'
-        : !parserNeedsReview && top && isDeterministicProtocolCandidate(top) && dupStatus === null
-        ? 'learned'
-        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= Math.max(0.99, autoCommitThreshold) && dupStatus === null
-        ? 'silent'
-        : !parserNeedsReview && top?.method === 'alias_match' && top.confidence >= autoCommitThreshold && dupStatus === null
-        ? 'learned'
-        : null;
-    const autoAccept = Boolean(autoApprovalLevel && !reviewReason);
+    const decision = evaluateCommitDecision({
+      study,
+      candidates,
+      selectedCandidates,
+      duplicateStatus: dupStatus,
+      parserNeedsReview,
+      matchReviewReason,
+      profileId: profileId ?? null,
+      siteId: siteId ?? null,
+    });
+    const autoApprovalLevel = decision.autoCommit
+      ? selectedCandidates.every(isExactConfirmedAliasCandidate) ? 'silent' : 'learned'
+      : null;
+    const autoAccept = decision.autoCommit;
+    const effectiveReviewReason = decision.reason ?? reviewReason;
 
     const row: PipelineReviewRow = {
       tempId: crypto.randomUUID(),
@@ -261,11 +350,13 @@ export async function runImportPipeline(
       selectedCandidateIndex: selectedIndex,
       selectedCandidateIndices,
       displayTitle: procedureNameFor(study),
-      needsReview: parserNeedsReview || (!autoAccept && Boolean(reviewReason ?? (candidates.length === 0 || !top || top.confidence < 0.75))),
+      needsReview: !autoAccept,
       autoApproved: autoAccept,
       autoApprovalLevel,
       approvalStatus: autoAccept ? 'auto_approved' : 'pending',
-      reviewReason,
+      reviewReason: effectiveReviewReason,
+      matchCertainty: decision.certainty,
+      commitDecisionReason: decision.reason,
       duplicateStatus: dupStatus,
       duplicateExistingLogId: dupLogId,
       duplicateReason: dupReason,

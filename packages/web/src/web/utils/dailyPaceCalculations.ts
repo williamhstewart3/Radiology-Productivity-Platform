@@ -46,6 +46,11 @@ export type PaceStatus =
 export interface DailyPaceMetrics {
   /** wRVUs logged so far today */
   currentRvu: number;
+  /** Estimated wRVUs from unresolved captures with a selected provisional CPT set. */
+  pendingRvu: number;
+  /** Confirmed plus pending; never written back to permanent history. */
+  projectedRvu: number;
+  projectedPercent: number;
   /** Configured daily goal */
   dailyGoal: number;
   /** Percentage of goal completed (0–100+) */
@@ -119,6 +124,7 @@ export function computeDailyPace(
   logs: StudyLog[],
   settings: DailyPaceSettings,
   previouslyAchieved: boolean,
+  pendingWrvu = 0,
 ): DailyPaceMetrics {
   const {
     dailyRvuGoal,
@@ -138,6 +144,9 @@ export function computeDailyPace(
 
   const now = nowMinutes();
   const currentRvu = sumTodayRvu(logs);
+  const pendingRvu = Math.max(0, pendingWrvu);
+  const projectedRvu = currentRvu + pendingRvu;
+  const projectedPercent = (projectedRvu / goal) * 100;
   const remainingToGoal = Math.max(0, goal - currentRvu);
   const percentComplete = (currentRvu / goal) * 100;
 
@@ -148,6 +157,9 @@ export function computeDailyPace(
   if (now < startMin) {
     return {
       currentRvu,
+      pendingRvu,
+      projectedRvu,
+      projectedPercent,
       dailyGoal: goal,
       percentComplete,
       elapsedWorkMinutes: 0,
@@ -172,6 +184,9 @@ export function computeDailyPace(
     const pd = currentRvu - goal;
     return {
       currentRvu,
+      pendingRvu,
+      projectedRvu,
+      projectedPercent,
       dailyGoal: goal,
       percentComplete,
       elapsedWorkMinutes: shiftMinutes,
@@ -237,6 +252,9 @@ export function computeDailyPace(
 
   return {
     currentRvu,
+    pendingRvu,
+    projectedRvu,
+    projectedPercent,
     dailyGoal: goal,
     percentComplete,
     elapsedWorkMinutes,

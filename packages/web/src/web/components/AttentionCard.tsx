@@ -10,6 +10,7 @@ const SOURCE_LABELS: Record<ImportSource, string> = {
   csv: 'CSV',
   manual: 'Manual',
   powerscribe: 'PowerScribe',
+  report_capture: 'Report Capture',
 };
 
 function shortTime(iso: string | null | undefined): string | null {
@@ -52,9 +53,10 @@ export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandRequest]);
   const chipsWrvu = chips.reduce((sum, option) => sum + (option.workRvu ?? 0), 0);
+  const pendingNeedsAttention = row.duplicateStatus === 'possible' || row.matchCertainty === 'ambiguous' || row.matchCertainty === 'unmatched';
 
   return (
-    <article className={`rounded-[16px] border bg-rd-surface p-5 ${active ? 'border-rd-caution' : 'border-rd-separator'}`} aria-current={active ? 'true' : undefined}>
+    <article className={`rounded-[16px] border bg-rd-surface p-5 ${active ? pendingNeedsAttention ? 'border-rd-caution' : 'border-rd-accent' : 'border-rd-separator'}`} aria-current={active ? 'true' : undefined}>
       {row.duplicateStatus === 'possible' ? (
         <div className="space-y-4">
           <p className="text-[13px] font-semibold text-rd-caution">Possible duplicate</p>
@@ -67,6 +69,9 @@ export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onS
         </div>
       ) : (
         <div className="space-y-3">
+          {row.source.source === 'report_capture' && (
+            <span className="inline-flex rounded-full border border-rd-accent/35 bg-rd-accent/10 px-2 py-0.5 text-[11px] font-medium text-rd-label-secondary">Pending · Report Capture</span>
+          )}
           <p className="font-mono text-[15px] text-rd-label-secondary">“{row.source.procedureName ?? row.source.examTitle}”</p>
           <div>
             <p className="text-[22px] font-semibold text-rd-label-primary">
@@ -75,7 +80,7 @@ export function AttentionCard({ row, active, onAccept, onSkip, onOpenPicker, onS
             {chips.length > 0 ? (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {chips.map((option, index) => (
-                  <span key={`${option.cptCode}-${index}`} className="rounded-full bg-rd-surface-2 px-2.5 py-1 font-mono text-[13px] text-rd-label-primary">
+                  <span key={`${option.cptCode}-${index}`} className="rounded-full border border-rd-accent/25 bg-rd-accent/10 px-2.5 py-1 font-mono text-[13px] text-rd-label-primary">
                     {option.cptCode} · {option.workRvu?.toFixed(2) ?? '—'}
                   </span>
                 ))}

@@ -12,6 +12,9 @@ import type { StudyLog } from '../src/web/types';
 function metrics(overrides: Partial<DailyPaceMetrics>): DailyPaceMetrics {
   return {
     currentRvu: 0,
+    pendingRvu: 0,
+    projectedRvu: 0,
+    projectedPercent: 0,
     dailyGoal: 90,
     percentComplete: 0,
     elapsedWorkMinutes: 0,
@@ -127,5 +130,26 @@ describe('computeDailyPace — the six restored cluster figures reconcile with i
       false,
     );
     expect(m.currentRvu).toBe(10);
+  });
+
+  test('pending is explicit: projected increases while confirmed stays unchanged', () => {
+    const m = computeDailyPace(
+      [log('confirmed', 60)],
+      { ...settings, workdayStart: '00:00', workdayEnd: '23:59' },
+      false,
+      8.4,
+    );
+    expect(m.currentRvu).toBe(60);
+    expect(m.pendingRvu).toBe(8.4);
+    expect(m.projectedRvu).toBe(68.4);
+    expect(m.projectedPercent).toBeCloseTo(76);
+  });
+
+  test('approval moves the same amount from pending to confirmed without changing projected', () => {
+    const before = computeDailyPace([log('base', 60)], settings, false, 1.16);
+    const after = computeDailyPace([log('base', 60), log('approved', 1.16)], settings, false, 0);
+    expect(before.projectedRvu).toBeCloseTo(after.projectedRvu);
+    expect(after.currentRvu - before.currentRvu).toBeCloseTo(1.16);
+    expect(before.pendingRvu - after.pendingRvu).toBeCloseTo(1.16);
   });
 });

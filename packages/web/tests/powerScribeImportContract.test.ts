@@ -5,6 +5,7 @@ import type { StudyLog } from '../src/web/types';
 import {
   __testBatchDuplicateKey,
   checkOneDuplicate,
+  scopeDuplicateLogs,
   type StudyCandidate,
 } from '../src/web/utils/duplicateDetection';
 import { parseOcrLines } from '../src/web/utils/powerScribeParser';
@@ -125,9 +126,11 @@ describe('PowerScribe import contract fixtures', () => {
     expect(match?.confidence).toBe('exact');
   });
 
-  test.todo(
-    'profile scoping: batch DB lookup should ignore another profile (known limitation: duplicate lookup currently filters only by logDate)',
-  );
+  test('profile scoping: batch DB lookup ignores another profile', () => {
+    const own = existingLog('portable-morning', 'profile-a');
+    const other = existingLog('portable-morning', 'profile-b');
+    expect(scopeDuplicateLogs([own, other], 'profile-a')).toEqual([own]);
+  });
 
   test('quoted CSV exam titles retain embedded commas', async () => {
     const [study] = await new CSVImportProvider(quotedCommaCsv, '2026-07-13').importStudies();

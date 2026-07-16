@@ -136,9 +136,12 @@ function MainApp() {
   const pendingCount = useLiveQuery(async () => {
     const sessions = await db.activeReviewSessions.where('status').equals('active').toArray();
     return sessions
-      .filter((session) => session.profileId === (activeProfile?.id ?? null) || session.profileId == null)
+      .filter((session) =>
+        session.profileId === (activeProfile?.id ?? null) &&
+        (session.siteId ?? null) === (activePractice?.id ?? null),
+      )
       .reduce((sum, session) => sum + session.needsReviewCount, 0);
-  }, [activeProfile?.id], 0);
+  }, [activeProfile?.id, activePractice?.id], 0);
   const tabItems = PRIMARY_ITEMS.map((item) => item.path === '/inbox' ? { ...item, badge: pendingCount } : item);
 
   // Settings > Appearance (auto/light/dark) drives both the legacy Baptist

@@ -34,16 +34,17 @@ interface LogProps {
 }
 
 export function Log({ onImported, onReviewReady, onClose }: LogProps) {
-  const { activeProfile } = useOrg();
+  const { activeProfile, activePractice } = useOrg();
   const profileId = activeProfile?.id ?? null;
+  const siteId = activePractice?.id ?? null;
   const [segment, setSegment] = useState<Segment>('capture');
 
   const pendingSession = useLiveQuery(
     async () => {
       const sessions = await db.activeReviewSessions.where('status').equals('active').reverse().sortBy('updatedAt');
-      return sessions.find((session) => session.profileId === profileId || session.profileId == null) ?? null;
+      return sessions.find((session) => session.profileId === profileId && (session.siteId ?? null) === siteId) ?? null;
     },
-    [profileId],
+    [profileId, siteId],
     null,
   );
 

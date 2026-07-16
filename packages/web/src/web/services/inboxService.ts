@@ -100,10 +100,11 @@ export interface InboxResolutionResult {
 
 export async function resolveInboxRows(input: {
   profileId: string | null;
+  siteId?: string | null;
   rowIds: string[];
   action: 'accept' | 'skip' | 'update_existing';
 }): Promise<InboxResolutionResult> {
-  const session = await loadActiveReviewSession(input.profileId);
+  const session = await loadActiveReviewSession(input.profileId, input.siteId);
   if (!session) return { importedCount: 0, addedWrvu: 0, remainingAttention: 0 };
   const ids = new Set(input.rowIds);
   const selected = session.rows.filter((row) => ids.has(row.tempId));
@@ -161,6 +162,7 @@ export async function resolveInboxRows(input: {
     await persistActiveReviewSession({
       sessionId: session.sessionId,
       profileId: input.profileId,
+      siteId: input.siteId ?? session.siteId,
       readingDate: session.readingDate,
       rows: nextRows,
       skippedRows: nextSkipped,
@@ -257,15 +259,15 @@ export function splitInboxRowByCandidates(
   }));
 }
 
-export async function applyInboxCandidateSelection(profileId: string | null, rowId: string, candidates: MatchCandidate[]): Promise<void> {
-  const session = await loadActiveReviewSession(profileId);
+export async function applyInboxCandidateSelection(profileId: string | null, rowId: string, candidates: MatchCandidate[], siteId?: string | null): Promise<void> {
+  const session = await loadActiveReviewSession(profileId, siteId);
   if (!session) return;
   const rows = session.rows.map((row) => row.tempId === rowId ? mergeInboxCandidateSelection(row, candidates) : row);
   await persistActiveReviewSession({ ...session, profileId, rows });
 }
 
-export async function applyInboxRowSplit(profileId: string | null, rowId: string, candidates: MatchCandidate[]): Promise<number> {
-  const session = await loadActiveReviewSession(profileId);
+export async function applyInboxRowSplit(profileId: string | null, rowId: string, candidates: MatchCandidate[], siteId?: string | null): Promise<number> {
+  const session = await loadActiveReviewSession(profileId, siteId);
   if (!session) return 0;
   const target = session.rows.find((row) => row.tempId === rowId);
   if (!target) return 0;

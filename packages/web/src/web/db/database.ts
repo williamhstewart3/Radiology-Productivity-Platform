@@ -431,6 +431,32 @@ export class RvuDatabase extends Dexie {
       organizations: 'id',
       practices: 'id, organizationId',
     });
+
+    // v21: pending/review captures are location-scoped as well as profile-scoped.
+    this.version(21).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, siteId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      ocrLearningEntries: 'id, profileId, siteId, normalizedOcrText, matchedCpt, lastUsedAt',
+      activeReviewSessions: 'id, profileId, siteId, readingDate, status, updatedAt',
+      auditLogEntries: 'id, profileId, siteId, sessionId, logDate, action, createdAt',
+      hospitalComparisonReports: 'id, profileId, siteId, reportDate, createdAt',
+      memorySuggestions: 'id, profileId, siteId, normalizedKey, status, createdAt',
+      feedbackEvents: 'id, profileId, sessionId, category, severity, status, createdAt',
+      correctionActions: 'id, feedbackEventId, targetRowId, actionType, createdAt, appliedAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade(async (trans) => {
+      const profiles = await trans.table('radiologistProfiles').toArray();
+      const siteByProfile = new Map(profiles.map((profile) => [profile.id, profile.practiceId ?? null]));
+      await trans.table('activeReviewSessions').toCollection().modify((session) => {
+        if (!('siteId' in session)) session.siteId = session.profileId ? siteByProfile.get(session.profileId) ?? null : null;
+      });
+    });
   }
 }
 

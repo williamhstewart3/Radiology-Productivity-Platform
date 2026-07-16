@@ -4,6 +4,8 @@ import { cn } from '@/lib/utils';
 interface RingProps {
   /** 0–100+. Values above 100 render a full ring (goal exceeded). */
   percent: number;
+  /** Confirmed + pending percent. Drawn as a lighter extension behind confirmed. */
+  projectedPercent?: number;
   size?: number;
   strokeWidth?: number;
   children?: React.ReactNode;
@@ -12,18 +14,24 @@ interface RingProps {
 }
 
 /** Apple Watch-style activity ring. SVG stroke-dasharray only, no chart library. */
-export function Ring({ percent, size = 220, strokeWidth = 16, children, label, className }: RingProps) {
+export function Ring({ percent, projectedPercent, size = 220, strokeWidth = 16, children, label, className }: RingProps) {
   const clamped = Math.max(0, Math.min(100, percent));
+  const projectedClamped = Math.max(clamped, Math.min(100, projectedPercent ?? clamped));
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
 
   const [sweep, setSweep] = useState(0);
+  const [projectedSweep, setProjectedSweep] = useState(0);
   useEffect(() => {
-    const raf = requestAnimationFrame(() => setSweep(clamped));
+    const raf = requestAnimationFrame(() => {
+      setSweep(clamped);
+      setProjectedSweep(projectedClamped);
+    });
     return () => cancelAnimationFrame(raf);
-  }, [clamped]);
+  }, [clamped, projectedClamped]);
 
   const offset = circumference - (sweep / 100) * circumference;
+  const projectedOffset = circumference - (projectedSweep / 100) * circumference;
 
   return (
     <div
@@ -32,6 +40,20 @@ export function Ring({ percent, size = 220, strokeWidth = 16, children, label, c
     >
       <svg width={size} height={size} className="-rotate-90">
         <title>{label}</title>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="var(--rd-accent)"
+          strokeOpacity={0.28}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={projectedOffset}
+          className="rd-motion-safe"
+          style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.4,0,0.2,1)' }}
+        />
         <circle
           cx={size / 2}
           cy={size / 2}

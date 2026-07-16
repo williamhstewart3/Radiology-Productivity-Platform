@@ -399,6 +399,7 @@ export async function checkOneDuplicate(
 export async function checkBatchDuplicates(
   candidates: StudyCandidate[],
   logDate: string,
+  profileId?: string | null,
 ): Promise<DuplicateCheckResult[]> {
   const candidateDates = [
     ...new Set(
@@ -411,10 +412,10 @@ export async function checkBatchDuplicates(
   for (const date of candidateDates) {
     logsByDate.set(
       date,
-      await db.studyLogs
+      scopeDuplicateLogs(await db.studyLogs
         .where('logDate')
         .equals(date)
-        .toArray(),
+        .toArray(), profileId ?? null),
     );
   }
 
@@ -504,4 +505,8 @@ export async function checkBatchDuplicates(
   }
 
   return results;
+}
+
+export function scopeDuplicateLogs(logs: StudyLog[], profileId: string | null): StudyLog[] {
+  return logs.filter((log) => log.profileId === profileId || log.profileId == null);
 }

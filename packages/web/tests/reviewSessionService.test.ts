@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { __testQuietRowsForImmediateCommit, mergeReviewSessionRows } from '../src/web/services/reviewSessionService';
+import { __testQuietRowsForImmediateCommit, mergeReviewSessionRows, selectScopedActiveReviewSession } from '../src/web/services/reviewSessionService';
 import type { PipelineReviewRow } from '../src/web/pipeline/importPipeline';
 import type { ImportedStudy } from '../src/web/types/importProvider';
 import type { MatchCandidate, Modality } from '../src/web/types';
@@ -75,6 +75,15 @@ function row(patch: Partial<ImportedStudy> = {}, cptCodes = ['71045']): Pipeline
 }
 
 describe('active review session duplicate merging', () => {
+  test('pending sessions never fall back across profiles or locations', () => {
+    const sessions = [
+      { id: 'a', profileId: 'profile-a', siteId: 'site-a' },
+      { id: 'b', profileId: 'profile-b', siteId: 'site-b' },
+    ];
+    expect(selectScopedActiveReviewSession(sessions, 'profile-a', 'site-a')?.id).toBe('a');
+    expect(selectScopedActiveReviewSession(sessions, 'profile-a', 'site-b')).toBeUndefined();
+    expect(selectScopedActiveReviewSession(sessions, 'missing', 'site-a')).toBeUndefined();
+  });
   test('commits quiet rows even when another row still needs review', () => {
     const quiet = row();
     const pending = { ...row({}, ['73650']), needsReview: true };
@@ -145,5 +154,26 @@ describe('active review session duplicate merging', () => {
     expect(repeatedMerge.skippedRows).toHaveLength(1);
     expect(differentMerge.skippedRows).toHaveLength(0);
     expect(differentMerge.reviewRows).toHaveLength(2);
+  });
+
+  test('later worklist row reconciles with a pending report capture by CPT set and exam datetime', () => {
+    const report = {
+      ...row({ source: 'report_capture', examDateTime: '2026-07-16T08:47:00', modifiedDate: null, modifiedDateTime: null }),
+      needsReview: true,
+    };
+    const worklist = row({
+      source: 'ocr', examDateTime: '2026-07-16T08:47:00', modifiedDate: '2026-07-16', modifiedDateTime: '2026-07-16T09:15:00',
+    });
+    const merged = mergeReviewSessionRows([report], [], [worklist], []);
+    expect(merged.reviewRows).toHaveLength(1);
+    expect(merged.reviewRows[0].source.source).toBe('report_capture');
+    expect(merged.reviewRows[0].source.modifiedDateTime).toBe('2026-07-16T09:15:00');
+    expect(merged.skippedRows[0].duplicateReason).toContain('pending approval');
+  });
+
+  test('same report procedure with a different exam datetime remains a separate study', () => {
+    const first = row({ source: 'report_capture', examDateTime: '2026-07-16T08:47:00', modifiedDate: null, modifiedDateTime: null });
+    const second = row({ source: 'report_capture', examDateTime: '2026-07-16T10:12:00', modifiedDate: null, modifiedDateTime: null });
+    expect(mergeReviewSessionRows([first], [], [second], []).reviewRows).toHaveLength(2);
   });
 });

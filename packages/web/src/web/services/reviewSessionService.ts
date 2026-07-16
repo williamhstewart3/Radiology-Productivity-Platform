@@ -8,6 +8,7 @@ export type TimelineEvent = { id: string; at: string; label: string };
 
 export interface ReviewSessionSnapshot {
   sessionId: string;
+  siteId: string | null;
   readingDate: string;
   rows: PipelineReviewRow[];
   skippedRows: PipelineReviewRow[];
@@ -81,6 +82,17 @@ function reviewSessionExactDuplicateKey(row: PipelineReviewRow): string | null {
   ].join('|');
 }
 
+function performedStudyIdentityKey(row: PipelineReviewRow): string | null {
+  if (!row.source.examDateTime) return null;
+  const selectedCptSet = getSelectedCandidates(row)
+    .map((candidate) => candidate.cptCode)
+    .filter(Boolean)
+    .sort()
+    .join('+');
+  const identity = selectedCptSet || normalizedExamKey(row);
+  return identity ? `${identity}|${row.source.examDateTime.slice(0, 16)}` : null;
+}
+
 export function summarizeReviewSession(rows: PipelineReviewRow[], skippedRows: PipelineReviewRow[]) {
   const included = rows.filter((row) => row.included);
   const confirmedWrvu = included
@@ -107,10 +119,44 @@ export function mergeReviewSessionRows(
   nextSkippedRows: PipelineReviewRow[],
 ): { reviewRows: PipelineReviewRow[]; skippedRows: PipelineReviewRow[] } {
   const existingKeys = new Set(currentRows.map(reviewSessionExactDuplicateKey).filter((key): key is string => Boolean(key)));
+  const mergedCurrentRows = [...currentRows];
+  const performedRows = new Map<string, { row: PipelineReviewRow; index: number }>();
+  currentRows.forEach((row, index) => {
+    const key = performedStudyIdentityKey(row);
+    if (key) performedRows.set(key, { row, index });
+  });
   const appendRows: PipelineReviewRow[] = [];
   const duplicateRows: PipelineReviewRow[] = [];
 
   for (const row of nextRows) {
+    const performedKey = performedStudyIdentityKey(row);
+    const performedMatch = performedKey ? performedRows.get(performedKey) : null;
+    if (performedMatch && (performedMatch.row.source.source === 'report_capture' || row.source.source === 'report_capture')) {
+      if (performedMatch.row.source.source === 'report_capture' && row.source.source !== 'report_capture') {
+        mergedCurrentRows[performedMatch.index] = {
+          ...performedMatch.row,
+          source: {
+            ...performedMatch.row.source,
+            modifiedDate: row.source.modifiedDate ?? performedMatch.row.source.modifiedDate,
+            modifiedTime: row.source.modifiedTime ?? performedMatch.row.source.modifiedTime,
+            modifiedDateTime: row.source.modifiedDateTime ?? performedMatch.row.source.modifiedDateTime,
+            rowIndex: row.source.rowIndex ?? performedMatch.row.source.rowIndex,
+          },
+          duplicateReason: 'Later worklist row reconciled with this pending report capture',
+        };
+      }
+      duplicateRows.push({
+        ...row,
+        included: false,
+        autoSkipped: true,
+        duplicateStatus: 'exact',
+        duplicateReason: performedMatch.row.needsReview
+          ? 'Same study is already pending approval from Report Capture'
+          : 'Same study is already represented in this review session',
+        approvalStatus: 'exact_duplicate_skipped',
+      });
+      continue;
+    }
     const key = reviewSessionExactDuplicateKey(row);
     if (key && existingKeys.has(key)) {
       duplicateRows.push({
@@ -123,23 +169,35 @@ export function mergeReviewSessionRows(
       });
     } else {
       if (key) existingKeys.add(key);
+      if (performedKey) performedRows.set(performedKey, { row, index: mergedCurrentRows.length + appendRows.length });
       appendRows.push(row);
     }
   }
 
   return {
-    reviewRows: [...currentRows, ...appendRows],
+    reviewRows: [...mergedCurrentRows, ...appendRows],
     skippedRows: [...currentSkippedRows, ...duplicateRows, ...nextSkippedRows],
   };
 }
 
-export async function loadActiveReviewSession(profileId: string | null): Promise<ReviewSessionSnapshot | null> {
+export function selectScopedActiveReviewSession<T extends { profileId: string | null; siteId?: string | null }>(
+  sessions: T[],
+  profileId: string | null,
+  siteId?: string | null,
+): T | undefined {
+  return sessions.find((entry) =>
+    entry.profileId === profileId &&
+    (siteId === undefined || (entry.siteId ?? null) === siteId),
+  );
+}
+
+export async function loadActiveReviewSession(profileId: string | null, siteId?: string | null): Promise<ReviewSessionSnapshot | null> {
   const sessions = await db.activeReviewSessions
     .where('status')
     .equals('active')
     .reverse()
     .sortBy('updatedAt');
-  const session = sessions.find((entry) => entry.profileId === profileId) ?? sessions[0];
+  const session = selectScopedActiveReviewSession(sessions, profileId, siteId);
   if (!session) return null;
 
   try {
@@ -148,6 +206,7 @@ export async function loadActiveReviewSession(profileId: string | null): Promise
     const timeline = JSON.parse(session.timelineJson) as TimelineEvent[];
     return {
       sessionId: session.id,
+      siteId: session.siteId ?? null,
       readingDate: session.readingDate,
       rows: Array.isArray(rows) ? rows : [],
       skippedRows: Array.isArray(skippedRows) ? skippedRows : [],
@@ -197,6 +256,7 @@ export function __testQuietRowsForImmediateCommit(rows: PipelineReviewRow[]): Pi
 export async function persistActiveReviewSession(input: {
   sessionId: string;
   profileId: string | null;
+  siteId?: string | null;
   readingDate: string;
   rows: PipelineReviewRow[];
   skippedRows: PipelineReviewRow[];
@@ -211,6 +271,7 @@ export async function persistActiveReviewSession(input: {
     await db.activeReviewSessions.put({
       id: input.sessionId,
       profileId: input.profileId,
+      siteId: input.siteId ?? null,
       readingDate: input.readingDate,
       status: 'finalized',
       rowsJson: '[]',
@@ -227,6 +288,7 @@ export async function persistActiveReviewSession(input: {
   await db.activeReviewSessions.put({
     id: input.sessionId,
     profileId: input.profileId,
+    siteId: input.siteId ?? null,
     readingDate: input.readingDate,
     status: 'active',
     rowsJson: JSON.stringify(swept.rows),
