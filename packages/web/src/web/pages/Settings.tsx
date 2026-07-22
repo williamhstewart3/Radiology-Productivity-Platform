@@ -6,7 +6,13 @@ import { importRvuFile } from '../utils/rvuFileImporter';
 import { buildSeedCptRows } from '../data/seedCptData';
 import { normalizeExamText } from '../utils/textMatching';
 import { isDesktop, getDesktopAPI } from '../lib/desktop';
+import { DEFAULT_OPENAI_VISION_MODEL } from '../services/openaiVisionImport';
 import type { UserSettings, ExamAlias, ExamDictionaryEntry } from '../types';
+
+type VisionUserSettings = Partial<UserSettings> & {
+  openAiVisionEnabled?: boolean;
+  openAiVisionModel?: string;
+};
 import type { ImportResult } from '../utils/rvuFileImporter';
 
 export function Settings() {
@@ -28,11 +34,11 @@ export function Settings() {
     setCptCount(count);
   }, []);
 
-  const [local, setLocal] = useState<Partial<UserSettings>>({});
+  const [local, setLocal] = useState<VisionUserSettings>({});
 
-  const merged: Partial<UserSettings> = { ...settings, ...local };
+  const merged: VisionUserSettings = { ...settings, ...local };
 
-  function update(patch: Partial<UserSettings>) {
+  function update(patch: VisionUserSettings) {
     setLocal((prev) => ({ ...prev, ...patch }));
   }
 
@@ -769,9 +775,73 @@ export function Settings() {
             <li>• Original photo deleted immediately after crop is confirmed</li>
             <li>• Cropped image cleared from memory after OCR completes</li>
             <li>• No image saved to camera roll, disk, or cloud</li>
-            <li>• All OCR runs locally — no external API calls</li>
+            <li>• Existing OCR runs locally; OpenAI Vision sends only the cropped worklist region when selected</li>
           </ul>
         </div>
+      </div>
+
+      {/* OpenAI Vision experiment */}
+      <div className="card space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">OpenAI Vision</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Experimental PowerScribe table extraction. The API key is server-side only.
+            </p>
+          </div>
+          <span className="text-[10px] px-2 py-0.5 rounded-full border border-sky-500/25 bg-sky-500/10 text-sky-300">
+            Experimental
+          </span>
+        </div>
+
+        <label className="flex items-center justify-between gap-3 cursor-pointer select-none">
+          <div>
+            <p className="text-sm text-white font-medium">Enable OpenAI Vision engine</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Adds OpenAI Vision as a selectable extraction engine. Existing OCR remains available.
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            checked={Boolean(merged.openAiVisionEnabled)}
+            onChange={(event) => update({ openAiVisionEnabled: event.target.checked })}
+            className="h-4 w-4 accent-sky-500"
+          />
+        </label>
+
+        <div>
+          <label className="block text-xs text-slate-400 mb-1.5">Vision model</label>
+          <input
+            type="text"
+            value={merged.openAiVisionModel ?? DEFAULT_OPENAI_VISION_MODEL}
+            onChange={(event) => update({ openAiVisionModel: event.target.value })}
+            placeholder={DEFAULT_OPENAI_VISION_MODEL}
+            className="input w-full font-mono text-xs"
+          />
+          <p className="text-[10px] text-slate-500 mt-1">
+            Configure OPENAI_API_KEY in Vercel server-side environment variables. Do not use VITE_ variables for this key.
+          </p>
+        </div>
+
+        <div className="px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
+          <p className="text-amber-300 text-xs">
+            OpenAI Vision sends the PHI-excluding cropped worklist region to the server endpoint for extraction.
+            The application does not persist screenshots after processing.
+          </p>
+        </div>
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all ${
+            saved
+              ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
+              : 'text-white hover:opacity-90'
+          }`}
+          style={!saved ? { background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` } : {}}
+        >
+          {saving ? 'Saving...' : saved ? 'Saved' : 'Save Vision Settings'}
+        </button>
       </div>
 
       {/* Danger zone */}

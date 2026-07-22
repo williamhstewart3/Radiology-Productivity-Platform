@@ -31,6 +31,11 @@ import {
 } from '../services/reviewSessionService';
 import { rememberCorrectedExam } from '../services/memoryLearningService';
 import { processOcrImport, processTextImport } from '../services/ocrWorkflowService';
+import {
+  processOpenAiVisionImport,
+  type ProcessedVisionResult,
+} from '../services/openaiVisionWorkflowService';
+import { DEFAULT_OPENAI_VISION_MODEL, type OpenAiVisionDiagnostics } from '../services/openaiVisionImport';
 import { rowEntry } from '../lib/motionVariants';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
 import type { DuplicateStatus, MatchCandidate } from '../types';
@@ -269,6 +274,7 @@ interface ImportProps {
 type Mode = 'paste' | 'ocr' | 'powerscribe';
 type Step = 'input' | 'review' | 'done';
 type ReviewMode = 'unknowns' | 'everything' | 'auto' | 'low';
+type ProcessingEngine = 'openai_vision' | 'ocr';
 const WATCHER_REVIEW_KEY = 'wrvu_pending_watcher_review';
 
 export function Import({ onImported }: ImportProps) {
@@ -292,6 +298,11 @@ export function Import({ onImported }: ImportProps) {
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [processingEngine, setProcessingEngine] = useState<ProcessingEngine>('ocr');
+  const [visionDiagnostics, setVisionDiagnostics] = useState<OpenAiVisionDiagnostics | null>(null);
+  const [visionHealth, setVisionHealth] = useState('Checking OpenAI Vision...');
+  const [showVisionCropPreview, setShowVisionCropPreview] = useState(false);
+  const [visionCropPreviewUrl, setVisionCropPreviewUrl] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -343,8 +354,22 @@ export function Import({ onImported }: ImportProps) {
       else if (settings.reviewAutoApprovedExams) setReviewMode('auto');
       else if (settings.unknownsOnlyReview === false) setReviewMode('everything');
       else setReviewMode('unknowns');
+      if ((settings as { openAiVisionEnabled?: boolean }).openAiVisionEnabled) setProcessingEngine('openai_vision');
     });
   }, []);
+
+  useEffect(() => {
+    fetch('/api/openai-vision/health')
+      .then((response) => response.json())
+      .then((payload) => setVisionHealth(payload.status ?? 'OpenAI Vision status unavailable'))
+      .catch(() => setVisionHealth('OpenAI Vision health check unavailable'));
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (visionCropPreviewUrl) URL.revokeObjectURL(visionCropPreviewUrl);
+    };
+  }, [visionCropPreviewUrl]);
 
   useEffect(() => {
     if (mode !== 'ocr') return;
@@ -407,16 +432,38 @@ export function Import({ onImported }: ImportProps) {
     if (!ocrFile) return;
     setProcessing(true);
     setError(null);
+    setVisionDiagnostics(null);
+    if (visionCropPreviewUrl) {
+      URL.revokeObjectURL(visionCropPreviewUrl);
+      setVisionCropPreviewUrl(null);
+    }
     try {
-      const processed = await processOcrImport(ocrFile, {
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-      }, { filename: ocrFile.name, size: ocrFile.size });
+      const processed = processingEngine === 'openai_vision'
+        ? await processOpenAiVisionImport(ocrFile, {
+            profileId: activeProfile?.id ?? null,
+            siteId: activePractice?.id ?? null,
+            sessionId,
+            logDate,
+          }, {
+            filename: ocrFile.name,
+            size: ocrFile.size,
+            model: (await ensureUserSettings() as { openAiVisionModel?: string }).openAiVisionModel,
+            debugPreview: showVisionCropPreview,
+          })
+        : await processOcrImport(ocrFile, {
+            profileId: activeProfile?.id ?? null,
+            siteId: activePractice?.id ?? null,
+            sessionId,
+            logDate,
+          }, { filename: ocrFile.name, size: ocrFile.size });
+      if (processingEngine === 'openai_vision') {
+        const visionProcessed = processed as ProcessedVisionResult;
+        setVisionDiagnostics(visionProcessed.diagnostics);
+        setVisionCropPreviewUrl(visionProcessed.cropPreviewUrl);
+      }
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'OCR failed — try paste mode instead');
+      setError(e instanceof Error ? e.message : processingEngine === 'openai_vision' ? 'OpenAI Vision failed' : 'OCR failed - try paste mode instead');
     } finally {
       setProcessing(false);
     }
@@ -757,6 +804,39 @@ export function Import({ onImported }: ImportProps) {
             </div>
           </div>
         </div>
+
+        {visionDiagnostics && (
+          <div className="card space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-white">OpenAI Vision Diagnostics</p>
+                <p className="text-xs text-slate-500">
+                  Engine: {visionDiagnostics.engine} | OCR used: {visionDiagnostics.ocrUsed} | Model: {visionDiagnostics.model}
+                </p>
+              </div>
+              <span className="text-xs text-sky-300">
+                {visionDiagnostics.extractionDurationSeconds.toFixed(1)} seconds
+              </span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {[
+                ['Visible/model rows extracted', visionDiagnostics.rowsExtracted],
+                ['Valid structured rows', visionDiagnostics.validStructuredRows],
+                ['Unresolved rows', visionDiagnostics.unresolvedRows],
+                ['Downstream review rows', visionDiagnostics.downstreamReviewRows],
+                ['Exact duplicates skipped', visionDiagnostics.exactDuplicatesSkipped],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-lg border border-white/8 bg-white/3 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
+                  <p className="text-lg font-bold text-white">{value}</p>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-slate-400">
+              Final accounted rows: {visionDiagnostics.finalAccountedRows}
+            </p>
+          </div>
+        )}
 
         <div className="card flex flex-wrap items-center gap-2">
           <button
@@ -1304,11 +1384,61 @@ export function Import({ onImported }: ImportProps) {
 
       {mode === 'ocr' && (
         <div className="card space-y-4">
+          <div className="rounded-xl border border-white/10 bg-white/3 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-white">Processing Engine</p>
+                <p className="text-xs text-slate-500">{visionHealth}</p>
+              </div>
+              <span className={`text-[10px] px-2 py-0.5 rounded border ${
+                processingEngine === 'openai_vision'
+                  ? 'border-sky-500/30 bg-sky-500/15 text-sky-300'
+                  : 'border-white/10 bg-white/5 text-slate-400'
+              }`}>
+                OCR used: {processingEngine === 'openai_vision' ? 'No' : 'Yes'}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setProcessingEngine('openai_vision')}
+                className={`px-3 py-2 rounded-lg border text-sm text-left ${
+                  processingEngine === 'openai_vision'
+                    ? 'border-sky-500/40 bg-sky-500/15 text-sky-200'
+                    : 'border-white/10 text-slate-400 hover:border-white/25'
+                }`}
+              >
+                OpenAI Vision — Experimental
+              </button>
+              <button
+                type="button"
+                onClick={() => setProcessingEngine('ocr')}
+                className={`px-3 py-2 rounded-lg border text-sm text-left ${
+                  processingEngine === 'ocr'
+                    ? 'border-sky-500/40 bg-sky-500/15 text-sky-200'
+                    : 'border-white/10 text-slate-400 hover:border-white/25'
+                }`}
+              >
+                Existing OCR
+              </button>
+            </div>
+            {processingEngine === 'openai_vision' && (
+              <label className="flex items-center gap-2 text-xs text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={showVisionCropPreview}
+                  onChange={(event) => setShowVisionCropPreview(event.target.checked)}
+                  className="h-4 w-4 accent-sky-500"
+                />
+                Show debug crop preview after extraction
+              </label>
+            )}
+          </div>
           {clipboardFile && (
             <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-3">
               <p className="text-sm font-semibold text-sky-300">PowerScribe screenshot detected - Process?</p>
               <p className="text-xs text-slate-400">
-                The pasted image will be processed in memory for OCR, then discarded. Only parsed exam/CPT productivity data is stored.
+                The pasted image will be processed in memory by the selected engine, then discarded. Only structured productivity rows are stored.
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -1382,12 +1512,19 @@ export function Import({ onImported }: ImportProps) {
             />
           </div>
           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-            <p className="text-amber-300 text-xs font-medium">⚡ OCR Tips</p>
+            <p className="text-amber-300 text-xs font-medium">⚡ Extraction Tips</p>
             <p className="text-amber-300/70 text-xs mt-1">
               Higher resolution screenshots work best. Crop to just the study list.
-              OCR runs locally — nothing leaves your device. Already-imported studies are auto-skipped.
+              Existing OCR runs locally. OpenAI Vision sends only the PHI-excluding crop to the server endpoint for temporary extraction.
+              Already-imported studies are auto-skipped.
             </p>
           </div>
+          {visionCropPreviewUrl && (
+            <div className="rounded-xl border border-sky-500/25 bg-sky-500/8 p-3 space-y-2">
+              <p className="text-xs font-semibold text-sky-300 uppercase tracking-wider">Debug crop preview</p>
+              <img src={visionCropPreviewUrl} alt="OpenAI Vision crop preview" className="w-full rounded-lg border border-white/10" />
+            </div>
+          )}
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button
             onClick={handleOcrProcess}
@@ -1395,7 +1532,9 @@ export function Import({ onImported }: ImportProps) {
             className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
             style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
           >
-            {processing ? 'Running OCR…' : 'Extract & Match'}
+            {processing
+              ? processingEngine === 'openai_vision' ? 'Running OpenAI Vision...' : 'Running OCR...'
+              : processingEngine === 'openai_vision' ? 'Extract with OpenAI Vision' : 'Extract & Match'}
           </button>
         </div>
       )}

@@ -15,6 +15,7 @@ import type {
   MemorySuggestion,
 } from '../types';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import { DEFAULT_OPENAI_VISION_MODEL } from '../services/openaiVisionImport';
 
 /**
  * Local-first database. Phase 1 uses IndexedDB via Dexie exclusively.
@@ -294,6 +295,28 @@ export class RvuDatabase extends Dexie {
         if (!('siteId' in report)) report.siteId = null;
       });
     });
+
+    // v15: experimental OpenAI Vision import settings. The API key remains server-side only.
+    this.version(15).stores({
+      cptRvuTable: 'id, &[cptCode+modifier], cptCode, modality, statusCategory, rvuFileVersion',
+      examAliases: 'id, profileId, siteId, aliasText, cptCode, canonicalExamName, lastUsedAt',
+      examDictionary: 'id, normalizedKey, canonicalDisplayName, modality, bodyRegion',
+      activeReviewSessions: 'id, profileId, readingDate, status, updatedAt',
+      auditLogEntries: 'id, profileId, siteId, sessionId, logDate, action, createdAt',
+      hospitalComparisonReports: 'id, profileId, siteId, reportDate, createdAt',
+      memorySuggestions: 'id, profileId, siteId, normalizedKey, status, createdAt',
+      studyLogs: 'id, profileId, logDate, studyDate, cptCode, needsReview, sessionId, sourceImportId, studyFingerprint',
+      dailySessions: 'id, sessionDate',
+      userSettings: 'id',
+      radiologistProfiles: 'id, practiceId, active, lastUsed',
+      organizations: 'id',
+      practices: 'id, organizationId',
+    }).upgrade((trans) => {
+      return trans.table('userSettings').toCollection().modify((settings) => {
+        if (!('openAiVisionEnabled' in settings)) settings.openAiVisionEnabled = false;
+        if (!('openAiVisionModel' in settings)) settings.openAiVisionModel = DEFAULT_OPENAI_VISION_MODEL;
+      });
+    });
   }
 }
 
@@ -332,6 +355,8 @@ export async function ensureUserSettings(): Promise<UserSettings> {
     alwaysProcessPowerScribeClipboard: false,
     clearClipboardAfterImport: false,
     savedPowerScribeCropRegions: {},
+    openAiVisionEnabled: false,
+    openAiVisionModel: DEFAULT_OPENAI_VISION_MODEL,
   };
   await db.userSettings.put(defaults);
   return defaults;

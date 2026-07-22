@@ -244,7 +244,7 @@ export type MatchMethod =
   | 'unmatched';
 
 /** Source of the study date/time — used to show confidence indicators in UI. */
-export type DateTimeSource = 'ocr' | 'import_default' | 'manual' | 'api_future';
+export type DateTimeSource = 'ocr' | 'openai_vision' | 'import_default' | 'manual' | 'api_future';
 
 /** One completed study log — the core transactional record. */
 export interface StudyLog {
@@ -346,6 +346,8 @@ export interface UserSettings {
   alwaysProcessPowerScribeClipboard: boolean;
   clearClipboardAfterImport: boolean;
   savedPowerScribeCropRegions: Record<string, { x: number; y: number; width: number; height: number }>;
+  openAiVisionEnabled: boolean;
+  openAiVisionModel: string;
 }
 
 /** Color accent for a radiologist profile, practice, or org. */
