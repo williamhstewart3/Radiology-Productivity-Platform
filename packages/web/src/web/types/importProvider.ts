@@ -4,25 +4,26 @@
  * Canonical type definitions for the Import Provider architecture.
  *
  * Every import source — paste text, OCR screenshot, CSV, and eventually
- * PowerScribe live sync — must produce an ImportedStudy[] and feed it
+ * PowerScribe live sync — must produce StructuredStudyRow[] and feed it
  * through the shared importPipeline. No provider performs normalization,
  * alias lookup, duplicate detection, or CPT matching on its own.
  *
  * ── Data flow ────────────────────────────────────────────────────────────────
  *
  *   ImportProvider.importStudies()
- *       ↓ ImportedStudy[]
+ *       ↓ StructuredStudyRow[]
  *   importPipeline()
  *       ↓ normalize exam text
- *       ↓ alias mapping   (learnAlias on commit)
+ *       ↓ institution and learned-alias resolution
+ *       ↓ CPT/RVU matching
  *       ↓ duplicate detection
- *       ↓ CPT matching
+ *       ↓ review and approval
  *       ↓ db.studyLogs.add()
  *
  * ── Adding a new source ──────────────────────────────────────────────────────
  *
  * 1. Create a class that implements ImportProvider.
- * 2. Implement importStudies() to return ImportedStudy[].
+ * 2. Implement importStudies() to return StructuredStudyRow[].
  * 3. The pipeline handles everything downstream — no extra wiring needed.
  * 4. Alias learning from one source immediately benefits all other sources.
  */
@@ -42,7 +43,7 @@ export type ImportSource = 'manual' | 'ocr' | 'csv' | 'powerscribe';
  * Do NOT perform CPT matching or alias lookup inside a provider. The
  * pipeline does that uniformly for every source.
  */
-export interface ImportedStudy {
+export interface StructuredStudyRow {
   /** Raw exam title as it appears in the source system (e.g. "CT ABDOMEN W CON") */
   examTitle: string;
 
@@ -167,6 +168,13 @@ export interface ImportedStudy {
   dateTimeSource: import('./index').DateTimeSource | null;
 }
 
+/**
+ * Backwards-compatible name retained for existing import sources.
+ * New extraction engines should target StructuredStudyRow so the contract is
+ * clearly independent of OCR, Vision, CSV, or any other extraction mechanism.
+ */
+export type ImportedStudy = StructuredStudyRow;
+
 // ─── Provider interface ────────────────────────────────────────────────────
 
 /**
@@ -195,5 +203,14 @@ export interface ImportProvider {
    * May be async (API call, file read, OCR).
    * Returns an empty array rather than throwing if there is nothing to import.
    */
-  importStudies(): Promise<ImportedStudy[]>;
+  importStudies(): Promise<StructuredStudyRow[]>;
+}
+
+/**
+ * Marker interface for providers that turn an image or source-system payload
+ * into structured rows. All matching, duplicate detection, review, approval,
+ * and persistence behavior remains downstream in importPipeline.ts.
+ */
+export interface ExtractorProvider extends ImportProvider {
+  readonly providerKind: 'extractor';
 }

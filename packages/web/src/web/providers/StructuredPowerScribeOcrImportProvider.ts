@@ -1,5 +1,5 @@
 import { parseDateTimeFromOcr } from '../utils/studyDateParser';
-import type { ImportProvider, ImportedStudy } from '../types/importProvider';
+import type { ExtractorProvider, ImportedStudy } from '../types/importProvider';
 import type { PowerScribeStructuredOcrRow } from '../types/structuredOcr';
 
 function splitIsoMinute(value: string | null): { date: string | null; time: string | null; dateTime: string | null } {
@@ -31,9 +31,10 @@ function compactRawLine(row: PowerScribeStructuredOcrRow): string {
   });
 }
 
-export class StructuredPowerScribeOcrImportProvider implements ImportProvider {
+export class StructuredPowerScribeOcrImportProvider implements ExtractorProvider {
   readonly name = 'Windows PowerScribe OCR';
   readonly sourceId = 'ocr' as const;
+  readonly providerKind = 'extractor' as const;
 
   constructor(
     private readonly rows: PowerScribeStructuredOcrRow[],

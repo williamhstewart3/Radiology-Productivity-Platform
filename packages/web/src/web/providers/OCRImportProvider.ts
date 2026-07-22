@@ -25,7 +25,7 @@ import {
   type PowerScribeColumnName,
   type RelativeCropRect,
 } from '../utils/imageCrop';
-import type { ImportProvider, ImportedStudy } from '../types/importProvider';
+import type { ExtractorProvider, ImportedStudy } from '../types/importProvider';
 import type { ParsedLine } from '../utils/powerScribeParser';
 import type { OcrPositionedLine, OcrResult } from '../utils/ocrProvider';
 
@@ -256,9 +256,10 @@ function applyColumnDateOverrides(row: ParsedLine, debugRow: ReassembledColumnRo
   };
 }
 
-export class OCRImportProvider implements ImportProvider {
+export class OCRImportProvider implements ExtractorProvider {
   readonly name = 'OCR Screenshot';
   readonly sourceId = 'ocr' as const;
+  readonly providerKind = 'extractor' as const;
 
   private file: File | Blob;
   private studyDate: string;

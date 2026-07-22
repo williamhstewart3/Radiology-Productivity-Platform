@@ -18,6 +18,7 @@ describe('StructuredPowerScribeOcrImportProvider', () => {
       },
     ], '2026-07-03');
 
+    expect(provider.providerKind).toBe('extractor');
     const studies = await provider.importStudies();
     expect(studies).toHaveLength(1);
     expect(studies[0].procedureName).toBe('XR CHEST PORTABLE');
