@@ -26,8 +26,7 @@ import {
   type TimelineEvent,
 } from '../services/reviewSessionService';
 import { getSavedPowerScribeManualGuides, inspectPowerScribeCapture, inspectPowerScribeCaptureForVision, processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, savePowerScribeManualGuides, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
-import { processOpenAiVisionImport } from '../services/openaiVisionWorkflowService';
-import type { OpenAiVisionDiagnostics } from '../services/openaiVisionImport';
+import { processOpenAiVisionImport, VisionExecutionError } from '../services/openaiVisionWorkflowService';
 import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
 import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
@@ -324,6 +323,13 @@ interface ImportProps {
 
 type Mode = 'paste' | 'ocr' | 'powerscribe';
 type ProcessingEngine = 'advanced_ocr' | 'openai_vision';
+interface RuntimeExtractionDiagnostics {
+  selectedEngine: string; actualEngine: string; extractorProviderClass: string;
+  openAiEndpointCalled: boolean; openAiResponseReceived: boolean; ocrProviderCalled: boolean;
+  tesseractCalled: boolean; ocrReconstructionCalled: boolean; modelRequested: string | null;
+  modelReturned: string | null; cropCoordinates: unknown; rowsReturnedDirectlyByVision: number;
+  rowsEnteringSharedPipeline: number; fallbackUsed: boolean; fallbackReason: string | null; buildCommit: string;
+}
 type Step = 'input' | 'review';
 type ImportToastTone = 'info' | 'success' | 'warning' | 'danger';
 
@@ -821,7 +827,7 @@ export function Import({ onReviewReady }: ImportProps) {
   const [savedManualCropLoaded, setSavedManualCropLoaded] = useState(false);
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   const [processingEngine, setProcessingEngine] = useState<ProcessingEngine>('advanced_ocr');
-  const [visionDiagnostics, setVisionDiagnostics] = useState<OpenAiVisionDiagnostics | null>(null);
+  const [extractionDiagnostics, setExtractionDiagnostics] = useState<RuntimeExtractionDiagnostics | null>(null);
   const [visionHealth, setVisionHealth] = useState('Checking OpenAI Vision readiness...');
   // Eagerly generated (not lazily inside the persist effect below) so that
   // effect only ever runs once per actual state change instead of twice per
@@ -1052,6 +1058,18 @@ export function Import({ onReviewReady }: ImportProps) {
       });
       pushToast('info', 'Matching CPT codes...', 'Running aliases, active CPT filters, and review checks.');
       setOcrDebug(processed.ocrDebug ?? null);
+      const debug = processed.ocrDebug;
+      const rows = [...processed.result.reviewRows, ...processed.result.skippedRows];
+      if (rows.some((row) => row.source.source !== 'advanced_ocr')) throw new Error('Advanced OCR source assertion failed');
+      setExtractionDiagnostics({
+        selectedEngine: 'advanced_ocr', actualEngine: debug?.accounting?.engine ?? debug?.ocrProvider ?? 'advanced_ocr',
+        extractorProviderClass: 'OCRImportProvider', openAiEndpointCalled: false, openAiResponseReceived: false,
+        ocrProviderCalled: true, tesseractCalled: /tesseract/i.test(`${debug?.accounting?.engine ?? ''} ${debug?.ocrProvider ?? ''}`),
+        ocrReconstructionCalled: true, modelRequested: null, modelReturned: null,
+        cropCoordinates: debug?.crop?.rect ?? null, rowsReturnedDirectlyByVision: 0,
+        rowsEnteringSharedPipeline: processed.extractedCount, fallbackUsed: false, fallbackReason: null,
+        buildCommit: __BUILD_COMMIT_SHA__,
+      });
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
       setClipboardFile(null);
     } catch (e) {
@@ -1079,6 +1097,15 @@ export function Import({ onReviewReady }: ImportProps) {
       });
       setOcrFile(file);
       setOcrDebug(null);
+      const pipelineRows = [...processed.result.reviewRows, ...processed.result.skippedRows];
+      if (pipelineRows.some((row) => row.source.source !== 'advanced_ocr')) throw new Error('Windows OCR source assertion failed');
+      setExtractionDiagnostics({
+        selectedEngine: 'advanced_ocr', actualEngine: 'windows_structured_ocr', extractorProviderClass: 'StructuredPowerScribeOcrImportProvider',
+        openAiEndpointCalled: false, openAiResponseReceived: false, ocrProviderCalled: true, tesseractCalled: false,
+        ocrReconstructionCalled: false, modelRequested: null, modelReturned: null, cropCoordinates: null,
+        rowsReturnedDirectlyByVision: 0, rowsEnteringSharedPipeline: processed.extractedCount,
+        fallbackUsed: false, fallbackReason: null, buildCommit: __BUILD_COMMIT_SHA__,
+      });
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
       setClipboardFile(null);
       return true;
@@ -1124,7 +1151,7 @@ export function Import({ onReviewReady }: ImportProps) {
           sessionId,
           logDate,
         }, selectedTableRect);
-        setVisionDiagnostics(processed.diagnostics);
+        setExtractionDiagnostics(processed.diagnostics);
         setOcrDebug(null);
         appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
         return;
@@ -1135,6 +1162,15 @@ export function Import({ onReviewReady }: ImportProps) {
       if (!usedStructuredHelper) {
         await processOcrFile(file, timelineSource, manualColumnCrops, manualRows, manualGuidesToSave, clearSavedManualCrop);
       }
+    } catch (error) {
+      if (processingEngine === 'openai_vision') {
+        if (error instanceof VisionExecutionError) setExtractionDiagnostics(error.diagnostics);
+        const message = 'OpenAI Vision did not run. No OCR fallback was used.';
+        setError(message);
+        pushToast('danger', 'OpenAI Vision failed', message);
+        return;
+      }
+      throw error;
     } finally {
       setProcessing(false);
     }
@@ -1436,16 +1472,26 @@ export function Import({ onReviewReady }: ImportProps) {
             </p>
           </div>
           <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
-          {visionDiagnostics && (
+          {extractionDiagnostics && (
             <details className="rounded-[10px] border border-rd-separator bg-rd-surface-2 p-3 text-[12px]">
-              <summary className="cursor-pointer font-semibold text-rd-label-primary">OpenAI Vision diagnostics · {visionDiagnostics.extractedRows} extracted</summary>
+              <summary className="cursor-pointer font-semibold text-rd-label-primary">Extraction execution diagnostics</summary>
               <div className="mt-2 grid gap-1 font-mono text-[11px] text-rd-label-secondary sm:grid-cols-2">
-                <span>Build: {visionDiagnostics.buildCommit.slice(0, 12)}</span><span>Selected: {visionDiagnostics.selectedEngine}</span>
-                <span>Actual: {visionDiagnostics.actualEngine}</span><span>OCR used: {visionDiagnostics.ocrUsed}</span>
-                <span>Model: {visionDiagnostics.model}</span><span>Duration: {visionDiagnostics.extractionDurationSeconds.toFixed(2)}s</span>
-                <span>Valid: {visionDiagnostics.validRows}</span><span>Unresolved: {visionDiagnostics.unresolvedRows}</span>
-                <span>Accounted: {visionDiagnostics.downstreamAccountedRows}</span>
-                <span>Crop: {JSON.stringify(visionDiagnostics.cropCoordinates)}</span>
+                <span>Selected engine: {extractionDiagnostics.selectedEngine}</span>
+                <span>Actual engine invoked: {extractionDiagnostics.actualEngine}</span>
+                <span>Extractor provider class: {extractionDiagnostics.extractorProviderClass}</span>
+                <span>OpenAI endpoint called: {extractionDiagnostics.openAiEndpointCalled ? 'Yes' : 'No'}</span>
+                <span>OpenAI response received: {extractionDiagnostics.openAiResponseReceived ? 'Yes' : 'No'}</span>
+                <span>OCR provider called: {extractionDiagnostics.ocrProviderCalled ? 'Yes' : 'No'}</span>
+                <span>Tesseract called: {extractionDiagnostics.tesseractCalled ? 'Yes' : 'No'}</span>
+                <span>OCR reconstruction called: {extractionDiagnostics.ocrReconstructionCalled ? 'Yes' : 'No'}</span>
+                <span>Model requested: {extractionDiagnostics.modelRequested ?? 'n/a'}</span>
+                <span>Model returned: {extractionDiagnostics.modelReturned ?? 'n/a'}</span>
+                <span>Crop sent to Vision: {JSON.stringify(extractionDiagnostics.cropCoordinates)}</span>
+                <span>Rows returned directly by Vision: {extractionDiagnostics.rowsReturnedDirectlyByVision}</span>
+                <span>Rows entering shared pipeline: {extractionDiagnostics.rowsEnteringSharedPipeline}</span>
+                <span>Fallback used: {extractionDiagnostics.fallbackUsed ? 'Yes' : 'No'}</span>
+                <span>Fallback reason: {extractionDiagnostics.fallbackReason ?? 'None'}</span>
+                <span>Build commit SHA: {extractionDiagnostics.buildCommit.slice(0, 12)}</span>
               </div>
             </details>
           )}

@@ -27,6 +27,19 @@ export interface OpenAiVisionDiagnostics {
   unresolvedRows: number;
   downstreamAccountedRows: number;
   extractionDurationSeconds: number;
+  extractorProviderClass: 'OpenAiVisionExtractorProvider';
+  openAiEndpointCalled: boolean;
+  openAiResponseReceived: boolean;
+  ocrProviderCalled: false;
+  tesseractCalled: false;
+  ocrReconstructionCalled: false;
+  modelRequested: string;
+  modelReturned: string | null;
+  cropSentToVision: boolean;
+  rowsReturnedDirectlyByVision: number;
+  rowsEnteringSharedPipeline: number;
+  fallbackUsed: false;
+  fallbackReason: null;
 }
 
 export function validateVisionExtractionPayload(payload: unknown): OpenAiVisionExtraction {
@@ -104,6 +117,21 @@ export function buildVisionDiagnostics(
     ...server,
     unresolvedRows: pipeline.reviewRows.filter((row) => row.candidates.length === 0).length,
     downstreamAccountedRows: pipeline.reviewRows.length + pipeline.skippedRows.length,
+  };
+}
+
+export function failedVisionDiagnostics(
+  cropCoordinates: OpenAiVisionDiagnostics['cropCoordinates'],
+  overrides: Partial<OpenAiVisionDiagnostics> = {},
+): OpenAiVisionDiagnostics {
+  return {
+    buildCommit: typeof __BUILD_COMMIT_SHA__ === 'string' ? __BUILD_COMMIT_SHA__ : 'test', selectedEngine: 'openai_vision', actualEngine: 'openai_vision', ocrUsed: 'No',
+    model: DEFAULT_OPENAI_VISION_MODEL, cropCoordinates, extractedRows: 0, validRows: 0, unresolvedRows: 0,
+    downstreamAccountedRows: 0, extractionDurationSeconds: 0, extractorProviderClass: 'OpenAiVisionExtractorProvider',
+    openAiEndpointCalled: false, openAiResponseReceived: false, ocrProviderCalled: false, tesseractCalled: false,
+    ocrReconstructionCalled: false, modelRequested: DEFAULT_OPENAI_VISION_MODEL, modelReturned: null,
+    cropSentToVision: false, rowsReturnedDirectlyByVision: 0, rowsEnteringSharedPipeline: 0,
+    fallbackUsed: false, fallbackReason: null, ...overrides,
   };
 }
 

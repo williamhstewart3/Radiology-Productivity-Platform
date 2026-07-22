@@ -530,7 +530,7 @@ export function __testApplyColumnDateOverrides(
 
 export class OCRImportProvider implements ImportProvider {
   readonly name = 'OCR Screenshot';
-  readonly sourceId = 'ocr' as const;
+  readonly sourceId = 'advanced_ocr' as const;
 
   private file: File | Blob;
   private studyDate: string;
@@ -611,7 +611,7 @@ export class OCRImportProvider implements ImportProvider {
         parserReviewReason: error.message,
         parserRawLine: '',
         ocrConfidence: passOne?.confidence ?? 0,
-        source: 'ocr',
+        source: 'advanced_ocr',
         importedAt: now,
         dateTimeConfidence: 0,
         dateTimeSource: 'import_default',
@@ -761,7 +761,7 @@ export class OCRImportProvider implements ImportProvider {
           parserReviewReason: `${grammarFailure}. Review the captured row before counting it.`,
           parserRawLine: p.rawText,
           ocrConfidence,
-          source: 'ocr' as const,
+          source: 'advanced_ocr' as const,
           importedAt: now,
           dateTimeConfidence: p.dateTimeConfidence,
           dateTimeSource: 'ocr' as const,
@@ -798,7 +798,7 @@ export class OCRImportProvider implements ImportProvider {
           : [p.reviewReason, grammarFailure, recoveryNeedsReview ? 'Procedure title recovered before numeric date spillover' : null].filter(Boolean).join(' | ') || null,
         parserRawLine: p.rawText,
         ocrConfidence,
-        source: 'ocr' as const,
+        source: 'advanced_ocr' as const,
         importedAt: now,
         dateTimeConfidence: p.dateTimeConfidence,
         dateTimeSource: p.modifiedDateTime ? 'ocr' : 'import_default',
@@ -830,7 +830,7 @@ export class OCRImportProvider implements ImportProvider {
       parserReviewReason: `${rejected.reason}. Review the captured row before counting it.`,
       parserRawLine: rejected.rawText,
       ocrConfidence,
-      source: 'ocr',
+      source: 'advanced_ocr',
       importedAt: now,
       dateTimeConfidence: 0,
       dateTimeSource: 'ocr',

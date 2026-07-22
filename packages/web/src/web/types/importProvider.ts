@@ -31,7 +31,7 @@ import type { Modality } from './index';
 
 // ─── Canonical study model returned by every provider ──────────────────────
 
-export type ImportSource = 'manual' | 'ocr' | 'csv' | 'powerscribe' | 'openai_vision';
+export type ImportSource = 'manual' | 'ocr' | 'advanced_ocr' | 'csv' | 'powerscribe' | 'openai_vision';
 
 /** Extractor-neutral row contract handed to the shared import pipeline. */
 export interface StructuredStudyRow {

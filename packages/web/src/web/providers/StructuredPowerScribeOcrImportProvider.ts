@@ -34,7 +34,7 @@ function compactRawLine(row: PowerScribeStructuredOcrRow): string {
 
 export class StructuredPowerScribeOcrImportProvider implements ImportProvider {
   readonly name = 'Windows PowerScribe OCR';
-  readonly sourceId = 'ocr' as const;
+  readonly sourceId = 'advanced_ocr' as const;
 
   constructor(
     private readonly rows: PowerScribeStructuredOcrRow[],
@@ -84,7 +84,7 @@ export class StructuredPowerScribeOcrImportProvider implements ImportProvider {
         parserReviewReason,
         parserRawLine: compactRawLine(row),
         ocrConfidence: row.confidence,
-        source: 'ocr' as const,
+        source: 'advanced_ocr' as const,
         importedAt: now,
         dateTimeConfidence,
         dateTimeSource: dateTimeConfidence > 0 ? 'ocr' : 'import_default',

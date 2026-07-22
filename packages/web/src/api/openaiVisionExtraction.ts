@@ -33,9 +33,13 @@ export function openAiVisionHealth() {
 export async function extractPowerScribeRowsFromImage(payload: unknown) {
   const started = performance.now();
   const request = requestSchema.parse(payload);
+  console.info('[openai-vision] image payload received', { modelRequested: DEFAULT_OPENAI_VISION_MODEL, hasImagePayload: true });
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not configured on the server');
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const response = await client.responses.create({
+  console.info('[openai-vision] OpenAI request started', { modelRequested: DEFAULT_OPENAI_VISION_MODEL });
+  let response;
+  try {
+    response = await client.responses.create({
     model: DEFAULT_OPENAI_VISION_MODEL,
     store: false,
     input: [{ role: 'user', content: [
@@ -43,15 +47,27 @@ export async function extractPowerScribeRowsFromImage(payload: unknown) {
       { type: 'input_image', image_url: request.imageDataUrl, detail: 'original' },
     ] }],
     text: { format: { type: 'json_schema', name: 'powerscribe_rows', strict: true, schema } },
-  });
+    });
+  } catch (error) {
+    console.error('[openai-vision] OpenAI request failed', { modelRequested: DEFAULT_OPENAI_VISION_MODEL, error: error instanceof Error ? error.message : 'unknown error' });
+    throw error;
+  }
+  console.info('[openai-vision] OpenAI request succeeded', { modelRequested: DEFAULT_OPENAI_VISION_MODEL, modelReturned: response.model });
   if (!response.output_text) throw new Error('OpenAI Vision returned no structured output');
   const extraction = validateVisionExtractionPayload(JSON.parse(response.output_text));
   const validRows = extraction.rows.filter((row) => Boolean(row.procedure && row.modifiedDateTime)).length;
+  console.info('[openai-vision] structured rows returned', { rowCount: extraction.rows.length });
   return { rows: extraction.rows, diagnostics: {
     buildCommit: process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? 'local',
     selectedEngine: 'openai_vision' as const, actualEngine: 'openai_vision' as const, ocrUsed: 'No' as const,
     model: DEFAULT_OPENAI_VISION_MODEL, cropCoordinates: request.cropCoordinates,
     extractedRows: extraction.rows.length, validRows,
     extractionDurationSeconds: (performance.now() - started) / 1000,
+    extractorProviderClass: 'OpenAiVisionExtractorProvider' as const,
+    openAiEndpointCalled: true, openAiResponseReceived: true,
+    ocrProviderCalled: false as const, tesseractCalled: false as const, ocrReconstructionCalled: false as const,
+    modelRequested: DEFAULT_OPENAI_VISION_MODEL, modelReturned: response.model,
+    cropSentToVision: true, rowsReturnedDirectlyByVision: extraction.rows.length,
+    rowsEnteringSharedPipeline: extraction.rows.length, fallbackUsed: false as const, fallbackReason: null,
   } };
 }

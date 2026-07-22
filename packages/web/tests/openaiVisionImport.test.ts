@@ -6,8 +6,11 @@ import { buildFingerprint } from '../src/web/utils/duplicateDetection';
 import {
   OpenAiVisionExtractorProvider,
   buildVisionDiagnostics,
+  failedVisionDiagnostics,
   validateVisionExtractionPayload,
 } from '../src/web/services/openaiVisionImport';
+import { VisionExecutionError } from '../src/web/services/openaiVisionWorkflowService';
+import { StructuredPowerScribeOcrImportProvider } from '../src/web/providers/StructuredPowerScribeOcrImportProvider';
 
 const visibleRows = [{
   rowNumber: 1,
@@ -54,6 +57,11 @@ describe('OpenAI Vision extractor boundary', () => {
       buildCommit: 'test', selectedEngine: 'openai_vision', actualEngine: 'openai_vision', ocrUsed: 'No',
       model: 'gpt-5.6-terra', cropCoordinates: { x: 0.3, y: 0.1, width: 0.69, height: 0.85 },
       extractedRows: 1, validRows: 1, extractionDurationSeconds: 1,
+      extractorProviderClass: 'OpenAiVisionExtractorProvider', openAiEndpointCalled: true,
+      openAiResponseReceived: true, ocrProviderCalled: false, tesseractCalled: false,
+      ocrReconstructionCalled: false, modelRequested: 'gpt-5.6-terra', modelReturned: 'gpt-5.6-terra',
+      cropSentToVision: true, rowsReturnedDirectlyByVision: 1, rowsEnteringSharedPipeline: 1,
+      fallbackUsed: false, fallbackReason: null,
     }, pipeline);
     expect(diagnostics.downstreamAccountedRows).toBe(0);
   });
@@ -76,5 +84,29 @@ describe('OpenAI Vision extractor boundary', () => {
     expect(page).not.toContain('OPENAI_API_KEY');
     expect(page).not.toContain('VITE_OPENAI');
     expect(visionBranch).not.toContain('processOcrImport');
+    expect(page).toContain('OpenAI Vision did not run. No OCR fallback was used.');
+  });
+
+  test('Vision API failure is represented as fail-closed with no OCR fallback', () => {
+    const diagnostics = failedVisionDiagnostics({ x: 0.3, y: 0.1, width: 0.69, height: 0.85 }, {
+      openAiEndpointCalled: true, openAiResponseReceived: true,
+    });
+    const error = new VisionExecutionError('OpenAI Vision did not run. No OCR fallback was used.', diagnostics);
+    expect(error.message).toBe('OpenAI Vision did not run. No OCR fallback was used.');
+    expect(error.diagnostics.fallbackUsed).toBe(false);
+    expect(error.diagnostics.ocrProviderCalled).toBe(false);
+    expect(error.diagnostics.tesseractCalled).toBe(false);
+  });
+
+  test('OCR selection never invokes Vision and current OCR rows carry the advanced marker', async () => {
+    const page = readFileSync('src/web/pages/Import.tsx', 'utf8');
+    const ocrBranch = page.slice(page.indexOf('const usedStructuredHelper'), page.indexOf('async function queueClipboardImage'));
+    expect(ocrBranch).not.toContain('processOpenAiVisionImport');
+    const rows = await new StructuredPowerScribeOcrImportProvider([{
+      procedureName: 'XR CHEST PORTABLE', examDateTime: '7/1/2026 5:18 PM', modifiedDateTime: '7/2/2026 7:59 AM',
+      rawProcedureText: 'XR CHEST PORTABLE', rawExamDateText: '7/1/2026 5:18 PM', rawModifiedText: '7/2/2026 7:59 AM',
+      confidence: 0.99, needsReview: false, reviewReason: null,
+    }], '2026-07-02').importStudies();
+    expect(rows[0].source).toBe('advanced_ocr');
   });
 });

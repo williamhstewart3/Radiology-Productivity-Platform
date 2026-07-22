@@ -7,6 +7,7 @@ import { KeyHint } from './ui/KeyHint';
 
 const SOURCE_LABELS: Record<ImportSource, string> = {
   ocr: 'Screenshot',
+  advanced_ocr: 'Advanced OCR',
   csv: 'CSV',
   manual: 'Manual',
   powerscribe: 'PowerScribe',
