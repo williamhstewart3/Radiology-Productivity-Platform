@@ -25,6 +25,9 @@ const ABBREVIATION_MAP: Record<string, string> = {
   'con':        'contrast',
   'cont':       'contrast',
   'wcon':       'with contrast',
+  'wcontrast':  'with contrast',
+  'wocont':     'without contrast',
+  'wocontrast': 'without contrast',
   'wwocon':     'with and without contrast',
 
   // Modality abbreviations
@@ -137,7 +140,7 @@ export function normalizeExamText(raw: string): string {
 
   // Strip underscores, punctuation (except slashes — handled below)
   text = text.replace(/[_]+/g, ' ');
-  text = text.replace(/[.,;:()\[\]{}]/g, ' ');
+  text = text.replace(/[.,;:()[\]{}]/g, ' ');
 
   // Expand whole-phrase slash abbreviations FIRST, while the slash is still
   // attached, before any blanket slash-splitting can break them apart.
@@ -173,6 +176,10 @@ export function normalizeExamText(raw: string): string {
 
 export function tokenize(normalized: string): string[] {
   return normalized.split(' ').filter(Boolean);
+}
+
+export function spacelessKey(raw: string): string {
+  return normalizeExamText(raw).replace(/\s+/g, '');
 }
 
 // ─── String similarity ───────────────────────────────────────────────────────
@@ -234,7 +241,18 @@ export function tokenOverlapScore(tokensA: string[], tokensB: string[]): number 
  * Plain token recall can't distinguish "query didn't mention it" from
  * "query explicitly contradicts it" — so this is an explicit multiplier.
  */
-function contrastConsistencyPenalty(tokensA: string[], tokensB: string[]): number {
+function contrastSignature(normalized: string): 'with' | 'without' | null {
+  const spaceless = normalized.replace(/\s+/g, '');
+  if (/\bwithout\b/.test(normalized) || /(?:^|[^a-z])wo(?:contrast)?/.test(spaceless) || spaceless.includes('wocontrast')) {
+    return 'without';
+  }
+  if (/\bwith\b/.test(normalized) || spaceless.includes('wcontrast') || spaceless.includes('withcontrast')) {
+    return 'with';
+  }
+  return null;
+}
+
+function contrastConsistencyPenalty(tokensA: string[], tokensB: string[], normA: string, normB: string): number {
   const setA = new Set(tokensA);
   const setB = new Set(tokensB);
   const aHasWith    = setA.has('with')    && !setA.has('without');
@@ -243,6 +261,9 @@ function contrastConsistencyPenalty(tokensA: string[], tokensB: string[]): numbe
   const bHasWithout = setB.has('without');
 
   if ((aHasWith && bHasWithout) || (aHasWithout && bHasWith)) return 0.3;
+  const signatureA = contrastSignature(normA);
+  const signatureB = contrastSignature(normB);
+  if (signatureA && signatureB && signatureA !== signatureB) return 0.3;
   return 1;
 }
 
@@ -257,6 +278,7 @@ export function combinedSimilarity(rawA: string, rawB: string): number {
   const tokensB = tokenize(normB);
   const tokenScore  = tokenOverlapScore(tokensA, tokensB);
   const stringScore = stringSimilarity(normA, normB);
-  const baseScore   = tokenScore * 0.8 + stringScore * 0.2;
-  return baseScore * contrastConsistencyPenalty(tokensA, tokensB);
+  const spacelessScore = stringSimilarity(normA.replace(/\s+/g, ''), normB.replace(/\s+/g, ''));
+  const baseScore   = Math.max(tokenScore * 0.8 + stringScore * 0.2, spacelessScore * 0.95);
+  return baseScore * contrastConsistencyPenalty(tokensA, tokensB, normA, normB);
 }

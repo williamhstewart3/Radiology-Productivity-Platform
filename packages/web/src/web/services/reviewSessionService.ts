@@ -1,5 +1,5 @@
 import { db } from '../db/database';
-import { commitPipelineResults } from '../pipeline/importPipeline';
+import { commitPipelineResults, isReviewRowSaveEligible } from '../pipeline/importPipeline';
 import type { CommitResult, PipelineReviewRow } from '../pipeline/importPipeline';
 import { recordAuditEvent } from '../utils/audit';
 import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
@@ -36,15 +36,48 @@ export function getSelectedWorkRvu(row: PipelineReviewRow): number {
 }
 
 export function normalizedExamKey(row: PipelineReviewRow): string {
-  return normalizeRadiologyDescription(row.source.examTitle);
+  return normalizeRadiologyDescription(row.source.procedureName ?? row.source.examTitle);
 }
 
 export function reviewSessionRowKey(row: PipelineReviewRow): string {
+  const selectedCptSet = getSelectedCandidates(row)
+    .map((candidate) => candidate.cptCode)
+    .filter(Boolean)
+    .sort()
+    .join('+');
+  if (selectedCptSet && row.source.examDateTime && row.source.modifiedDateTime) {
+    return [
+      'strict',
+      selectedCptSet,
+      row.source.examDateTime.slice(0, 16),
+      row.source.modifiedDateTime.slice(0, 16),
+    ].join('|');
+  }
+
   return [
+    'review',
     normalizedExamKey(row),
-    row.source.studyTime ?? '',
+    row.source.modifiedDateTime ?? row.source.studyTime ?? '',
+    row.source.modifiedDate ?? '',
     row.source.studyDate ?? '',
     row.source.accessionNumber ?? '',
+    row.source.rowIndex ?? '',
+  ].join('|');
+}
+
+function reviewSessionExactDuplicateKey(row: PipelineReviewRow): string | null {
+  const selectedCptSet = getSelectedCandidates(row)
+    .map((candidate) => candidate.cptCode)
+    .filter(Boolean)
+    .sort()
+    .join('+');
+  const normalizedTitle = normalizedExamKey(row);
+  const identity = selectedCptSet || normalizedTitle;
+  if (!identity || !row.source.examDateTime || !row.source.modifiedDateTime) return null;
+  return [
+    identity,
+    row.source.examDateTime.slice(0, 16),
+    row.source.modifiedDateTime.slice(0, 16),
   ].join('|');
 }
 
@@ -73,22 +106,23 @@ export function mergeReviewSessionRows(
   nextRows: PipelineReviewRow[],
   nextSkippedRows: PipelineReviewRow[],
 ): { reviewRows: PipelineReviewRow[]; skippedRows: PipelineReviewRow[] } {
-  const existingKeys = new Set(currentRows.map(reviewSessionRowKey));
+  const existingKeys = new Set(currentRows.map(reviewSessionExactDuplicateKey).filter((key): key is string => Boolean(key)));
   const appendRows: PipelineReviewRow[] = [];
   const duplicateRows: PipelineReviewRow[] = [];
 
   for (const row of nextRows) {
-    const key = reviewSessionRowKey(row);
-    if (existingKeys.has(key)) {
+    const key = reviewSessionExactDuplicateKey(row);
+    if (key && existingKeys.has(key)) {
       duplicateRows.push({
         ...row,
         included: false,
         autoSkipped: true,
-        duplicateStatus: row.duplicateStatus ?? 'very_likely',
-        duplicateReason: row.duplicateReason ?? 'Duplicate already exists in this active review session',
+        duplicateStatus: 'exact',
+        duplicateReason: row.duplicateReason ?? 'Same CPT/title, exam time, and read time already exist in this active review session',
+        approvalStatus: 'exact_duplicate_skipped',
       });
     } else {
-      existingKeys.add(key);
+      if (key) existingKeys.add(key);
       appendRows.push(row);
     }
   }
@@ -124,6 +158,42 @@ export async function loadActiveReviewSession(profileId: string | null): Promise
   }
 }
 
+/**
+ * Commits every row that's already ready (auto-approved / nothing left to
+ * decide) immediately, even when another row in the batch still needs review.
+ *
+ * Previously this sweep lived exclusively in resolveInboxRows, which only
+ * runs when the user accepts or skips a card. A batch where every row
+ * matched with high confidence from the start never puts a card in front
+ * of the user — Inbox shows "All caught up" immediately — so
+ * resolveInboxRows was never called and those rows sat in rowsJson
+ * forever, never written to studyLogs despite the UI reporting nothing
+ * outstanding. Running the same sweep here, at the single place every
+ * caller already persists a session, closes that gap for all of them
+ * (a fresh capture, a resolved decision, or a candidate change) without
+ * duplicating the eligibility logic.
+ */
+async function sweepQuietRows(input: {
+  readingDate: string;
+  profileId: string | null;
+  rows: PipelineReviewRow[];
+  timeline: TimelineEvent[];
+}): Promise<{ rows: PipelineReviewRow[]; timeline: TimelineEvent[] }> {
+  const quietRows = input.rows.filter(isReviewRowSaveEligible);
+  if (quietRows.length === 0) return { rows: input.rows, timeline: input.timeline };
+
+  await commitPipelineResults(quietRows, input.readingDate, 0, input.profileId);
+  const quietIds = new Set(quietRows.map((row) => row.tempId));
+  return {
+    rows: input.rows.filter((row) => !quietIds.has(row.tempId)),
+    timeline: [...input.timeline, createTimelineEvent(`Auto-counted ${quietRows.length} quiet ${quietRows.length === 1 ? 'study' : 'studies'}`)],
+  };
+}
+
+export function __testQuietRowsForImmediateCommit(rows: PipelineReviewRow[]): PipelineReviewRow[] {
+  return rows.filter(isReviewRowSaveEligible);
+}
+
 export async function persistActiveReviewSession(input: {
   sessionId: string;
   profileId: string | null;
@@ -132,16 +202,37 @@ export async function persistActiveReviewSession(input: {
   skippedRows: PipelineReviewRow[];
   timeline: TimelineEvent[];
 }): Promise<void> {
+  const swept = await sweepQuietRows(input);
   const now = new Date().toISOString();
+
+  if (swept.rows.length === 0 && input.rows.length > 0) {
+    // Everything in this batch was quiet-eligible and just got committed —
+    // finalize rather than leave an empty "active" session behind.
+    await db.activeReviewSessions.put({
+      id: input.sessionId,
+      profileId: input.profileId,
+      readingDate: input.readingDate,
+      status: 'finalized',
+      rowsJson: '[]',
+      skippedRowsJson: JSON.stringify(input.skippedRows),
+      timelineJson: JSON.stringify(swept.timeline),
+      ...summarizeReviewSession([], input.skippedRows),
+      createdAt: now,
+      updatedAt: now,
+      finalizedAt: now,
+    });
+    return;
+  }
+
   await db.activeReviewSessions.put({
     id: input.sessionId,
     profileId: input.profileId,
     readingDate: input.readingDate,
     status: 'active',
-    rowsJson: JSON.stringify(input.rows),
+    rowsJson: JSON.stringify(swept.rows),
     skippedRowsJson: JSON.stringify(input.skippedRows),
-    timelineJson: JSON.stringify(input.timeline),
-    ...summarizeReviewSession(input.rows, input.skippedRows),
+    timelineJson: JSON.stringify(swept.timeline),
+    ...summarizeReviewSession(swept.rows, input.skippedRows),
     createdAt: now,
     updatedAt: now,
     finalizedAt: null,

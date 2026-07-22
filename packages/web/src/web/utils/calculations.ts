@@ -1,5 +1,5 @@
 import type { Modality, StudyLog, UserSettings } from '../types';
-import { MODALITIES } from '../types';
+import { MODALITIES, MODALITY_LABELS } from '../types';
 
 /**
  * All productivity math lives here so formulas are auditable in one place.
@@ -192,23 +192,94 @@ export function computeRangeDailyAverage(
   return total / numberOfDaysInRange;
 }
 
+export interface TopCpt {
+  cptCode: string;
+  count: number;
+  totalRvu: number;
+}
+
 export interface PeriodTotals {
   totalWorkRvu: number;
   studyCount: number;
   avgRvuPerStudy: number;
   byModality: Record<Modality, number>;
+  avgRvuPerDay: number;
+  busiestDay: { date: string; rvu: number } | null;
+  topCpts: TopCpt[];
 }
 
-export function computePeriodTotals(logs: StudyLog[]): PeriodTotals {
+/**
+ * `daysInRange`, when given, is the calendar day count of the period being
+ * summarized (including days with zero studies) — matching the convention
+ * `computeYtdStats.dailyAverageYtd` already uses. Omit it to fall back to
+ * the count of days that actually have logs (used by callers that only
+ * have a log list, not an explicit range).
+ */
+export function computePeriodTotals(logs: StudyLog[], daysInRange?: number): PeriodTotals {
   const countedLogs = logs.filter((l) => !l.needsReview);
   const totalWorkRvu = sumWorkRvu(countedLogs, true);
   const studyCount = countedLogs.length;
+
+  const byDate = groupLogsByDate(countedLogs);
+  const effectiveDays = daysInRange ?? byDate.size;
+  const avgRvuPerDay = effectiveDays > 0 ? totalWorkRvu / effectiveDays : 0;
+
+  let busiestDay: { date: string; rvu: number } | null = null;
+  for (const [date, dayLogs] of byDate) {
+    const rvu = sumWorkRvu(dayLogs, true);
+    if (!busiestDay || rvu > busiestDay.rvu) busiestDay = { date, rvu };
+  }
+
+  const cptTotals = new Map<string, TopCpt>();
+  for (const log of countedLogs) {
+    const cptCode = log.cptCode ?? 'Unmatched';
+    const entry = cptTotals.get(cptCode) ?? { cptCode, count: 0, totalRvu: 0 };
+    entry.count += 1;
+    entry.totalRvu += log.workRvu ?? 0;
+    cptTotals.set(cptCode, entry);
+  }
+  const topCpts = [...cptTotals.values()].sort((a, b) => b.totalRvu - a.totalRvu).slice(0, 5);
+
   return {
     totalWorkRvu,
     studyCount,
     avgRvuPerStudy: studyCount > 0 ? totalWorkRvu / studyCount : 0,
     byModality: computeByModality(countedLogs, true),
+    avgRvuPerDay,
+    busiestDay,
+    topCpts,
   };
+}
+
+export interface ModalityShare {
+  modality: string;
+  label: string;
+  percent: number;
+}
+
+/**
+ * Top modalities by wRVU share, always summing to 100% of the input's total
+ * (any remainder beyond `max` is folded into a trailing "Other" slice, never
+ * silently dropped).
+ */
+export function topModalityShares(byModality: Record<string, number>, max = 4): ModalityShare[] {
+  const total = Object.values(byModality).reduce((sum, v) => sum + v, 0);
+  if (total <= 0) return [];
+  const sorted = Object.entries(byModality)
+    .filter(([, rvu]) => rvu > 0)
+    .sort((a, b) => b[1] - a[1]);
+  const top = sorted.slice(0, max);
+  const shown = top.reduce((sum, [, rvu]) => sum + rvu, 0);
+  const shares: ModalityShare[] = top.map(([modality, rvu]) => ({
+    modality,
+    label: MODALITY_LABELS[modality as Modality] ?? modality,
+    percent: (rvu / total) * 100,
+  }));
+  const remainder = total - shown;
+  if (remainder > 0.01) {
+    shares.push({ modality: 'OTHER_REMAINDER', label: 'Other', percent: (remainder / total) * 100 });
+  }
+  return shares;
 }
 
 /** Groups logs by their logDate, useful for weekly/monthly trend charts. */

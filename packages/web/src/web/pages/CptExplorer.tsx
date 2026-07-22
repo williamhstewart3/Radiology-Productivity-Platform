@@ -2,7 +2,7 @@
  * Search-first CPT lookup and logging workstation.
  *
  * This page is intentionally self-contained: it only reads CPT rows and writes
- * studyLogs using the existing StudyLog shape. No schema/import/watcher paths
+ * studyLogs using the existing StudyLog shape. No schema/import/capture paths
  * are involved.
  */
 
@@ -105,6 +105,8 @@ const SEARCH_EXPANSIONS: Record<string, string[]> = {
   'rectal mri': ['mri pelvis rectum', 'pelvis mri', '72195', '72197'],
   'thyroid ultrasound': ['ultrasound thyroid', 'soft tissue head neck', '76536'],
   'breast biopsy': ['mammography biopsy', 'breast bx', 'stereotactic biopsy', 'ultrasound breast biopsy', '19081', '19083'],
+  'mri wrist': ['mri joint upr extrem', '73221', '73222', '73223'],
+  'mr wrist': ['mri joint upr extrem', '73221', '73222', '73223'],
 };
 
 function codeInRegion(cptCode: string, region: BodyRegion): boolean {
@@ -149,7 +151,7 @@ function expandedSearchTerms(query: string): string[] {
   return [...terms].filter(Boolean);
 }
 
-function tokenScore(row: CptRvuRow, query: string): number {
+export function tokenScore(row: CptRvuRow, query: string): number {
   const terms = expandedSearchTerms(query);
   if (terms.length === 0) return 0;
 
@@ -172,7 +174,7 @@ function tokenScore(row: CptRvuRow, query: string): number {
   return best;
 }
 
-function pickProfessionalRow(rows: CptRvuRow[]): CptRvuRow | null {
+export function pickProfessionalRow(rows: CptRvuRow[]): CptRvuRow | null {
   const billableRows = rows.filter(
     (row) => row.pcTcIndicator !== 'technical' && (row.workRvu ?? 0) > 0,
   );

@@ -1,4 +1,8 @@
+import { normalizeOcrExamTextForMatching } from './ocrExamTextNormalization';
+
 const COMMON_EXAM_CPT_CODES: Array<{ description: string; cptCodes: string[] }> = [
+  { description: 'CT CARDIAC SCORING', cptCodes: ['75571'] },
+  { description: 'CT CARDIAC SCORE SPECIAL', cptCodes: ['75571'] },
   { description: 'CT HEAD WO', cptCodes: ['70450'] },
   { description: 'CT CHEST W', cptCodes: ['71260'] },
   { description: 'CT CHEST WO', cptCodes: ['71250'] },
@@ -6,12 +10,18 @@ const COMMON_EXAM_CPT_CODES: Array<{ description: string; cptCodes: string[] }> 
   { description: 'CT ABDOMEN PELVIS W', cptCodes: ['74177'] },
   { description: 'CT ABDOMEN PELVIS WO', cptCodes: ['74176'] },
   { description: 'CT ABDOMEN PELVIS WWO', cptCodes: ['74178'] },
+  { description: 'CT RENAL STONE PROTOCOL', cptCodes: ['74176'] },
+  { description: 'CT APPENDIX PROTOCOL', cptCodes: ['74177'] },
   { description: 'CTA CHEST PE', cptCodes: ['71275'] },
   { description: 'CTA HEAD', cptCodes: ['70496'] },
   { description: 'CTA NECK', cptCodes: ['70498'] },
+  { description: 'CT ANGIOGRAM HEAD NECK WWO', cptCodes: ['70496', '70498'] },
   { description: 'MRI BRAIN WWO', cptCodes: ['70553'] },
+  { description: 'MRI PROSTATE WWO', cptCodes: ['72197'] },
   { description: 'US ABDOMEN COMPLETE', cptCodes: ['76700'] },
+  { description: 'US CAROTID BILATERAL', cptCodes: ['93880'] },
   { description: 'US RUQ', cptCodes: ['76705'] },
+  { description: 'XR CHEST PORTABLE', cptCodes: ['71045'] },
   { description: 'XR CHEST 1 VIEW', cptCodes: ['71045'] },
   { description: 'XR CHEST 2 VIEWS', cptCodes: ['71046'] },
 ];
@@ -74,13 +84,13 @@ function applyPhraseReplacements(text: string): string {
 }
 
 export function normalizeRadiologyDescription(raw: string): string {
-  let text = raw.toUpperCase().trim();
+  let text = normalizeOcrExamTextForMatching(raw).toUpperCase().trim();
   if (!text) return '';
 
   text = text
     .replace(/[\u2010-\u2015]/g, '-')
     .replace(/&/g, ' AND ')
-    .replace(/[_.,;:()\[\]{}+]/g, ' ')
+    .replace(/[_.,;:()[\]{}+]/g, ' ')
     .replace(/-/g, ' ')
     .replace(/\s*\/\s*/g, ' / ')
     .replace(/\s+/g, ' ')

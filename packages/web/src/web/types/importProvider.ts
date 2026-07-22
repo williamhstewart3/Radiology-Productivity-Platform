@@ -46,6 +46,9 @@ export interface ImportedStudy {
   /** Raw exam title as it appears in the source system (e.g. "CT ABDOMEN W CON") */
   examTitle: string;
 
+  /** Clean procedure/exam name with OCR date/time columns removed. */
+  procedureName?: string | null;
+
   /**
    * Canonical exam name if the source system already provides one.
    * If the source only gives a raw title, leave this null and let the
@@ -67,14 +70,38 @@ export interface ImportedStudy {
    */
   workRvu: number | null;
 
-  /** ISO date string (YYYY-MM-DD) for the calendar day the study was read. */
+  /** ISO date string (YYYY-MM-DD) for the performed exam date. */
   studyDate: string;
 
+  /** Explicit performed exam date extracted from OCR, if available. */
+  examDate?: string | null;
+
+  /** Explicit performed exam time (HH:MM) extracted from OCR, if available. */
+  examTime?: string | null;
+
+  /** Full ISO datetime for the performed exam, exposed with PowerScribe column naming. */
+  examDateTime?: string | null;
+
   /**
-   * Full ISO 8601 datetime if the source provides study time.
-   * Used for time-bucket duplicate detection.
+   * Full ISO 8601 datetime for the performed exam if the source provides it.
+   * OCR often only provides the date, so this may be null.
    */
   studyTime: string | null;
+
+  /**
+   * ISO date string (YYYY-MM-DD) for when the exam was read/signed/modified.
+   * This is the productivity date; if omitted, the pipeline falls back to studyDate.
+   */
+  modifiedDate?: string | null;
+
+  /** Explicit modified/read time (HH:MM) extracted from OCR, if available. */
+  modifiedTime?: string | null;
+
+  /**
+   * Full ISO 8601 datetime for when the exam was read/signed/modified.
+   * Used for productivity timestamping and preferred duplicate detection.
+   */
+  modifiedDateTime?: string | null;
 
   /**
    * Modality if known from the source. If null, the pipeline infers from
@@ -90,6 +117,37 @@ export interface ImportedStudy {
 
   /** Patient MRN — stored for audit purposes, never used for dedup. */
   patientMRN: string | null;
+
+  /** Optional visible row/index number from the source table, when OCR captures it. */
+  rowIndex?: string | null;
+
+  /** PowerScribe row status when the capture engine can distinguish it. */
+  powerScribeStatus?: 'check' | 'arrow' | 'unknown';
+
+  /** OCR/parser-cleaned exam name before CPT matching, when available. */
+  cleanedExamName?: string | null;
+
+  /** OCR/parser-cleaned row text before CPT matching, when available. */
+  cleanedText?: string | null;
+
+  /** Confidence that OCR table row/procedure extraction was clean. */
+  extractionConfidence?: number | null;
+
+  /** Provider/parser-level review flag, before CPT matching. */
+  parserNeedsReview?: boolean | null;
+
+  /** Provider/parser-level explanation for why review is needed. */
+  parserReviewReason?: string | null;
+
+  /** Original OCR table row text, when different from examTitle. */
+  parserRawLine?: string | null;
+
+  /**
+   * OCR engine confidence for the source image/text when this came from OCR.
+   * Current Tesseract provider reports image-level confidence, so each parsed
+   * study from the same screenshot receives the same score.
+   */
+  ocrConfidence?: number | null;
 
   /** Which provider emitted this study. Set by the provider itself. */
   source: ImportSource;

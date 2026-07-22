@@ -13,6 +13,11 @@ export default defineConfig(({ mode }) => {
 
 	return {
 		plugins: [honoDevPlugin(), react(), runableAnalyticsPlugin(), tailwind()],
+		define: {
+			__BUILD_COMMIT_SHA__: JSON.stringify(
+				process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? 'local',
+			),
+		},
 		resolve: {
 			alias: {
 				"@": path.resolve(__dirname, "./src/web"),

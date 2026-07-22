@@ -8,272 +8,798 @@
  *   powerscribe → PowerScribeImportProvider (disabled, "Coming Soon")
  */
 
-import { useState, useRef, useEffect } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { theme } from '../lib/theme';
-import { searchExamLibrary } from '../utils/matching';
-import { normalizeRadiologyDescription } from '../utils/radiologyDescriptionNormalization';
+import { useState, useRef, useEffect, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { cn } from '@/lib/utils';
+import { Card } from '../components/ui/Card';
 import { useProfile } from '../hooks/useProfile';
+import { getDesktopAPI } from '../lib/desktop';
 import { todayDateString } from '../utils/calculations';
-import { db, ensureUserSettings } from '../db/database';
+import { db } from '../db/database';
 import {
   createTimelineEvent,
-  discardActiveReviewSession,
-  finalizeReviewSession,
   getSelectedCandidateIndices,
   getSelectedCandidates,
   getSelectedWorkRvu,
   loadActiveReviewSession,
   mergeReviewSessionRows,
-  normalizedExamKey,
   persistActiveReviewSession,
   type TimelineEvent,
 } from '../services/reviewSessionService';
-import { rememberCorrectedExam } from '../services/memoryLearningService';
-import { processOcrImport, processTextImport } from '../services/ocrWorkflowService';
-import { rowEntry } from '../lib/motionVariants';
+import { getSavedPowerScribeManualGuides, inspectPowerScribeCapture, processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
+import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
-import type { DuplicateStatus, MatchCandidate } from '../types';
+import type { MatchCandidate, UserSettings } from '../types';
+import {
+  DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES,
+  detectPowerScribeRowBands,
+  normalizePowerScribeRowBands,
+  powerScribeManualColumnsFromGuides,
+  type PowerScribeManualColumnCrops,
+  type PowerScribeManualColumnGuides,
+  type PowerScribeRowBand,
+} from '../utils/imageCrop';
 
-// ─── ExamSearchPanel ─────────────────────────────────────────────────────────
-
-interface ExamSearchPanelProps {
-  /** Raw OCR / paste text to pre-populate the search */
-  initialQuery: string;
-  onSelect: (candidate: MatchCandidate) => void;
-  onClose: () => void;
-}
-
-function ExamSearchPanel({ initialQuery, onSelect, onClose }: ExamSearchPanelProps) {
-  const [query, setQuery] = useState(initialQuery);
-  const [results, setResults] = useState<MatchCandidate[]>([]);
-  const [searching, setSearching] = useState(false);
-
-  // Auto-search on mount and whenever query changes (debounced)
+function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocrDebug']; imageFile?: File | Blob | null }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!query.trim()) { setResults([]); return; }
-    const timer = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const hits = await searchExamLibrary(query, 8);
-        setResults(hits);
-      } finally {
-        setSearching(false);
-      }
-    }, 280);
-    return () => clearTimeout(timer);
-  }, [query]);
+    if (!imageFile) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(imageFile);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [imageFile]);
+
+  if (!debug) return null;
+  const debugStats = [
+    ['Build commit', __BUILD_COMMIT_SHA__.slice(0, 12)],
+    ['Provider', debug.ocrProvider],
+    ['Engine', debug.accounting?.engine ?? debug.ocrProvider],
+    ['Crop tier', debug.accounting?.cropMethod ?? debug.crop?.method ?? 'none'],
+    ['OCR scale', debug.accounting ? `${debug.accounting.preprocessScale.toFixed(2)}x` : 'n/a'],
+    ['Header/valley drift', debug.accounting?.headerValleyDrift == null ? 'n/a' : debug.accounting.headerValleyDrift.toFixed(3)],
+    ['Raw lines', debug.rawLineCount ?? debug.ocrLines.length],
+    ['Cleaned lines', debug.cleanedLineCount ?? debug.ocrLines.length],
+    ['Procedure OCR lines', debug.columnLineCounts?.procedure ?? 'n/a'],
+    ['Exam date OCR lines', debug.columnLineCounts?.examDate ?? 'n/a'],
+    ['Modified OCR lines', debug.columnLineCounts?.modifiedDate ?? 'n/a'],
+    ['Geometric row crops', debug.accounting?.detectedRowCount ?? 0],
+    ['Reconstructed rows', debug.reconstructedRowCount ?? debug.ocrLines.length],
+    ['Parsed rows', debug.parsedRowCount ?? debug.detectedRows.length],
+    ['Rejected rows', debug.rejectedRowCount ?? 0],
+    ['Duplicates skipped', debug.duplicateSkippedCount ?? 0],
+    ['Review rows', debug.finalReviewRowCount ?? debug.detectedRows.length],
+    ['Auto-approved rows', debug.autoApprovedRowCount ?? 0],
+    ['Manual-approved rows', debug.manuallyApprovedRowCount ?? 0],
+    ['Possible duplicates', debug.possibleDuplicateRowCount ?? 0],
+    ['Exact duplicates skipped', debug.exactDuplicateSkippedCount ?? 0],
+    ['Excluded rows', debug.excludedRowCount ?? 0],
+  ];
 
   return (
-    <div className="mt-2 rounded-xl border border-sky-500/30 bg-slate-900/95 shadow-2xl overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/8">
-        <span className="text-sky-400 text-xs font-semibold uppercase tracking-wider">Search Exam Library</span>
-        <button
-          onClick={onClose}
-          className="ml-auto text-slate-500 hover:text-slate-300 text-xs px-1.5 py-0.5 rounded transition-colors"
-        >
-          ✕ Close
-        </button>
-      </div>
-
-      {/* Search input */}
-      <div className="px-3 py-2 border-b border-white/6">
-        <input
-          autoFocus
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name, CPT code, modality…"
-          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500/50"
-        />
-      </div>
-
-      {/* Results */}
-      <div className="max-h-64 overflow-y-auto divide-y divide-white/5">
-        {searching && (
-          <div className="px-4 py-3 text-xs text-slate-400 italic">Searching…</div>
-        )}
-        {!searching && results.length === 0 && query.trim() && (
-          <div className="px-4 py-3 text-xs text-slate-400 italic">No results — try different terms or CPT code</div>
-        )}
-        {results.map((c, ci) => (
-          <button
-            key={`${c.cptCode}-${c.modifier ?? ''}-${ci}`}
-            onClick={() => onSelect(c)}
-            className="w-full text-left px-3 py-2.5 text-xs hover:bg-white/5 transition-colors"
-          >
-            <div className="flex items-baseline gap-2">
-              <span className="font-mono font-bold text-white">{c.cptCode}</span>
-              {c.modifier && (
-                <span className="text-slate-500">mod {c.modifier}</span>
-              )}
-              <span
-                className={`ml-auto shrink-0 font-medium ${
-                  c.confidence >= 0.70 ? 'text-emerald-400' :
-                  c.confidence >= 0.50 ? 'text-amber-400' : 'text-slate-400'
-                }`}
-              >
-                {Math.round(c.confidence * 100)}%
-              </span>
+    <details className="rounded-[10px] border border-rd-separator bg-rd-surface-2 p-3 text-[13px]">
+      <summary className="cursor-pointer font-semibold text-rd-label-primary">
+        OCR debug: {debug.parsedRowCount ?? debug.detectedRows.length} parsed / {debug.rawLineCount ?? debug.ocrLines.length} raw lines, {Math.round(debug.ocrConfidence * 100)}% text confidence
+      </summary>
+      <div className="mt-3 grid gap-3">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {debugStats.map(([label, value]) => (
+            <div key={label} className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-rd-label-secondary">{label}</p>
+              <p className="mt-1 font-mono text-[11px] text-rd-label-primary">{value}</p>
             </div>
-            <div className="text-slate-300 mt-0.5 leading-snug">
-              {c.description.slice(0, 90)}{c.description.length > 90 ? '…' : ''}
+          ))}
+        </div>
+        {debug.crop && (
+          <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+            <p className="font-medium text-rd-label-primary">
+              Crop: {debug.crop.method} ({Math.round(debug.crop.confidence * 100)}%)
+            </p>
+            <p className="mt-1 font-mono text-[11px] text-rd-label-secondary">
+              x {debug.crop.rect.x.toFixed(3)}, y {debug.crop.rect.y.toFixed(3)}, w {debug.crop.rect.width.toFixed(3)}, h {debug.crop.rect.height.toFixed(3)}, bottom {(debug.crop.rect.y + debug.crop.rect.height).toFixed(3)}
+            </p>
+          </div>
+        )}
+        {previewUrl && debug.crop && (
+          <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+            <p className="font-medium text-rd-label-primary">Crop preview</p>
+            <div className="relative mt-2 overflow-hidden rounded-[8px] border border-rd-separator">
+              <img src={previewUrl} alt="OCR crop debug preview" className="block w-full opacity-80" />
+              <div
+                className="absolute border-2 border-sky-400/90 bg-sky-400/10"
+                style={{
+                  left: `${debug.crop.rect.x * 100}%`,
+                  top: `${debug.crop.rect.y * 100}%`,
+                  width: `${debug.crop.rect.width * 100}%`,
+                  height: `${debug.crop.rect.height * 100}%`,
+                }}
+              />
+              {debug.columnCrops?.map((column) => (
+                <div
+                  key={column.name}
+                  className={`absolute border ${column.name === 'procedure' ? 'border-emerald-300/90 bg-emerald-300/10' : column.name === 'examDate' ? 'border-amber-300/90 bg-amber-300/10' : 'border-fuchsia-300/90 bg-fuchsia-300/10'}`}
+                  title={column.name}
+                  style={{
+                    left: `${column.rect.x * 100}%`,
+                    top: `${column.rect.y * 100}%`,
+                    width: `${column.rect.width * 100}%`,
+                    height: `${column.rect.height * 100}%`,
+                  }}
+                />
+              ))}
             </div>
-            {c.workRvu != null && (
-              <div className="text-slate-500 mt-0.5">{c.workRvu.toFixed(2)} wRVU</div>
+          </div>
+        )}
+        <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+          <p className="font-medium text-rd-label-primary">Detected rows</p>
+          <div className="mt-2 max-h-36 overflow-y-auto space-y-1">
+            {debug.detectedRows.length === 0 ? (
+              <p className="text-rd-label-secondary">No exam rows were detected from the OCR text.</p>
+            ) : (
+              debug.detectedRows.map((row, index) => (
+                <p key={`${row.rawText}-${index}`} className="font-mono text-[11px] text-rd-label-secondary">
+                  {index + 1}. {row.cleanedExamName ?? row.examName}
+                  {row.rawProcedureColumnText ? ` | proc "${row.rawProcedureColumnText}"` : ''}
+                  {row.rawExamDateColumnText ? ` | exam raw "${row.rawExamDateColumnText}"` : ''}
+                  {row.rawModifiedDateColumnText ? ` | read raw "${row.rawModifiedDateColumnText}"` : ''}
+                  {` | exam ${row.examDateTime ?? row.examDate ?? row.studyDate ?? 'none'}`}
+                  {` | read ${row.modifiedDateTime ?? row.modifiedDate ?? 'none'}`}
+                  {` | acc ${row.accessionNumber ?? 'none'}`}
+                  {` | log ${row.modifiedDateTime ?? row.studyDateTime ?? 'none'}`}
+                  {` | parser ${Math.round((row.extractionConfidence ?? 0) * 100)}%`}
+                  {row.matchResult?.topCandidate ? ` | match ${row.matchResult.topCandidate}` : ' | no match'}
+                  {row.matchResult?.confidence != null ? ` ${Math.round(row.matchResult.confidence * 100)}%` : ''}
+                  {row.matchResult?.duplicateKey ? ` | dupe ${row.matchResult.duplicateKey}` : ''}
+                  {row.reviewReason ?? row.matchResult?.reviewReason ? ` | review: ${row.reviewReason ?? row.matchResult?.reviewReason}` : ''}
+                </p>
+              ))
             )}
-          </button>
-        ))}
+          </div>
+        </div>
+        {debug.rejectedRows && debug.rejectedRows.length > 0 && (
+          <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+            <p className="font-medium text-rd-label-primary">Rejected rows</p>
+            <div className="mt-2 max-h-32 overflow-y-auto space-y-1">
+              {debug.rejectedRows.map((row, index) => (
+                <p key={`${row.reason}-${row.rawText}-${index}`} className="font-mono text-[11px] text-rd-label-secondary">
+                  {index + 1}. {row.reason}: {row.rawText}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+          <p className="font-medium text-rd-label-primary">OCR text</p>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-rd-label-secondary">
+            {debug.ocrText}
+          </pre>
+        </div>
+        {debug.columnText && (
+          <div className="grid gap-2 md:grid-cols-3">
+            {(['procedure', 'examDate', 'modifiedDate'] as const).map((column) => (
+              <div key={column} className="rounded-[8px] border border-rd-separator bg-rd-surface p-2">
+                <p className="font-medium text-rd-label-primary">{column}</p>
+                <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-rd-label-secondary">
+                  {debug.columnText?.[column]}
+                </pre>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-    </div>
+    </details>
   );
 }
 
-// ─── ImportProps ──────────────────────────────────────────────────────────────
-
-function candidateKey(candidate: MatchCandidate): string {
-  return `${candidate.cptCode}-${candidate.modifier ?? ''}`;
+export function shouldShowAccession(accessionNumber?: string | null): boolean {
+  return Boolean(accessionNumber?.trim());
 }
 
-function candidateExplanationText(candidate: MatchCandidate, rawText: string): string {
-  const normalized = candidate.explanation?.normalizedText ?? normalizeRadiologyDescription(rawText);
-  const source = candidate.explanation?.source ?? candidate.method.replace(/_/g, ' ');
-  return `Raw: ${rawText} | Normalized: ${normalized} | Source: ${source} | Method: ${candidate.method} | CMS: ${candidate.description}`;
+function formatOcrTime(time: string): string {
+  const match = time.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return time;
+  const hour24 = Number(match[1]);
+  const minute = match[2];
+  const period = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${minute} ${period}`;
 }
 
-function isRadiologyCpt(candidate: MatchCandidate): boolean {
-  return /^7\d{4}$/.test(candidate.cptCode);
+export function formatOcrDateTime(date?: string | null, time?: string | null, fallbackDateTime?: string | null): string | null {
+  const fallbackTime = fallbackDateTime?.match(/T(\d{2}:\d{2})(?::\d{2})?/)?.[1] ?? null;
+  const displayTime = time ?? fallbackTime;
+  if (date) {
+    const [year, month, day] = date.split('-');
+    if (year && month && day) {
+      const shortYear = year.slice(-2);
+      return `${Number(month)}/${Number(day)}/${shortYear}${displayTime ? ` ${formatOcrTime(displayTime)}` : ''}`;
+    }
+  }
+  if (!fallbackDateTime) return null;
+  const parsed = new Date(fallbackDateTime);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleString('en-US', {
+    month: 'numeric',
+    day: 'numeric',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
 }
 
 function isProductivityCandidate(candidate: MatchCandidate): boolean {
   return candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0;
 }
 
-function hasProcedureSignal(row: PipelineReviewRow): boolean {
-  const text = `${row.source.examTitle} ${row.candidates.map((c) => c.description).join(' ')}`.toLowerCase();
-  return /\b(?:biopsy|lesion|drain|drainage|aspirat|injection|catheter|tube|port|line|needle|arthrogram|myelogram|guided|guidance|stereo|procedure)\b/.test(text) ||
-    row.candidates.some((candidate) => candidate.modality === 'PROCEDURE');
+export function hasValidSelectedProductivityRvu(row: PipelineReviewRow): boolean {
+  return row.included && getSelectedCandidates(row).some(isProductivityCandidate);
 }
 
-function hasMultiplePossibleCptMatches(row: PipelineReviewRow): boolean {
-  const plausible = row.candidates.filter(
-    (candidate) => isProductivityCandidate(candidate) && candidate.confidence >= 0.65,
-  );
-  return plausible.length > 1 || getSelectedCandidates(row).length > 1;
+export function canApproveReviewRow(row: PipelineReviewRow): boolean {
+  return hasValidSelectedProductivityRvu(row) && row.duplicateStatus !== 'exact';
 }
 
-function safeAutoApprovalCandidate(row: PipelineReviewRow): MatchCandidate | null {
-  const selected = getSelectedCandidates(row).filter(isProductivityCandidate);
-  const candidate = selected.length === 1 ? selected[0] : row.candidates.find(isProductivityCandidate);
-  if (!candidate) return null;
-  if (!isRadiologyCpt(candidate)) return null;
-  if ((candidate.workRvu ?? 0) <= 0) return null;
-  if (candidate.confidence < 0.85) return null;
-  if (hasMultiplePossibleCptMatches(row)) return null;
-  if (hasProcedureSignal(row)) return null;
-  return candidate;
+export function isRowFinalizableAfterApproval(row: PipelineReviewRow): boolean {
+  if (!hasValidSelectedProductivityRvu(row)) return false;
+  if (row.autoSkipped || row.approvalStatus === 'excluded' || row.approvalStatus === 'exact_duplicate_skipped') return false;
+  return !row.needsReview ||
+    row.approvalStatus === 'auto_approved' ||
+    row.approvalStatus === 'manual_approved' ||
+    row.approvalStatus === 'approved_as_new';
 }
 
-function isSafeAutoApprovalRow(row: PipelineReviewRow): boolean {
-  return Boolean(row.included && row.duplicateStatus !== 'possible' && safeAutoApprovalCandidate(row));
+export function approvalButtonLabel(row: PipelineReviewRow): string {
+  if (!hasValidSelectedProductivityRvu(row)) return 'Add CPT';
+  if (row.duplicateStatus === 'possible') return 'Approve as new';
+  return 'Approve';
 }
 
-function isPriorApprovedMappingRow(row: PipelineReviewRow): boolean {
-  const candidate = safeAutoApprovalCandidate(row);
-  return Boolean(candidate && candidate.method === 'alias_match' && candidate.confidence >= 0.95);
-}
-
-function confidenceLabel(row: PipelineReviewRow, candidate?: MatchCandidate): { label: string; tone: 'green' | 'sky' | 'amber' | 'red' } {
-  const current = candidate ?? getSelectedCandidates(row)[0] ?? row.candidates[0];
-  if (!current) return { label: 'No match', tone: 'red' };
-  if (current.method === 'alias_match' && current.confidence >= 0.95) {
-    return { label: 'Exact alias match', tone: 'green' };
+export function reviewRowStatusLabel(row: PipelineReviewRow): string {
+  if (!row.included) return row.duplicateStatus === 'exact' ? 'Exact duplicate skipped' : 'Excluded';
+  if (!hasValidSelectedProductivityRvu(row)) return 'Missing CPT/RVU';
+  if (!row.needsReview) {
+    if (row.approvalStatus === 'approved_as_new') return 'Approved as new';
+    if (row.approvalStatus === 'manual_approved') return 'Manually approved';
+    return row.autoApproved ? 'Auto-approved' : 'Approved';
   }
-  if (current.confidence >= 0.85 && current.method === 'radiology_match') {
-    return { label: 'High-confidence normalized match', tone: 'sky' };
-  }
-  return { label: 'Fuzzy match needs review', tone: 'amber' };
+  if (row.duplicateStatus === 'possible') return 'Possible duplicate pending approval';
+  return 'Pending approval';
 }
 
-function labelClass(tone: 'green' | 'sky' | 'amber' | 'red'): string {
-  if (tone === 'green') return 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400';
-  if (tone === 'sky') return 'bg-sky-500/15 border-sky-500/30 text-sky-300';
-  if (tone === 'amber') return 'bg-amber-500/15 border-amber-500/30 text-amber-300';
-  return 'bg-red-500/15 border-red-500/30 text-red-300';
-}
-
-function manualReviewReason(row: PipelineReviewRow): string | null {
-  const selected = getSelectedCandidates(row);
-  const candidate = selected[0] ?? row.candidates[0];
-  if (!candidate) return 'No match';
-  if (selected.length > 1) return 'Multiple CPTs selected';
-  if ((candidate.workRvu ?? 0) <= 0 || candidate.modifier !== '26') return 'Not modifier 26 productivity RVU';
-  if (!isRadiologyCpt(candidate)) return 'Non-7xxxx CPT requires explicit selection';
-  if (candidate.confidence < 0.85) return 'Low confidence';
-  if (hasMultiplePossibleCptMatches(row)) return 'Multiple possible CPT matches';
-  if (hasProcedureSignal(row)) return 'Possible multi-CPT/procedure exam';
-  if (row.duplicateStatus === 'possible') return 'Possible duplicate';
-  return null;
-}
-
-function buildManualSelectionPatch(
-  row: PipelineReviewRow,
-  candidatesToSelect: MatchCandidate[],
-  forceReviewed = false,
-): Pick<PipelineReviewRow, 'candidates' | 'selectedCandidateIndex' | 'selectedCandidateIndices' | 'needsReview'> {
-  const updatedCandidates = [...row.candidates];
-  const existingKeys = new Set(updatedCandidates.map(candidateKey));
-  for (const candidate of candidatesToSelect) {
-    if (!existingKeys.has(candidateKey(candidate))) {
-      updatedCandidates.push(candidate);
-      existingKeys.add(candidateKey(candidate));
-    }
-  }
-
-  const selectedKeys = new Set(getSelectedCandidates(row).map(candidateKey));
-  candidatesToSelect.forEach((candidate) => selectedKeys.add(candidateKey(candidate)));
-  const selectedCandidateIndices = updatedCandidates
-    .map((candidate, index) => (selectedKeys.has(candidateKey(candidate)) ? index : -1))
-    .filter((index) => index >= 0);
-  const nextRow = { ...row, candidates: updatedCandidates, selectedCandidateIndices, selectedCandidateIndex: selectedCandidateIndices[0] ?? null };
-
+export function buildUserApprovalPatch(row: PipelineReviewRow): Partial<PipelineReviewRow> | null {
+  if (!canApproveReviewRow(row)) return null;
+  const selectedIndices = getSelectedCandidateIndices(row);
+  if (selectedIndices.length === 0) return null;
+  const priorDuplicateReason = row.duplicateReason;
   return {
-    candidates: updatedCandidates,
-    selectedCandidateIndex: selectedCandidateIndices[0] ?? null,
-    selectedCandidateIndices,
-    needsReview: forceReviewed ? false : Boolean(manualReviewReason(nextRow)),
+    needsReview: false,
+    included: true,
+    duplicateStatus: row.duplicateStatus === 'possible' ? null : row.duplicateStatus,
+    duplicateReason: row.duplicateStatus === 'possible' ? null : row.duplicateReason,
+    duplicateExistingLogId: row.duplicateStatus === 'possible' ? null : row.duplicateExistingLogId,
+    approvalStatus: row.duplicateStatus === 'possible' ? 'approved_as_new' : 'manual_approved',
+    reviewReason: row.duplicateStatus === 'possible'
+      ? `Approved as new despite possible duplicate warning${priorDuplicateReason ? `: ${priorDuplicateReason}` : ''}`
+      : row.reviewReason,
   };
 }
 
-function buildApprovalPatch(row: PipelineReviewRow): Pick<PipelineReviewRow, 'selectedCandidateIndex' | 'selectedCandidateIndices' | 'needsReview'> | null {
-  const candidate = safeAutoApprovalCandidate(row);
-  if (!candidate) return null;
-  const index = row.candidates.findIndex((existing) => candidateKey(existing) === candidateKey(candidate));
-  if (index < 0) return null;
-  return { selectedCandidateIndex: index, selectedCandidateIndices: [index], needsReview: false };
-}
+export function summarizeReviewApproval(rows: PipelineReviewRow[], skippedRows: PipelineReviewRow[]) {
+  const included = rows.filter((row) => row.included);
+  const approvedRows = included.filter(isRowFinalizableAfterApproval);
+  const pendingRows = included.filter((row) => !isRowFinalizableAfterApproval(row) && hasValidSelectedProductivityRvu(row));
+  const possibleDuplicateRows = pendingRows.filter((row) => row.duplicateStatus === 'possible');
+  const noValidCptRows = included.filter((row) => !hasValidSelectedProductivityRvu(row));
+  const excludedRows = rows.filter((row) => !row.included);
+  const exactSkippedRows = skippedRows.filter((row) => row.duplicateStatus === 'exact' || row.autoSkipped);
 
-function getCandidatesFromPatch(
-  patch: Pick<PipelineReviewRow, 'candidates' | 'selectedCandidateIndices'>,
-): MatchCandidate[] {
-  return (patch.selectedCandidateIndices ?? [])
-    .map((index) => patch.candidates[index])
-    .filter(Boolean);
+  return {
+    approvedRows: approvedRows.length,
+    approvedWrvu: approvedRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+    pendingRows: pendingRows.length,
+    pendingWrvu: pendingRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+    possibleDuplicateRows: possibleDuplicateRows.length,
+    possibleDuplicateWrvu: possibleDuplicateRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+    exactDuplicateRows: exactSkippedRows.length,
+    exactDuplicateWrvu: exactSkippedRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+    excludedRows: excludedRows.length,
+    excludedWrvu: excludedRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+    noValidCptRows: noValidCptRows.length,
+    finalizableRows: approvedRows.length,
+    finalizableWrvu: approvedRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0),
+  };
 }
 
 interface ImportProps {
-  onImported: () => void;
+  onReviewReady: () => void;
 }
 
 type Mode = 'paste' | 'ocr' | 'powerscribe';
-type Step = 'input' | 'review' | 'done';
-type ReviewMode = 'unknowns' | 'everything' | 'auto' | 'low';
-const WATCHER_REVIEW_KEY = 'wrvu_pending_watcher_review';
+type Step = 'input' | 'review';
+type ImportToastTone = 'info' | 'success' | 'warning' | 'danger';
 
-export function Import({ onImported }: ImportProps) {
+export const CAPTURE_PROCESSING_LABEL = 'Processing...';
+export const CAPTURE_PROMPT_TITLE = 'PowerScribe capture detected';
+export const CAPTURE_PRIVACY_COPY = 'The screenshot is processed in memory and discarded after parsing. Only extracted productivity data is stored.';
+
+export function shouldAutoProcessPowerScribeCaptures(settings: Pick<UserSettings, 'alwaysProcessPowerScribeClipboard'> | null | undefined): boolean {
+  return Boolean(settings?.alwaysProcessPowerScribeClipboard);
+}
+
+export function shouldAutoProcessRecognizedCapture(
+  detected: boolean,
+  settings: Pick<UserSettings, 'alwaysProcessPowerScribeClipboard'> | null | undefined,
+): boolean {
+  return detected && shouldAutoProcessPowerScribeCaptures(settings);
+}
+
+interface ImportToast {
+  id: string;
+  tone: ImportToastTone;
+  title: string;
+  body?: string;
+}
+
+function ImportToastStack({ toasts }: { toasts: ImportToast[] }) {
+  if (toasts.length === 0) return null;
+  const toneClass: Record<ImportToastTone, string> = {
+    info: 'text-rd-label-primary',
+    success: 'text-rd-positive',
+    warning: 'text-rd-caution',
+    danger: 'text-rd-negative',
+  };
+
+  return (
+    <div className="pointer-events-none fixed bottom-5 right-5 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className="animate-in fade-in slide-in-from-bottom-2 rounded-[10px] border border-rd-separator bg-rd-surface px-4 py-3 duration-200"
+          style={{ boxShadow: 'var(--rd-shadow-card)' }}
+        >
+          <p className={`text-[13px] font-semibold ${toneClass[toast.tone]}`}>{toast.title}</p>
+          {toast.body && <p className="mt-1 text-[12px] leading-relaxed text-rd-label-secondary">{toast.body}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CaptureProcessingState() {
+  return (
+    <div className="rounded-xl border border-rd-separator bg-rd-surface-2 px-4 py-4">
+      <p className="text-sm font-semibold text-rd-label-primary">Reading capture…</p>
+      <p className="mt-1 text-xs text-rd-label-secondary">Studies appear as each row resolves.</p>
+      <div className="mt-4 space-y-2" aria-label={CAPTURE_PROCESSING_LABEL}>
+        {[0, 1, 2].map((row) => (
+          <div key={row} className="flex min-h-11 items-center gap-3 rounded-[10px] border border-rd-separator bg-rd-surface px-3">
+            <span className="size-4 rounded-full border border-rd-separator" />
+            <span className="h-2.5 rounded-full bg-rd-separator" style={{ width: `${68 - row * 12}%` }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CapturePreview({
+  file,
+  inspection,
+  manualGuides,
+  onManualGuidesChange,
+  rowBands,
+  onRowBandsChange,
+  savedManualCropLoaded,
+}: {
+  file: File;
+  inspection: PowerScribeCapturePrecheck;
+  manualGuides: PowerScribeManualColumnGuides | null;
+  onManualGuidesChange: (guides: PowerScribeManualColumnGuides | null) => void;
+  rowBands: PowerScribeRowBand[] | null;
+  onRowBandsChange: (bands: PowerScribeRowBand[] | null) => void;
+  savedManualCropLoaded: boolean;
+}) {
+  const [url, setUrl] = useState('');
+  const [draggingGuide, setDraggingGuide] = useState<keyof PowerScribeManualColumnGuides | null>(null);
+  const [draggingRowBoundary, setDraggingRowBoundary] = useState<number | null>(null);
+  const [detectingRows, setDetectingRows] = useState(false);
+  const [rowDetectionMessage, setRowDetectionMessage] = useState<string | null>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const next = URL.createObjectURL(file);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [file]);
+
+  const manualColumns = manualGuides ? powerScribeManualColumnsFromGuides(manualGuides) : null;
+  const overlays = manualColumns
+    ? [
+        { name: 'procedure' as const, label: 'Procedure', color: '#2563eb', fill: 'rgba(37, 99, 235, 0.12)' },
+        { name: 'examDate' as const, label: 'Exam Date', color: '#d97706', fill: 'rgba(217, 119, 6, 0.12)' },
+        { name: 'modifiedDate' as const, label: 'Modified', color: '#059669', fill: 'rgba(5, 150, 105, 0.12)' },
+      ]
+    : [];
+
+  function updateGuide(name: keyof PowerScribeManualColumnGuides, nextValue: number) {
+    if (!manualGuides) return;
+    const next = { ...manualGuides };
+    if (name === 'left') next.left = Math.max(0, Math.min(nextValue, next.procedureEnd - 0.05));
+    if (name === 'procedureEnd') next.procedureEnd = Math.max(next.left + 0.05, Math.min(nextValue, next.examEnd - 0.05));
+    if (name === 'examEnd') next.examEnd = Math.max(next.procedureEnd + 0.05, Math.min(nextValue, next.right - 0.05));
+    if (name === 'right') next.right = Math.max(next.examEnd + 0.05, Math.min(1, nextValue));
+    if (name === 'top') next.top = Math.max(0, Math.min(nextValue, next.bottom - 0.1));
+    if (name === 'bottom') next.bottom = Math.max(next.top + 0.1, Math.min(1, nextValue));
+    onManualGuidesChange(next);
+  }
+
+  const rowBoundaries = rowBands?.length
+    ? [rowBands[0].top, ...rowBands.map((band) => band.bottom)]
+    : [];
+
+  function updateRowBoundary(index: number, nextValue: number) {
+    if (!rowBands?.length) return;
+    const boundaries = [...rowBoundaries];
+    const minimumGap = 0.004;
+    const minimum = index === 0 ? 0 : boundaries[index - 1] + minimumGap;
+    const maximum = index === boundaries.length - 1 ? 1 : boundaries[index + 1] - minimumGap;
+    boundaries[index] = Math.max(minimum, Math.min(maximum, nextValue));
+    onRowBandsChange(boundaries.slice(0, -1).map((top, rowIndex) => ({
+      top,
+      bottom: boundaries[rowIndex + 1],
+    })));
+  }
+
+  function removeRowBoundary(index: number) {
+    if (!rowBands?.length || index <= 0 || index >= rowBoundaries.length - 1) return;
+    const boundaries = rowBoundaries.filter((_, boundaryIndex) => boundaryIndex !== index);
+    onRowBandsChange(boundaries.slice(0, -1).map((top, rowIndex) => ({
+      top,
+      bottom: boundaries[rowIndex + 1],
+    })));
+  }
+
+  async function startRowAdjustment() {
+    const guides = manualGuides ?? inspection.suggestedManualGuides ?? DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES;
+    setDetectingRows(true);
+    setRowDetectionMessage(null);
+    try {
+      const detected = await detectPowerScribeRowBands(file, powerScribeManualColumnsFromGuides(guides));
+      if (detected.length < 2) {
+        onRowBandsChange(null);
+        setRowDetectionMessage('Rows were not clear enough to separate. Tighten the column crop and try again.');
+        return;
+      }
+      if (!manualGuides) onManualGuidesChange({ ...guides });
+      onRowBandsChange(detected);
+      setRowDetectionMessage(`${detected.length} row crops detected. Drag a horizontal divider to correct it.`);
+    } finally {
+      setDetectingRows(false);
+    }
+  }
+
+  const guideHandles: Array<{
+    name: keyof PowerScribeManualColumnGuides;
+    label: string;
+    orientation: 'vertical' | 'horizontal';
+    color: string;
+  }> = manualGuides
+    ? [
+        { name: 'top', label: 'Top of rows', orientation: 'horizontal', color: '#e11d48' },
+        { name: 'bottom', label: 'Bottom of rows', orientation: 'horizontal', color: '#e11d48' },
+        { name: 'left', label: 'Procedure left edge', orientation: 'vertical', color: '#2563eb' },
+        { name: 'procedureEnd', label: 'Procedure / Exam divider', orientation: 'vertical', color: '#d97706' },
+        { name: 'examEnd', label: 'Exam / Modified divider', orientation: 'vertical', color: '#059669' },
+        { name: 'right', label: 'Modified right edge', orientation: 'vertical', color: '#059669' },
+      ]
+    : [];
+
+  function updateGuideFromPointer(name: keyof PowerScribeManualColumnGuides, event: ReactPointerEvent<HTMLButtonElement>) {
+    const bounds = previewRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const horizontalGuide = name === 'top' || name === 'bottom';
+    const nextValue = horizontalGuide
+      ? (event.clientY - bounds.top) / bounds.height
+      : (event.clientX - bounds.left) / bounds.width;
+    updateGuide(name, nextValue);
+  }
+
+  function handleGuideKeyDown(name: keyof PowerScribeManualColumnGuides, event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (!manualGuides) return;
+    const horizontalGuide = name === 'top' || name === 'bottom';
+    const decreaseKey = horizontalGuide ? 'ArrowUp' : 'ArrowLeft';
+    const increaseKey = horizontalGuide ? 'ArrowDown' : 'ArrowRight';
+    if (event.key !== decreaseKey && event.key !== increaseKey) return;
+    event.preventDefault();
+    const direction = event.key === increaseKey ? 1 : -1;
+    updateGuide(name, manualGuides[name] + direction * (event.shiftKey ? 0.01 : 0.0025));
+  }
+
+  function rowValueFromPointer(event: ReactPointerEvent<HTMLElement>): number | null {
+    const bounds = previewRef.current?.getBoundingClientRect();
+    if (!bounds) return null;
+    return (event.clientY - bounds.top) / bounds.height;
+  }
+
+  function splitRowAtPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!rowBands?.length || event.detail < 2) return;
+    const value = rowValueFromPointer(event);
+    if (value == null) return;
+    const rowIndex = rowBands.findIndex((band) => value > band.top + 0.004 && value < band.bottom - 0.004);
+    if (rowIndex < 0) return;
+    event.preventDefault();
+    const next = [...rowBands];
+    const band = next[rowIndex];
+    next.splice(rowIndex, 1, { top: band.top, bottom: value }, { top: value, bottom: band.bottom });
+    onRowBandsChange(normalizePowerScribeRowBands(next));
+  }
+  const previewWidth = manualGuides
+    ? 'min(100%, 960px)'
+    : `min(100%, ${(320 * inspection.width) / inspection.height}px)`;
+
+  return (
+    <div className="space-y-3">
+      <div
+        ref={previewRef}
+        onPointerUp={splitRowAtPointer}
+        className="relative mx-auto overflow-hidden rounded-[10px] border border-rd-separator bg-black/5"
+        style={{ aspectRatio: `${inspection.width} / ${inspection.height}`, width: previewWidth }}
+      >
+        {url && <img src={url} alt="Capture waiting for review" draggable={false} className="absolute inset-0 size-full select-none object-contain" />}
+        {!manualColumns && inspection.tableRect && (
+          <span
+            aria-label="Detected table region"
+            className="pointer-events-none absolute border-2 border-rd-positive bg-rd-positive/10"
+            style={{
+              left: `${inspection.tableRect.x * 100}%`,
+              top: `${inspection.tableRect.y * 100}%`,
+              width: `${inspection.tableRect.width * 100}%`,
+              height: `${inspection.tableRect.height * 100}%`,
+            }}
+          />
+        )}
+        {overlays.map((overlay) => {
+          const rect = manualColumns![overlay.name];
+          return (
+            <span
+              key={overlay.name}
+              aria-label={`Manual ${overlay.label} crop`}
+              className="pointer-events-none absolute border-2"
+              style={{
+                left: `${rect.x * 100}%`,
+                top: `${rect.y * 100}%`,
+                width: `${rect.width * 100}%`,
+                height: `${rect.height * 100}%`,
+                borderColor: overlay.color,
+                backgroundColor: overlay.fill,
+              }}
+            >
+              <span className="absolute left-0 top-0 bg-black/70 px-1 py-0.5 text-[9px] font-semibold text-white">
+                {overlay.label}
+              </span>
+            </span>
+          );
+        })}
+        {rowBands?.map((band, index) => (
+          <span
+            key={`row-band-${index}`}
+            aria-label={`Row crop ${index + 1}`}
+            className="pointer-events-none absolute z-10 border-y border-rose-500/60"
+            style={{
+              left: `${(manualGuides?.left ?? inspection.tableRect?.x ?? 0) * 100}%`,
+              top: `${band.top * 100}%`,
+              width: `${((manualGuides?.right ?? ((inspection.tableRect?.x ?? 0) + (inspection.tableRect?.width ?? 1))) - (manualGuides?.left ?? inspection.tableRect?.x ?? 0)) * 100}%`,
+              height: `${(band.bottom - band.top) * 100}%`,
+              backgroundColor: index % 2 === 0 ? 'rgba(225, 29, 72, 0.035)' : 'rgba(225, 29, 72, 0.075)',
+            }}
+          />
+        ))}
+        {manualGuides && guideHandles.filter((handle) => !rowBands?.length || handle.orientation === 'vertical').map((handle) => {
+          const vertical = handle.orientation === 'vertical';
+          const active = draggingGuide === handle.name;
+          return (
+            <button
+              key={handle.name}
+              type="button"
+              aria-label={`${handle.label}, ${Math.round(manualGuides[handle.name] * 100)} percent. Drag to adjust.`}
+              title={`${handle.label} · drag to adjust`}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                setDraggingGuide(handle.name);
+                updateGuideFromPointer(handle.name, event);
+              }}
+              onPointerMove={(event) => {
+                if (draggingGuide === handle.name) updateGuideFromPointer(handle.name, event);
+              }}
+              onPointerUp={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                setDraggingGuide(null);
+              }}
+              onPointerCancel={() => setDraggingGuide(null)}
+              onKeyDown={(event) => handleGuideKeyDown(handle.name, event)}
+              className="absolute z-20 rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              style={vertical
+                ? {
+                    left: `${manualGuides[handle.name] * 100}%`,
+                    top: `${manualGuides.top * 100}%`,
+                    width: '24px',
+                    height: `${(manualGuides.bottom - manualGuides.top) * 100}%`,
+                    transform: 'translateX(-50%)',
+                    cursor: 'col-resize',
+                    touchAction: 'none',
+                  }
+                : {
+                    left: `${manualGuides.left * 100}%`,
+                    top: `${manualGuides[handle.name] * 100}%`,
+                    width: `${(manualGuides.right - manualGuides.left) * 100}%`,
+                    height: '24px',
+                    transform: 'translateY(-50%)',
+                    cursor: 'row-resize',
+                    touchAction: 'none',
+                  }}
+            >
+              <span
+                className="pointer-events-none absolute rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.7)]"
+                style={vertical
+                  ? { left: '10px', top: 0, width: '4px', height: '100%', backgroundColor: handle.color }
+                  : { left: 0, top: '10px', width: '100%', height: '4px', backgroundColor: handle.color }}
+              />
+              <span
+                className="pointer-events-none absolute rounded border-2 border-white shadow-[0_1px_3px_rgba(0,0,0,0.65)]"
+                style={vertical
+                  ? { left: '5px', top: '50%', width: '14px', height: '28px', transform: 'translateY(-50%)', backgroundColor: handle.color }
+                  : { left: '50%', top: '5px', width: '28px', height: '14px', transform: 'translateX(-50%)', backgroundColor: handle.color }}
+              />
+              <span className="sr-only">{active ? `Adjusting ${handle.label}` : handle.label}</span>
+            </button>
+          );
+        })}
+        {manualGuides && rowBands?.length && rowBoundaries.map((boundary, index) => (
+          <button
+            key={`row-boundary-${index}`}
+            type="button"
+            aria-label={`Row boundary ${index + 1} of ${rowBoundaries.length}, ${Math.round(boundary * 100)} percent. Drag to adjust${index > 0 && index < rowBoundaries.length - 1 ? ', or double click to merge rows' : ''}.`}
+            title={index > 0 && index < rowBoundaries.length - 1 ? 'Drag to adjust · double-click to merge rows' : 'Drag to adjust'}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setDraggingRowBoundary(index);
+              const value = rowValueFromPointer(event);
+              if (value != null) updateRowBoundary(index, value);
+            }}
+            onPointerMove={(event) => {
+              if (draggingRowBoundary !== index) return;
+              const value = rowValueFromPointer(event);
+              if (value != null) updateRowBoundary(index, value);
+            }}
+            onPointerUp={(event) => {
+              event.stopPropagation();
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+              setDraggingRowBoundary(null);
+            }}
+            onDoubleClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              removeRowBoundary(index);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                event.preventDefault();
+                updateRowBoundary(index, boundary + (event.key === 'ArrowDown' ? 1 : -1) * (event.shiftKey ? 0.01 : 0.0025));
+              } else if (event.key === 'Delete' || event.key === 'Backspace') {
+                event.preventDefault();
+                removeRowBoundary(index);
+              }
+            }}
+            className="absolute z-30 rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            style={{
+              left: `${manualGuides.left * 100}%`,
+              top: `${boundary * 100}%`,
+              width: `${(manualGuides.right - manualGuides.left) * 100}%`,
+              height: '10px',
+              transform: 'translateY(-50%)',
+              cursor: 'row-resize',
+              touchAction: 'none',
+            }}
+          >
+            <span className="pointer-events-none absolute left-0 top-[3px] h-1 w-full rounded-full border border-white bg-rose-600 shadow-[0_0_0_1px_rgba(0,0,0,0.55)]" />
+            <span className="pointer-events-none absolute left-1/2 top-0 h-[10px] w-5 -translate-x-1/2 rounded border border-white bg-rose-600 shadow" />
+          </button>
+        ))}
+      </div>
+      <p className="text-[12px] text-rd-label-secondary">
+        {inspection.width} × {inspection.height} · {manualColumns
+          ? rowBands?.length
+            ? `${rowBands.length} geometric row crops will be applied before OCR.`
+            : 'Drag the crop edges so each colored band contains only its named column.'
+          : inspection.detected
+          ? 'This looks like a PowerScribe worklist; the outlined region is the candidate table.'
+          : 'No table outline was detected. If this is the PowerScribe worklist, you can still process it for review.'}
+      </p>
+      {inspection.detected && (
+        <button
+          type="button"
+          onClick={() => {
+            onRowBandsChange(null);
+            onManualGuidesChange(
+              manualGuides
+                ? null
+                : { ...(inspection.suggestedManualGuides ?? DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES) },
+            );
+          }}
+          className="min-h-9 rounded-[8px] border border-rd-separator bg-rd-surface px-3 text-[12px] font-medium text-rd-label-primary"
+        >
+          {manualGuides ? (savedManualCropLoaded ? 'Reset saved crop' : 'Use detected crop') : 'Adjust crop'}
+        </button>
+      )}
+      {(manualGuides || inspection.suggestedManualGuides) && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void startRowAdjustment()}
+            disabled={detectingRows}
+            className="min-h-9 rounded-[8px] border border-rose-500/50 bg-rose-500/10 px-3 text-[12px] font-medium text-rd-label-primary disabled:opacity-50"
+          >
+            {detectingRows ? 'Detecting rows…' : rowBands?.length ? 'Redetect rows' : 'Adjust rows'}
+          </button>
+          {rowBands?.length ? (
+            <button
+              type="button"
+              onClick={() => {
+                onRowBandsChange(null);
+                setRowDetectionMessage(null);
+              }}
+              className="min-h-9 rounded-[8px] border border-rd-separator bg-rd-surface px-3 text-[12px] font-medium text-rd-label-secondary"
+            >
+              Clear row edits
+            </button>
+          ) : null}
+        </div>
+      )}
+      {rowDetectionMessage && <p className="text-[11px] text-rd-label-secondary">{rowDetectionMessage}</p>}
+      {manualGuides && (
+        <div className="space-y-2" aria-label="Manual PowerScribe column crop controls">
+          <p className="text-[12px] font-medium text-rd-label-primary">
+            {rowBands?.length
+              ? 'Drag rose dividers to resize rows. Double-click inside a row to split it; double-click a divider to merge.'
+              : 'Step 1: drag the colored column edges. Step 2: choose Adjust rows.'}
+          </p>
+          <div className="flex flex-wrap gap-1.5 text-[10px] text-rd-label-secondary">
+            {guideHandles.filter((handle) => !rowBands?.length || handle.orientation === 'vertical').map((handle) => (
+              <span key={handle.name} className="rounded-full border border-rd-separator bg-rd-surface px-2 py-1">
+                <span className="mr-1 inline-block size-2 rounded-full" style={{ backgroundColor: handle.color }} />
+                {handle.label} {Math.round(manualGuides[handle.name] * 100)}%
+              </span>
+            ))}
+            {rowBands?.length ? (
+              <span className="rounded-full border border-rose-500/40 bg-rose-500/10 px-2 py-1 font-medium text-rd-label-primary">
+                {rowBands.length} rows
+              </span>
+            ) : null}
+          </div>
+          <p className="text-[11px] text-rd-label-secondary">
+            {savedManualCropLoaded
+              ? `Saved crop applied for ${inspection.width} × ${inspection.height}. Drag to update it; changes are saved after Process.`
+              : `This crop will be reused for future ${inspection.width} × ${inspection.height} captures after Process.`}
+          </p>
+        </div>
+      )}
+      {savedManualCropLoaded && !manualGuides && (
+        <p className="text-[11px] text-rd-label-secondary">
+          The saved crop will be cleared after Process; the detected table will be used instead.
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function Import({ onReviewReady }: ImportProps) {
   const { activeProfile, activePractice } = useProfile();
-  const [mode, setMode]           = useState<Mode>('paste');
+  const [mode, setMode]           = useState<Mode>('ocr');
   const [step, setStep]           = useState<Step>('input');
   const [pasteText, setPasteText] = useState('');
   const [ocrFile, setOcrFile]     = useState<File | null>(null);
@@ -281,34 +807,43 @@ export function Import({ onImported }: ImportProps) {
   const [reviewRows, setReviewRows]   = useState<PipelineReviewRow[]>([]);
   const [skippedRows, setSkippedRows] = useState<PipelineReviewRow[]>([]);
   const [logDate, setLogDate]     = useState(todayDateString());
-  const [importing, setImporting] = useState(false);
-  const [importedCount, setImportedCount]   = useState(0);
-  const [skippedCount, setSkippedCount]     = useState(0);
-  const [reviewNeeded, setReviewNeeded]     = useState(0);
   const [error, setError]         = useState<string | null>(null);
-  const [showSkipped, setShowSkipped]       = useState(false);
-  const [searchPanelTempId, setSearchPanelTempId] = useState<string | null>(null);
-  const [reviewMode, setReviewMode] = useState<ReviewMode>('unknowns');
   const [clipboardFile, setClipboardFile] = useState<File | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [capturePreview, setCapturePreview] = useState<PowerScribeCapturePrecheck | null>(null);
+  const [manualCropGuides, setManualCropGuides] = useState<PowerScribeManualColumnGuides | null>(null);
+  const [manualRowBands, setManualRowBands] = useState<PowerScribeRowBand[] | null>(null);
+  const [savedManualCropLoaded, setSavedManualCropLoaded] = useState(false);
+  const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
+  // Eagerly generated (not lazily inside the persist effect below) so that
+  // effect only ever runs once per actual state change instead of twice per
+  // batch — the second, self-triggered run used to just overwrite the same
+  // Dexie row a second time, which was harmless, but now that persisting a
+  // session can also commit rows with no review needed (see
+  // reviewSessionService.sweepQuietRows), a guaranteed extra run would have
+  // double-committed them.
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [toasts, setToasts] = useState<ImportToast[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const raw = sessionStorage.getItem(WATCHER_REVIEW_KEY);
-    if (!raw) return;
-    try {
-      const rows = JSON.parse(raw) as PipelineReviewRow[];
-      if (Array.isArray(rows) && rows.length > 0) {
-        setReviewRows(rows);
-        setSkippedRows([]);
-        setLogDate(rows[0]?.source.studyDate ?? todayDateString());
-        setStep('review');
-      }
-    } finally {
-      sessionStorage.removeItem(WATCHER_REVIEW_KEY);
+  const processingRef = useRef(false);
+  const lastClipboardImageHashRef = useRef<string | null>(null);
+  useEffect(() => subscribeGlobalCapture((payload) => {
+    clearGlobalCapture(payload);
+    if (payload.kind === 'text') {
+      setMode('paste');
+      setPasteText(payload.text);
+      return;
     }
-  }, []);
+    if (payload.file.type.startsWith('image/')) {
+      setMode('ocr');
+      void queueClipboardImage(payload.file, `global ${payload.source}`);
+      return;
+    }
+    void payload.file.text().then((text) => {
+      setMode('paste');
+      setPasteText(text);
+    });
+  }), []);
 
   useEffect(() => {
     loadActiveReviewSession(activeProfile?.id ?? null).then((session) => {
@@ -324,27 +859,46 @@ export function Import({ onImported }: ImportProps) {
 
   useEffect(() => {
     if (step !== 'review' || reviewRows.length === 0) return;
-    const id = sessionId ?? crypto.randomUUID();
-    if (!sessionId) setSessionId(id);
     void persistActiveReviewSession({
-      sessionId: id,
+      sessionId,
       profileId: activeProfile?.id ?? null,
       readingDate: logDate,
       rows: reviewRows,
       skippedRows,
       timeline,
-    });
-  }, [step, reviewRows, skippedRows, timeline, logDate, activeProfile?.id, sessionId]);
+    }).then(onReviewReady);
+  }, [step, reviewRows, skippedRows, timeline, logDate, activeProfile?.id, sessionId, onReviewReady]);
 
   useEffect(() => {
-    db.userSettings.get('default').then((settings) => {
-      if (!settings) return;
-      if (settings.reviewOnlyLowConfidence) setReviewMode('low');
-      else if (settings.reviewAutoApprovedExams) setReviewMode('auto');
-      else if (settings.unknownsOnlyReview === false) setReviewMode('everything');
-      else setReviewMode('unknowns');
-    });
-  }, []);
+    processingRef.current = processing;
+  }, [processing]);
+
+  useEffect(() => {
+    if (!clipboardFile || processing) return;
+    function handlePreviewKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setClipboardFile(null);
+        setCapturePreview(null);
+        setManualCropGuides(null);
+        setManualRowBands(null);
+        setSavedManualCropLoaded(false);
+        lastClipboardImageHashRef.current = null;
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        void processPowerScribeCapture(
+          clipboardFile!,
+          'confirmed preview',
+          manualCropGuides ? powerScribeManualColumnsFromGuides(manualCropGuides) : null,
+          manualRowBands,
+          manualCropGuides,
+          savedManualCropLoaded && !manualCropGuides,
+        );
+      }
+    }
+    window.addEventListener('keydown', handlePreviewKey);
+    return () => window.removeEventListener('keydown', handlePreviewKey);
+  }, [clipboardFile, processing, manualCropGuides, manualRowBands, savedManualCropLoaded]);
 
   useEffect(() => {
     if (mode !== 'ocr') return;
@@ -355,17 +909,46 @@ export function Import({ onImported }: ImportProps) {
       if (!blob) return;
       const file = new File([blob], `powerscribe-clipboard-${Date.now()}.png`, { type: blob.type || 'image/png' });
       event.preventDefault();
-      setClipboardFile(file);
-      db.userSettings.get('default').then((settings) => {
-        if (settings?.autoImportClipboardScreenshots || settings?.alwaysProcessPowerScribeClipboard) {
-          setOcrFile(file);
-          setClipboardFile(null);
-        }
-      });
+      void queueClipboardImage(file, 'clipboard paste');
     }
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [mode]);
+  }, [mode, activeProfile?.id, activePractice?.id, sessionId, logDate, reviewRows, skippedRows]);
+
+  useEffect(() => {
+    if (mode !== 'ocr') return;
+    if (!navigator.clipboard?.read) return;
+
+    let cancelled = false;
+    let busy = false;
+
+    async function pollClipboard() {
+      if (cancelled || busy || processingRef.current || !document.hasFocus()) return;
+      busy = true;
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const imageType = item.types.find((type) => type.startsWith('image/'));
+          if (!imageType) continue;
+          const blob = await item.getType(imageType);
+          const file = new File([blob], `powerscribe-clipboard-${Date.now()}.png`, { type: imageType });
+          await queueClipboardImage(file, 'clipboard monitor');
+          break;
+        }
+      } catch {
+        // Browser/OS may deny polling; manual Paste remains available.
+      } finally {
+        busy = false;
+      }
+    }
+
+    void pollClipboard();
+    const id = window.setInterval(() => void pollClipboard(), 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [mode, activeProfile?.id, activePractice?.id, sessionId, logDate, reviewRows, skippedRows]);
 
   // ── Process helpers ───────────────────────────────────────────────────────
 
@@ -376,18 +959,194 @@ export function Import({ onImported }: ImportProps) {
     ]);
   }
 
+  function pushToast(tone: ImportToastTone, title: string, body?: string) {
+    const id = crypto.randomUUID();
+    setToasts((items) => [...items, { id, tone, title, body }].slice(-4));
+    window.setTimeout(() => {
+      setToasts((items) => items.filter((item) => item.id !== id));
+    }, tone === 'danger' ? 7000 : 4800);
+  }
+
   function appendPipelineRows(nextRows: PipelineReviewRow[], nextSkippedRows: PipelineReviewRow[], label: string) {
     const merged = mergeReviewSessionRows(reviewRows, skippedRows, nextRows, nextSkippedRows);
     setReviewRows(merged.reviewRows);
     setSkippedRows(merged.skippedRows);
     addTimeline(label);
     setStep('review');
+    const readyCount = nextRows.length;
+    const estimatedRvu = nextRows.reduce((sum, row) => sum + getSelectedWorkRvu(row), 0);
+    const reviewCount = nextRows.filter((row) => row.needsReview).length;
+    // The full saved/review/blocked/dup split for the receipt toast, all read
+    // off the same nextRows/nextSkippedRows the pipeline already returned —
+    // no new pipeline math. blockedCount is the subset of reviewCount with no
+    // CPT match at all (candidates.length === 0), broken out for the receipt
+    // only; reviewCount itself stays the full needsReview count so the
+    // desktop watcher notification's "in Inbox" total is unaffected.
+    const savedCount = nextRows.filter((row) => !row.needsReview).length;
+    const blockedCount = nextRows.filter((row) => row.needsReview && row.candidates.length === 0).length;
+    const decidableReviewCount = reviewCount - blockedCount;
+    const dupCount = nextSkippedRows.length;
+    pushToast(
+      reviewCount > 0 ? 'warning' : 'success',
+      readyCount === 0 && nextSkippedRows.length === 0
+        ? 'No studies found'
+        : `Ready to review ${readyCount} exam${readyCount === 1 ? '' : 's'}`,
+      `+${estimatedRvu.toFixed(1)} wRVUs pending · ${savedCount} saved · ${decidableReviewCount} need review · ${blockedCount} no CPT match · ${dupCount} duplicate${dupCount === 1 ? '' : 's'} skipped`,
+    );
+    const desktop = getDesktopAPI();
+    if (desktop && document.visibilityState !== 'visible' && readyCount > 0) {
+      void desktop.showNotification('Watcher receipt', watcherReceiptBody(readyCount, reviewCount));
+    }
+  }
+
+  async function hashImageBlob(blob: Blob): Promise<string> {
+    const buffer = await blob.arrayBuffer();
+    if (!crypto.subtle) return `${blob.size}:${blob.type}:${buffer.byteLength}`;
+    const digest = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  async function processOcrFile(
+    file: File,
+    timelineSource: string,
+    manualColumnCrops: PowerScribeManualColumnCrops | null = null,
+    manualRows: PowerScribeRowBand[] | null = null,
+    manualGuidesToSave: PowerScribeManualColumnGuides | null = null,
+    clearSavedManualCrop = false,
+  ) {
+    setProcessing(true);
+    setError(null);
+    setOcrFile(file);
+    pushToast('info', 'Processing capture...', 'Reading the screenshot and preparing extracted study rows.');
+    try {
+      const processed = await processOcrImport(file, {
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+      }, {
+        filename: file.name,
+        size: file.size,
+        manualColumnCrops,
+        manualColumnGuidesToSave: manualGuidesToSave,
+        clearSavedManualColumnGuides: clearSavedManualCrop,
+        manualRowBands: manualRows,
+      });
+      pushToast('info', 'Matching CPT codes...', 'Running aliases, active CPT filters, and review checks.');
+      setOcrDebug(processed.ocrDebug ?? null);
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
+      setClipboardFile(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'OCR failed - try paste mode instead');
+      pushToast('danger', 'OCR failed', e instanceof Error ? e.message : 'Try paste mode instead.');
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function processWindowsClipboardCapture(file: File, timelineSource: string): Promise<boolean> {
+    const desktop = getDesktopAPI();
+    if (desktop?.platform !== 'win32' || !desktop.extractPowerScribeClipboardRows) return false;
+
+    try {
+      pushToast('info', 'Reading PowerScribe...', 'Using the Windows structured OCR helper.');
+      const rows = await desktop.extractPowerScribeClipboardRows();
+      if (rows.length === 0) return false;
+      pushToast('info', 'Matching CPT codes...', 'Using structured procedure names only.');
+      const processed = await processStructuredPowerScribeOcrImport(rows, {
+        profileId: activeProfile?.id ?? null,
+        siteId: activePractice?.id ?? null,
+        sessionId,
+        logDate,
+      });
+      setOcrFile(file);
+      setOcrDebug(null);
+      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
+      setClipboardFile(null);
+      return true;
+    } catch (error) {
+      console.warn('Windows PowerScribe OCR helper failed; falling back to browser OCR.', error);
+      return false;
+    }
+  }
+
+  async function processPowerScribeCapture(
+    file: File,
+    timelineSource: string,
+    manualColumnCrops: PowerScribeManualColumnCrops | null = null,
+    manualRows: PowerScribeRowBand[] | null = null,
+    manualGuidesToSave: PowerScribeManualColumnGuides | null = null,
+    clearSavedManualCrop = false,
+  ) {
+    if (processingRef.current) return;
+    setProcessing(true);
+    setError(null);
+    setOcrFile(file);
+    setClipboardFile(null);
+    setCapturePreview(null);
+    setManualCropGuides(null);
+    setManualRowBands(null);
+    setSavedManualCropLoaded(false);
+    pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
+    try {
+      const usedStructuredHelper = manualColumnCrops
+        ? false
+        : await processWindowsClipboardCapture(file, timelineSource);
+      if (!usedStructuredHelper) {
+        await processOcrFile(file, timelineSource, manualColumnCrops, manualRows, manualGuidesToSave, clearSavedManualCrop);
+      }
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function queueClipboardImage(file: File, timelineSource: string) {
+    const hash = await hashImageBlob(file);
+    if (hash === lastClipboardImageHashRef.current) return;
+    lastClipboardImageHashRef.current = hash;
+    pushToast('info', 'Screenshot captured', `PowerScribe image received from ${timelineSource}.`);
+    const preview = await inspectPowerScribeCapture(file);
+    const settings = await db.userSettings.get('default');
+    const cropKey = activeProfile?.id ?? 'default';
+    const savedManualGuides = getSavedPowerScribeManualGuides(
+      settings?.savedPowerScribeCropRegions?.[cropKey],
+      preview.width,
+      preview.height,
+    );
+    if (shouldAutoProcessRecognizedCapture(preview.detected, settings)) {
+      pushToast(
+        'success',
+        'PowerScribe table detected — processing automatically',
+        `${preview.width} × ${preview.height} · ${savedManualGuides ? 'saved crop applied.' : 'outlined table region accepted.'}`,
+      );
+      await processPowerScribeCapture(
+        file,
+        `${timelineSource} (auto-process)`,
+        savedManualGuides ? powerScribeManualColumnsFromGuides(savedManualGuides) : null,
+        null,
+        savedManualGuides,
+      );
+      return;
+    }
+    setCapturePreview(preview);
+    setManualCropGuides(savedManualGuides ?? (preview.detected ? null : { ...DEFAULT_POWERSCRIBE_MANUAL_COLUMN_GUIDES }));
+    setManualRowBands(null);
+    setSavedManualCropLoaded(Boolean(savedManualGuides));
+    setClipboardFile(file);
+    pushToast(
+      preview.detected ? 'success' : 'warning',
+      preview.detected ? 'PowerScribe reports table detected' : 'PowerScribe table outline not detected',
+      'Review the image, then press Enter to process or Esc to discard.',
+    );
   }
 
   async function handlePasteProcess() {
     if (!pasteText.trim()) return;
     setProcessing(true);
     setError(null);
+    pushToast('info', 'Matching CPT codes...', 'Parsing pasted studies and preparing the review queue.');
     try {
       const processed = await processTextImport(pasteText, {
         profileId: activeProfile?.id ?? null,
@@ -398,1020 +1157,248 @@ export function Import({ onImported }: ImportProps) {
       appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Processing failed');
+      pushToast('danger', 'Processing failed', e instanceof Error ? e.message : 'Could not parse the pasted study list.');
     } finally {
       setProcessing(false);
     }
   }
 
-  async function handleOcrProcess() {
-    if (!ocrFile) return;
-    setProcessing(true);
-    setError(null);
-    try {
-      const processed = await processOcrImport(ocrFile, {
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-      }, { filename: ocrFile.name, size: ocrFile.size });
-      appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, processed.timelineLabel);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'OCR failed — try paste mode instead');
-    } finally {
-      setProcessing(false);
-    }
-  }
-
-  async function alwaysProcessClipboard(file: File) {
-    const settings = await ensureUserSettings();
-    await db.userSettings.put({
-      ...settings,
-      autoImportClipboardScreenshots: true,
-      alwaysProcessPowerScribeClipboard: true,
-      updatedAt: new Date().toISOString(),
-    });
-    setOcrFile(file);
-    setClipboardFile(null);
-  }
-
-  // Restore a skipped row back into the review list
-  function forceIncludeSkipped(tempId: string) {
-    const skipped = skippedRows.find((s) => s.tempId === tempId);
-    if (!skipped) return;
-    setSkippedRows((s) => s.filter((x) => x.tempId !== tempId));
-    setReviewRows((rows) => [
-      ...rows,
-      { ...skipped, duplicateStatus: null as DuplicateStatus, needsReview: true, included: true, autoSkipped: false },
-    ]);
-  }
-
-  async function handleCommit() {
-    setImporting(true);
-    setError(null);
-    try {
-      const result = await finalizeReviewSession({
-        sessionId,
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        logDate,
-        rows: reviewRows,
-        skippedRows,
-        timeline,
-      });
-      setImportedCount(result.importedCount);
-      setSkippedCount(result.skippedCount);
-      setReviewNeeded(result.reviewNeededCount);
-      setStep('done');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Import failed');
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  async function discardSession() {
-    if (!confirm('Discard this active review session? No productivity history will be saved.')) return;
-    await discardActiveReviewSession({
-      sessionId,
-      profileId: activeProfile?.id ?? null,
-      siteId: activePractice?.id ?? null,
-      logDate,
-      reviewRowCount: reviewRows.length,
-      skippedRowCount: skippedRows.length,
-    });
-    setSessionId(null);
-    setReviewRows([]);
-    setSkippedRows([]);
-    setTimeline([]);
-    setStep('input');
-  }
-
-  function updateRow(tempId: string, patch: Partial<PipelineReviewRow>) {
-    setReviewRows((rows) =>
-      rows.map((r) => (r.tempId === tempId ? { ...r, ...patch } : r)),
-    );
-  }
-
-  function setSelectedCandidates(row: PipelineReviewRow, indices: number[]) {
-    const uniqueIndices = Array.from(new Set(indices)).filter((index) => Boolean(row.candidates[index]));
-    const selected = uniqueIndices.map((index) => row.candidates[index]);
-    const nextRow = { ...row, selectedCandidateIndex: uniqueIndices[0] ?? null, selectedCandidateIndices: uniqueIndices };
-    updateRow(row.tempId, {
-      selectedCandidateIndex: uniqueIndices[0] ?? null,
-      selectedCandidateIndices: uniqueIndices,
-      needsReview: uniqueIndices.length === 0 || selected.length !== 1 || Boolean(manualReviewReason(nextRow)),
-    });
-  }
-
-  function approveRows(predicate: (row: PipelineReviewRow) => boolean) {
-    setReviewRows((rows) =>
-      rows.map((row) => {
-        if (!predicate(row)) return row;
-        const patch = buildApprovalPatch(row);
-        return patch ? { ...row, ...patch } : row;
-      }),
-    );
-  }
-
-  function approveHighConfidence() {
-    approveRows((row) => isSafeAutoApprovalRow(row));
-  }
-
-  function approvePriorMappings() {
-    approveRows((row) => isPriorApprovedMappingRow(row));
-  }
-
-  function approveSameNormalizedDescription(tempId: string) {
-    const sourceRow = reviewRows.find((row) => row.tempId === tempId);
-    if (!sourceRow) return;
-    const patch = buildApprovalPatch(sourceRow);
-    if (!patch) return;
-    const sourceCandidate = sourceRow.candidates[patch.selectedCandidateIndex ?? -1];
-    if (!sourceCandidate) return;
-    const sourceKey = normalizedExamKey(sourceRow);
-
-    setReviewRows((rows) =>
-      rows.map((row) => {
-        if (normalizedExamKey(row) !== sourceKey || !row.included) return row;
-        if (manualReviewReason({ ...row, candidates: row.candidates, selectedCandidateIndex: patch.selectedCandidateIndex, selectedCandidateIndices: patch.selectedCandidateIndices })) {
-          const manualPatch = buildManualSelectionPatch(row, [sourceCandidate], true);
-          return { ...row, ...manualPatch };
-        }
-        const approvalPatch = buildManualSelectionPatch(row, [sourceCandidate], true);
-        return { ...row, ...approvalPatch };
-      }),
-    );
-  }
-
-  async function handleManualSelect(tempId: string, candidate: MatchCandidate) {
-    const row = reviewRows.find((r) => r.tempId === tempId);
-    if (!row) return;
-
-    const normalizedSourceKey = normalizedExamKey(row);
-    const rowsToUpdate = reviewRows.filter(
-      (reviewRow) => normalizedExamKey(reviewRow) === normalizedSourceKey,
-    );
-
-    const patchesByTempId = new Map<string, ReturnType<typeof buildManualSelectionPatch>>();
-    for (const reviewRow of rowsToUpdate) {
-      patchesByTempId.set(reviewRow.tempId, buildManualSelectionPatch(reviewRow, [candidate], true));
-    }
-
-    setReviewRows((rows) =>
-      rows.map((reviewRow) => {
-        const patch = patchesByTempId.get(reviewRow.tempId);
-        return patch ? { ...reviewRow, ...patch } : reviewRow;
-      }),
-    );
-
-    const rowsByRawTitle = new Map<string, PipelineReviewRow>();
-    rowsToUpdate.forEach((reviewRow) => rowsByRawTitle.set(reviewRow.source.examTitle, reviewRow));
-
-    for (const aliasRow of rowsByRawTitle.values()) {
-      const patch = patchesByTempId.get(aliasRow.tempId);
-      const selectedForAlias = patch ? getCandidatesFromPatch(patch) : [];
-      if (!selectedForAlias.length) continue;
-
-      await rememberCorrectedExam({
-        rawText: aliasRow.source.examTitle,
-        candidates: selectedForAlias.map((c) => ({
-          cptCode: c.cptCode,
-          modifier: c.modifier,
-          workRvu: c.workRvu,
-          description: c.description,
-          modality: c.modality,
-        })),
-        profileId: activeProfile?.id ?? null,
-        siteId: activePractice?.id ?? null,
-        sessionId,
-        logDate,
-      });
-    }
-
-    setSearchPanelTempId(null);
-  }
-
-  const includedCount = reviewRows.filter((r) => r.included).length;
-  const matchedCount = reviewRows.filter((r) => r.included && getSelectedCandidates(r).length > 0).length;
-  const selectedCodeCount = reviewRows
-    .filter((r) => r.included)
-    .reduce((sum, row) => sum + getSelectedCandidates(row).length, 0);
-  const possibleDupes = reviewRows.filter(
-    (r) => r.included && r.duplicateStatus === 'possible',
-  ).length;
-  const safeApprovalCount = reviewRows.filter(isSafeAutoApprovalRow).length;
-  const priorMappingCount = reviewRows.filter(isPriorApprovedMappingRow).length;
-  const autoCodedCount = reviewRows.filter((row) => row.included && !row.needsReview).length;
-  const requiresReviewCount = reviewRows.filter((row) => row.included && row.needsReview).length;
-  const autoCodingPct = includedCount ? (autoCodedCount / includedCount) * 100 : 0;
-  const estimatedMinutesSaved = Math.round(autoCodedCount * 0.35);
-  const visibleReviewRows = reviewRows.filter((row) => {
-    if (reviewMode === 'everything') return true;
-    if (reviewMode === 'auto') return row.autoApproved || !row.needsReview;
-    if (reviewMode === 'low') return row.included && row.needsReview && (row.candidates[0]?.confidence ?? 0) < 0.95;
-    return row.included && row.needsReview;
-  });
-
-  // ── Done screen ───────────────────────────────────────────────────────────
-  if (step === 'done') {
-    return (
-      <motion.div
-        className="max-w-lg mx-auto text-center space-y-6 py-16"
-        variants={rowEntry}
-        initial="hidden"
-        animate="visible"
-      >
-        <div className="w-20 h-20 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto text-4xl">
-          ✓
-        </div>
-        <div>
-          <h2 className="text-2xl font-bold text-white">Import Complete</h2>
-          <div className="mt-3 space-y-1.5">
-            <p className="text-emerald-400 text-sm font-medium">
-              Imported: {importedCount} {importedCount === 1 ? 'study' : 'studies'}
-            </p>
-            {skippedCount > 0 && (
-              <p className="text-slate-400 text-sm">
-                Skipped duplicates: {skippedCount}
-              </p>
-            )}
-            {reviewNeeded > 0 && (
-              <p className="text-amber-400 text-sm">
-                Needs review: {reviewNeeded}
-              </p>
-            )}
-          </div>
-        </div>
-        <div className="flex gap-3 justify-center">
-          <button
-            onClick={() => {
-              setStep('input');
-              setPasteText('');
-              setOcrFile(null);
-              setReviewRows([]);
-              setSkippedRows([]);
-              setShowSkipped(false);
-              sessionStorage.removeItem(WATCHER_REVIEW_KEY);
-            }}
-            className="px-6 py-2.5 rounded-xl border border-white/15 text-slate-300 text-sm hover:border-white/30 transition-colors"
-          >
-            Import More
-          </button>
-          <button
-            onClick={onImported}
-            className="px-6 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity"
-            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
-          >
-            View Dashboard
-          </button>
-        </div>
-      </motion.div>
-    );
-  }
-
-  // ── Review screen ─────────────────────────────────────────────────────────
   if (step === 'review') {
-    return (
-      <motion.div className="space-y-5" variants={rowEntry} initial="hidden" animate="visible">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Review Matches</h1>
-            <p className="text-slate-400 text-sm mt-0.5">
-              {matchedCount}/{includedCount} matched
-              {skippedRows.length > 0 && ` · ${skippedRows.length} duplicates skipped`}
-              {possibleDupes > 0 && ` · ${possibleDupes} possible dup${possibleDupes > 1 ? 's' : ''}`}
-            </p>
-          </div>
-          <button
-            onClick={() => setStep('input')}
-            className="text-sm text-slate-400 hover:text-white transition-colors"
-          >
-            ← Back
-          </button>
-        </div>
-
-        {/* Date picker */}
-        <div className="card">
-          <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
-            Log Date (all studies)
-          </label>
-          <input
-            type="date"
-            value={logDate}
-            onChange={(e) => setLogDate(e.target.value)}
-            className="input"
-          />
-        </div>
-
-        <div className="card space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-white">Active Review Session</p>
-              <p className="text-xs text-slate-500">Temporary worklist. Nothing is saved to productivity history until Finalize Day.</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setStep('input')}
-                className="px-3 py-1.5 rounded-lg border border-white/12 text-xs text-slate-300 hover:text-white hover:border-white/25"
-              >
-                Continue Later / Add Screenshots
-              </button>
-              <button
-                onClick={discardSession}
-                className="px-3 py-1.5 rounded-lg border border-red-500/25 text-xs text-red-400 hover:bg-red-500/10"
-              >
-                Discard Session
-              </button>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-            <div className="rounded-lg border border-white/8 bg-white/3 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">Total exams</p>
-              <p className="text-lg font-bold text-white">{includedCount}</p>
-            </div>
-            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-emerald-500/80">Confirmed</p>
-              <p className="text-lg font-bold text-emerald-300">
-                {reviewRows.filter((row) => row.included && !row.needsReview).reduce((sum, row) => sum + getSelectedWorkRvu(row), 0).toFixed(1)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-amber-500/80">Pending est.</p>
-              <p className="text-lg font-bold text-amber-300">
-                {reviewRows.filter((row) => row.included && row.needsReview).reduce((sum, row) => sum + getSelectedWorkRvu(row), 0).toFixed(1)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-sky-500/80">Projected</p>
-              <p className="text-lg font-bold text-sky-300">
-                {reviewRows.filter((row) => row.included).reduce((sum, row) => sum + getSelectedWorkRvu(row), 0).toFixed(1)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-red-400/80">Needs review</p>
-              <p className="text-lg font-bold text-red-300">{requiresReviewCount}</p>
-            </div>
-            <div className="rounded-lg border border-orange-500/20 bg-orange-500/8 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-orange-400/80">Duplicates</p>
-              <p className="text-lg font-bold text-orange-300">{skippedRows.length + possibleDupes}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="card flex flex-wrap items-center gap-2">
-          <button
-            onClick={approveHighConfidence}
-            disabled={safeApprovalCount === 0}
-            className="btn-ghost text-xs disabled:opacity-40"
-          >
-            Approve all high-confidence matches ({safeApprovalCount})
-          </button>
-          <button
-            onClick={approvePriorMappings}
-            disabled={priorMappingCount === 0}
-            className="btn-ghost text-xs disabled:opacity-40"
-          >
-            Approve all prior mappings ({priorMappingCount})
-          </button>
-          <span className="text-xs text-slate-500 ml-auto">
-            Low-confidence, ambiguous, procedure, 0.0 wRVU, and non-7xxxx rows stay in review.
-          </span>
-        </div>
-
-        {timeline.length > 0 && (
-          <div className="card space-y-2">
-            <p className="text-sm font-semibold text-white">Daily Timeline</p>
-            <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
-              {timeline.slice(-8).map((event) => (
-                <div key={event.id} className="flex items-center gap-2 text-xs">
-                  <span className="font-mono text-slate-500 w-12">
-                    {new Date(event.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                  </span>
-                  <span className="text-slate-300">{event.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-          {[
-            ['Uploaded', includedCount.toLocaleString()],
-            ['Auto-coded', autoCodedCount.toLocaleString()],
-            ['Requires review', requiresReviewCount.toLocaleString()],
-            ['Auto-coding', `${autoCodingPct.toFixed(0)}%`],
-            ['Time saved', `${estimatedMinutesSaved} min`],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-xl border border-white/8 bg-white/3 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
-              <p className="text-lg font-bold text-white">{value}</p>
-            </div>
-          ))}
-        </div>
-
-        <div className="card flex flex-wrap items-center gap-2">
-          {[
-            ['unknowns', 'Unknowns Only'],
-            ['everything', 'Review Everything'],
-            ['auto', 'Review Auto-approved'],
-            ['low', 'Low-confidence Only'],
-          ].map(([modeId, label]) => (
-            <button
-              key={modeId}
-              onClick={() => setReviewMode(modeId as ReviewMode)}
-              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
-                reviewMode === modeId
-                  ? 'border-sky-500/40 bg-sky-500/15 text-sky-300'
-                  : 'border-white/10 text-slate-400 hover:border-white/25 hover:text-white'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-          <span className="text-xs text-slate-500 ml-auto">
-            Showing {visibleReviewRows.length} of {reviewRows.length} rows.
-          </span>
-        </div>
-
-        {/* ── Skipped duplicates panel ──────────────────────────────────── */}
-        {skippedRows.length > 0 && (
-          <div className="rounded-xl border border-slate-700/60 bg-slate-800/40 overflow-hidden">
-            <button
-              onClick={() => setShowSkipped((v) => !v)}
-              className="w-full flex items-center justify-between px-4 py-3 text-sm hover:bg-white/3 transition-colors"
-            >
-              <span className="flex items-center gap-2">
-                <span className="w-5 h-5 rounded-full bg-slate-600/60 flex items-center justify-center text-xs text-slate-300 font-bold">
-                  {skippedRows.length}
-                </span>
-                <span className="text-slate-300 font-medium">Skipped duplicates</span>
-              </span>
-              <span className="text-slate-500 text-xs">{showSkipped ? 'Hide ▲' : 'Show ▼'}</span>
-            </button>
-
-            {showSkipped && (
-              <div className="border-t border-slate-700/50 divide-y divide-slate-700/30">
-                {skippedRows.map((s) => {
-                  const top = s.candidates[0];
-                  return (
-                    <div key={s.tempId} className="px-4 py-3 flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm text-slate-300 truncate">{s.source.examTitle}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {top?.cptCode && (
-                            <span className="text-xs font-mono text-slate-500">{top.cptCode}</span>
-                          )}
-                          {top?.workRvu != null && (
-                            <span className="text-xs text-slate-500">{top.workRvu.toFixed(2)} wRVU</span>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-500 mt-0.5 italic">{s.duplicateReason}</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className={`text-xs px-2 py-0.5 rounded-lg border font-medium ${
-                          s.duplicateStatus === 'exact'
-                            ? 'bg-red-500/10 border-red-500/25 text-red-400'
-                            : 'bg-amber-500/10 border-amber-500/25 text-amber-400'
-                        }`}>
-                          {s.duplicateStatus === 'exact' ? 'Exact dup' : 'Very likely dup'}
-                        </span>
-                        <button
-                          onClick={() => forceIncludeSkipped(s.tempId)}
-                          className="text-xs px-2.5 py-1 rounded-lg border border-white/12 text-slate-400 hover:border-white/25 hover:text-white transition-colors"
-                        >
-                          Import anyway
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Review rows ───────────────────────────────────────────────── */}
-        <motion.div className="space-y-3" layout>
-          <AnimatePresence initial={false}>
-          {visibleReviewRows.map((row, i) => {
-            const isPossibleDupe = row.duplicateStatus === 'possible';
-            const selectedIndices = getSelectedCandidateIndices(row);
-            const selected = getSelectedCandidates(row);
-            const selectedTotal = getSelectedWorkRvu(row);
-            const label = confidenceLabel(row);
-            const reviewReason = manualReviewReason(row);
-            const canApproveSame = Boolean(buildApprovalPatch(row));
-            return (
-              <motion.div
-                key={row.tempId}
-                layout
-                variants={rowEntry}
-                initial="hidden"
-                animate="visible"
-                exit="exit"
-                className={`card transition-opacity duration-200 ${!row.included ? 'opacity-40' : ''}`}
-              >
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="min-w-0">
-                    <p className="text-xs text-slate-400">#{i + 1}</p>
-                    <p className="text-sm text-white font-medium truncate">{row.source.examTitle}</p>
-                    {row.source.accessionNumber && (
-                      <p className="text-xs text-slate-500">Acc: {row.source.accessionNumber}</p>
-                    )}
-                    {/* Date/time row with source confidence indicator */}
-                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                      {row.source.studyTime ? (
-                        <span className="text-xs font-mono text-slate-300">
-                          {new Date(row.source.studyTime).toLocaleString('en-US', {
-                            month: 'numeric', day: 'numeric',
-                            hour: 'numeric', minute: '2-digit', hour12: true,
-                          })}
-                        </span>
-                      ) : row.source.studyDate ? (
-                        <span className="text-xs font-mono text-slate-300">
-                          {new Date(row.source.studyDate + 'T12:00:00').toLocaleDateString('en-US', {
-                            month: 'numeric', day: 'numeric', year: 'numeric',
-                          })}
-                        </span>
-                      ) : null}
-                      {/* Source confidence badge */}
-                      {row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) >= 1.0 ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 font-medium">
-                          OCR ✓
-                        </span>
-                      ) : row.source.dateTimeSource === 'ocr' && (row.source.dateTimeConfidence ?? 0) > 0 ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/25 text-sky-400 font-medium">
-                          OCR date
-                        </span>
-                      ) : (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/25 text-amber-400/80 font-medium" title="Date was not extracted from OCR — using the log date you selected">
-                          ⚠ inferred
-                        </span>
-                      )}
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${labelClass(label.tone)}`}>
-                        {label.label}
-                      </span>
-                      {reviewReason && row.included && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded border border-amber-500/25 bg-amber-500/10 text-amber-300">
-                          {reviewReason}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-                    {isPossibleDupe && row.included && (
-                      <span
-                        className="text-xs bg-orange-500/15 border border-orange-500/30 text-orange-300 px-2 py-0.5 rounded-lg"
-                        title={row.duplicateReason ?? ''}
-                      >
-                        ⚠ Possible dup
-                      </span>
-                    )}
-                    {!row.needsReview && row.included && !isPossibleDupe &&
-                      row.candidates[0]?.method === 'alias_match' &&
-                      row.candidates[0]?.confidence >= 0.95 && (
-                      <span className="text-xs bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-lg">
-                        ✓ Learned
-                      </span>
-                    )}
-                    {row.needsReview && row.included && (
-                      <span className="text-xs bg-amber-500/20 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded-lg">
-                        Review
-                      </span>
-                    )}
-                    {canApproveSame && row.included && (
-                      <button
-                        onClick={() => approveSameNormalizedDescription(row.tempId)}
-                        className="text-xs px-2 py-1 rounded-lg border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                      >
-                        Approve same
-                      </button>
-                    )}
-                    <button
-                      onClick={() => updateRow(row.tempId, { included: !row.included })}
-                      className={`text-xs px-2 py-1 rounded-lg border transition-colors ${
-                        row.included
-                          ? 'bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25'
-                          : 'bg-white/5 border-white/15 text-slate-400 hover:border-white/30'
-                      }`}
-                    >
-                      {row.included ? 'Exclude' : 'Include'}
-                    </button>
-                  </div>
-                </div>
-
-                {isPossibleDupe && row.included && (
-                  <div className="mb-2 px-3 py-2 rounded-lg bg-orange-500/8 border border-orange-500/20 text-xs text-orange-300/80">
-                    {row.duplicateReason} — verify before saving or exclude this row.
-                  </div>
-                )}
-
-                {/* ── Candidate list or no-match state ─────────────── */}
-                {row.included && selected.length > 0 && (
-                  <div className="mb-2 rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2">
-                    <div className="flex items-center justify-between gap-3 mb-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-sky-300">
-                        Selected CPTs
-                      </span>
-                      <span className="text-xs font-semibold text-white">
-                        {selectedTotal.toFixed(2)} wRVU total
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-stretch gap-2">
-                      {selected.map((candidate, candidateIndex) => (
-                        <div key={candidateKey(candidate)} className="contents">
-                          {candidateIndex > 0 && (
-                            <span className="self-center text-sky-300 text-sm font-bold px-0.5">+</span>
-                          )}
-                          <div className="min-w-[11rem] max-w-full flex-1 sm:flex-none rounded-xl border border-white/12 bg-white/5 px-3 py-2">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="text-xs font-medium text-white truncate">
-                                  {candidate.description.slice(0, 52)}
-                                  {candidate.description.length > 52 ? '...' : ''}
-                                </p>
-                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                                  <span className="font-mono text-[11px] font-bold text-sky-300">{candidate.cptCode}</span>
-                                  {candidate.modifier && <span className="text-[10px] text-slate-400">mod {candidate.modifier}</span>}
-                                  <span className="text-[10px] text-emerald-400">{candidate.workRvu?.toFixed(2)} wRVU</span>
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setSelectedCandidates(
-                                    row,
-                                    selectedIndices.filter((index) => candidateKey(row.candidates[index]) !== candidateKey(candidate)),
-                                  )
-                                }
-                                className="text-slate-500 hover:text-red-300 transition-colors"
-                                title="Remove this study bubble"
-                              >
-                                x
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {row.candidates.length === 0 ? (
-                  <div className="space-y-2">
-                    <p className="text-xs text-red-400 italic">
-                      No confident match found — search the exam library to assign manually.
-                    </p>
-                    <button
-                      onClick={() =>
-                        setSearchPanelTempId(
-                          searchPanelTempId === row.tempId ? null : row.tempId,
-                        )
-                      }
-                      className="text-xs px-3 py-1.5 rounded-lg border border-sky-500/35 text-sky-400 hover:border-sky-400/60 hover:bg-sky-500/8 transition-all font-medium"
-                    >
-                      {searchPanelTempId === row.tempId ? '↑ Close search' : '🔍 Search exam library'}
-                    </button>
-                    {searchPanelTempId === row.tempId && (
-                      <ExamSearchPanel
-                        initialQuery={row.source.examTitle}
-                        onSelect={(c) => handleManualSelect(row.tempId, c)}
-                        onClose={() => setSearchPanelTempId(null)}
-                      />
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    {row.candidates.map((c, ci) => {
-                      const isSelected = selectedIndices.includes(ci);
-                      const candidateLabel = confidenceLabel(row, c);
-                      return (
-                        <button
-                          key={`${c.cptCode}-${c.modifier}-${ci}`}
-                          onClick={() =>
-                            setSelectedCandidates(
-                              row,
-                              isSelected
-                                ? selectedIndices.filter((index) => index !== ci)
-                                : [...selectedIndices, ci],
-                            )
-                          }
-                          className={`w-full text-left rounded-lg border px-3 py-2 text-xs transition-all ${
-                            isSelected
-                              ? 'text-white'
-                              : 'bg-white/3 border-white/8 text-slate-400 hover:border-white/20'
-                          }`}
-                          style={isSelected ? {
-                            background: 'rgba(37,99,168,0.15)',
-                            borderColor: 'rgba(37,99,168,0.4)',
-                          } : {}}
-                        >
-                          <span className="font-mono font-bold mr-2">{c.cptCode}</span>
-                          {c.modifier && (
-                            <span className="mr-1.5 text-slate-500">mod {c.modifier}</span>
-                          )}
-                          <span className="mr-2">
-                            {c.description.slice(0, 55)}
-                            {c.description.length > 55 ? '…' : ''}
-                          </span>
-                          <span className="font-medium">{c.workRvu?.toFixed(2)} wRVU</span>
-                          <span
-                            className={`ml-2 ${
-                              c.confidence >= 0.85
-                                ? 'text-emerald-400'
-                                : c.confidence >= 0.65
-                                ? 'text-amber-400'
-                                : 'text-red-400'
-                            }`}
-                          >
-                            {Math.round(c.confidence * 100)}%
-                          </span>
-                          <span className={`ml-1.5 text-[10px] font-semibold uppercase tracking-wide ${
-                            candidateLabel.tone === 'green' ? 'text-emerald-500/70' :
-                            candidateLabel.tone === 'sky' ? 'text-sky-400/80' :
-                            candidateLabel.tone === 'amber' ? 'text-amber-500/70' : 'text-red-400/80'
-                          }`}>
-                            {candidateLabel.label}
-                          </span>
-                          {isSelected && (
-                            <span className="ml-1.5 text-sky-300 text-[10px] font-semibold uppercase tracking-wide">
-                              selected
-                            </span>
-                          )}
-                          <span className="mt-1 block text-[10px] leading-snug text-slate-500">
-                            {candidateExplanationText(c, row.source.examTitle)}
-                          </span>
-                          {c.confidence < 0.75 && row.candidates.length > 1 && (
-                            <span className="mt-0.5 block text-[10px] text-amber-300/80">
-                              Alternatives: {row.candidates.filter((alt, altIndex) => altIndex !== ci).slice(0, 3).map((alt) => `${alt.cptCode}${alt.modifier ? `-${alt.modifier}` : ''} ${Math.round(alt.confidence * 100)}%`).join(' | ')}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                    {/* Add another CPT is always available for combined-code studies. */}
-                    <div className="flex items-center justify-end pt-0.5">
-                      <button
-                        onClick={() =>
-                          setSearchPanelTempId(
-                            searchPanelTempId === row.tempId ? null : row.tempId,
-                          )
-                        }
-                        className="text-[11px] text-slate-500 hover:text-sky-400 transition-colors"
-                      >
-                        {searchPanelTempId === row.tempId ? '↑ Close search' : 'Add another CPT'}
-                      </button>
-                    </div>
-                    {searchPanelTempId === row.tempId && (
-                      <ExamSearchPanel
-                        initialQuery={row.source.examTitle}
-                        onSelect={(c) => handleManualSelect(row.tempId, c)}
-                        onClose={() => setSearchPanelTempId(null)}
-                      />
-                    )}
-                  </div>
-                )}
-              </motion.div>
-            );
-          })}
-          </AnimatePresence>
-
-          {reviewRows.length === 0 && skippedRows.length > 0 && (
-            <div className="text-center py-10">
-              <p className="text-2xl mb-3">✓</p>
-              <p className="text-white font-medium">All studies are already logged</p>
-              <p className="text-slate-400 text-sm mt-1">
-                {skippedRows.length} duplicate{skippedRows.length > 1 ? 's' : ''} detected and skipped.
-              </p>
-            </div>
-          )}
-        </motion.div>
-
-        {error && <p className="text-red-400 text-sm">{error}</p>}
-
-        <div className="flex gap-3">
-          <button
-            onClick={() => setStep('input')}
-            className="px-5 py-2.5 rounded-xl border border-white/15 text-slate-300 text-sm hover:border-white/30 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleCommit}
-            disabled={
-              importing ||
-              (selectedCodeCount === 0 && reviewRows.length > 0) ||
-              (reviewRows.length === 0 && skippedRows.length > 0 && matchedCount === 0)
-            }
-            className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
-          >
-            {importing
-              ? 'Saving…'
-              : reviewRows.length === 0
-              ? 'All Duplicates — Nothing to Import'
-              : `Finalize Day: ${matchedCount} ${matchedCount === 1 ? 'Study' : 'Studies'} (${selectedCodeCount} CPT${selectedCodeCount === 1 ? '' : 's'})`}
-          </button>
-        </div>
-      </motion.div>
-    );
+    return <CaptureProcessingState />;
   }
 
   // ── Input screen ──────────────────────────────────────────────────────────
-  return (
-    <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
-      <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">Import Studies</h1>
-        <p className="text-slate-400 text-sm mt-0.5">Bulk log from pasted text, screenshot OCR, or CSV</p>
-      </div>
+  const modeTabClass = (active: boolean) =>
+    cn(
+      'min-h-8 flex-1 rounded-[8px] px-3 py-1.5 text-[13px] font-medium transition-colors',
+      active ? 'bg-rd-surface text-rd-label-primary shadow-sm' : 'text-rd-label-secondary',
+    );
 
+  return (
+    <>
+    <div className="mx-auto max-w-2xl space-y-5">
       {/* Mode toggle */}
-      <div className="flex gap-2 p-1 bg-white/5 rounded-xl">
+      <div role="tablist" className="inline-flex w-full gap-0.5 rounded-[10px] bg-rd-bg p-0.5">
         <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'paste'}
           onClick={() => { setMode('paste'); setError(null); }}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-            mode === 'paste' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-300'
-          }`}
+          className={modeTabClass(mode === 'paste')}
         >
-          📋 Paste / CSV
+          Paste / CSV
         </button>
         <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'ocr'}
           onClick={() => { setMode('ocr'); setError(null); }}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-            mode === 'ocr' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-300'
-          }`}
+          className={modeTabClass(mode === 'ocr')}
         >
-          📸 Screenshot OCR
+          Screen Capture Intake
         </button>
         {/* PowerScribe — architecture ready, live sync coming */}
         <button
+          type="button"
+          role="tab"
           disabled
           title="PowerScribe live sync — architecture implemented, activation coming soon"
-          className="flex-1 py-2 rounded-lg text-sm font-medium text-slate-600 cursor-not-allowed relative group"
+          className="group relative min-h-8 flex-1 cursor-not-allowed rounded-[8px] px-3 py-1.5 text-[13px] font-medium text-rd-label-secondary opacity-50"
         >
           <span>⚡ PowerScribe</span>
-          <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+          <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide">
             Soon
           </span>
           {/* Tooltip on hover */}
-          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-left shadow-xl z-10">
+          <span
+            className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-52 -translate-x-1/2 rounded-[10px] border border-rd-separator bg-rd-surface px-3 py-2 text-left text-[12px] text-rd-label-secondary opacity-0 transition-opacity group-hover:opacity-100"
+            style={{ boxShadow: 'var(--rd-shadow-card)' }}
+          >
             Live PowerScribe sync is architecturally supported — the provider interface and pipeline are ready. Authentication and site configuration coming soon.
           </span>
         </button>
       </div>
 
       {mode === 'paste' && (
-        <div className="card space-y-4">
+        <Card className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+            <label htmlFor="paste-text" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
               Paste exam names, CPT codes, or CSV
             </label>
             <textarea
+              id="paste-text"
+              aria-label="Paste exam names, CPT codes, or CSV"
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
               placeholder={`CT Abdomen Pelvis with contrast\nMRI Brain without contrast\n74177, 70553, 71046\n...one per line, comma-separated, or CSV with headers`}
               rows={10}
-              className="input w-full resize-none font-mono text-sm"
+              className="w-full resize-none rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 font-mono text-[13px] text-rd-label-primary placeholder:text-rd-label-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rd-label-primary"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+            <label htmlFor="paste-log-date" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
               Log Date
             </label>
             <input
+              id="paste-log-date"
+              aria-label="Log date"
               type="date"
               value={logDate}
               onChange={(e) => setLogDate(e.target.value)}
-              className="input"
+              className="rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 text-[13px] text-rd-label-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rd-label-primary"
             />
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-[12px] text-rd-label-secondary">
             Supports: one per line, comma-separated CPT codes, or CSV with headers
             (examTitle, cpt, studyDate, accessionNumber, modality…).
             Duplicates detected automatically.
           </p>
-          {error && <p className="text-red-400 text-sm">{error}</p>}
+          {error && <p className="text-[13px] text-rd-negative">{error}</p>}
           <button
+            type="button"
             onClick={handlePasteProcess}
             disabled={!pasteText.trim() || processing}
-            className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
+            className="min-h-11 w-full rounded-[10px] bg-rd-label-primary px-5 text-[15px] font-semibold text-rd-bg disabled:opacity-40"
           >
-            {processing ? 'Processing…' : 'Match & Review'}
+            {processing ? CAPTURE_PROCESSING_LABEL : 'Match & Review'}
           </button>
-        </div>
+        </Card>
       )}
 
       {mode === 'ocr' && (
-        <div className="card space-y-4">
-          {clipboardFile && (
-            <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-3">
-              <p className="text-sm font-semibold text-sky-300">PowerScribe screenshot detected - Process?</p>
-              <p className="text-xs text-slate-400">
-                The pasted image will be processed in memory for OCR, then discarded. Only parsed exam/CPT productivity data is stored.
+        <Card className="space-y-4">
+          {clipboardFile && !processing && (
+            <div className="space-y-3 rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
+              <p className="text-[13px] font-semibold text-rd-label-primary">Review capture before processing</p>
+              <p className="text-[12px] text-rd-label-secondary">
+                Only the local table pre-check has run—no import pipeline or saved data yet. {CAPTURE_PRIVACY_COPY}
               </p>
+              {capturePreview && (
+                <CapturePreview
+                  file={clipboardFile}
+                  inspection={capturePreview}
+                  manualGuides={manualCropGuides}
+                  onManualGuidesChange={setManualCropGuides}
+                  rowBands={manualRowBands}
+                  onRowBandsChange={setManualRowBands}
+                  savedManualCropLoaded={savedManualCropLoaded}
+                />
+              )}
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={() => { setOcrFile(clipboardFile); setClipboardFile(null); }}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                  style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
+                  type="button"
+                  onClick={() => processPowerScribeCapture(
+                    clipboardFile,
+                    'confirmed preview',
+                    manualCropGuides ? powerScribeManualColumnsFromGuides(manualCropGuides) : null,
+                    manualRowBands,
+                    manualCropGuides,
+                    savedManualCropLoaded && !manualCropGuides,
+                  )}
+                  disabled={processing}
+                  className="min-h-11 rounded-[10px] bg-rd-label-primary px-3 text-[13px] font-semibold text-rd-bg disabled:opacity-40"
                 >
-                  Process
+                  Process <span className="ml-1 opacity-70">Enter</span>
                 </button>
                 <button
-                  onClick={() => setClipboardFile(null)}
-                  className="px-3 py-1.5 rounded-lg border border-white/12 text-xs text-slate-400 hover:text-white"
+                  type="button"
+                  onClick={() => {
+                    setClipboardFile(null);
+                    setCapturePreview(null);
+                    setManualCropGuides(null);
+                    setManualRowBands(null);
+                    setSavedManualCropLoaded(false);
+                    lastClipboardImageHashRef.current = null;
+                  }}
+                  disabled={processing}
+                  className="min-h-11 px-2 text-[13px] text-rd-label-secondary disabled:opacity-40"
                 >
-                  Ignore
-                </button>
-                <button
-                  onClick={() => alwaysProcessClipboard(clipboardFile)}
-                  className="px-3 py-1.5 rounded-lg border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/10"
-                >
-                  Always process PowerScribe screenshots
+                  Discard <span className="ml-1 opacity-70">Esc</span>
                 </button>
               </div>
             </div>
           )}
+          {processing && <CaptureProcessingState />}
           <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
-              Upload PowerScribe screenshot
+            <label htmlFor="ocr-file-input" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
+              Paste or upload PowerScribe window grab
             </label>
-            <div
+            <input
+              ref={fileRef}
+              id="ocr-file-input"
+              aria-label="Upload PowerScribe window grab"
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void queueClipboardImage(file, 'file upload');
+                e.target.value = '';
+              }}
+            />
+            <button
+              type="button"
               onClick={() => fileRef.current?.click()}
-              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${
-                ocrFile ? '' : 'border-white/15 hover:border-white/30 hover:bg-white/3'
-              }`}
-              style={ocrFile ? {
-                borderColor: 'rgba(37,99,168,0.4)',
-                background: 'rgba(37,99,168,0.06)',
-              } : {}}
+              className={cn(
+                'w-full cursor-pointer rounded-[16px] border-2 border-dashed p-8 text-center transition-colors',
+                clipboardFile ? 'border-rd-label-primary bg-rd-surface-2' : 'border-rd-separator hover:bg-rd-surface-2',
+              )}
             >
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => setOcrFile(e.target.files?.[0] ?? null)}
-              />
-              {ocrFile ? (
+              {clipboardFile ? (
                 <div>
-                  <p className="font-medium" style={{ color: theme.colors.accent }}>{ocrFile.name}</p>
-                  <p className="text-slate-400 text-xs mt-1">
-                    {(ocrFile.size / 1024).toFixed(0)} KB · Click to change
+                  <p className="font-medium text-rd-label-primary">{clipboardFile.name}</p>
+                  <p className="mt-1 text-[12px] text-rd-label-secondary">
+                    {(clipboardFile.size / 1024).toFixed(0)} KB · Waiting for review
                   </p>
                 </div>
               ) : (
                 <div>
-                  <p className="text-4xl mb-3">📸</p>
-                  <p className="text-slate-300 text-sm font-medium">Paste, drop, or click to upload</p>
-                  <p className="text-slate-500 text-xs mt-1">Alt+Print Screen, then paste here. Images are not stored.</p>
+                  <p className="mb-3 text-4xl">📸</p>
+                  <p className="text-[13px] font-medium text-rd-label-primary">Paste, drop, or click to upload</p>
+                  <p className="mt-1 text-[12px] text-rd-label-secondary">Copy the PowerScribe window, then paste here. Images are not stored.</p>
                 </div>
               )}
-            </div>
+            </button>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+            <label htmlFor="ocr-log-date" className="mb-1.5 block text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">
               Log Date
             </label>
             <input
+              id="ocr-log-date"
+              aria-label="Log date"
               type="date"
               value={logDate}
               onChange={(e) => setLogDate(e.target.value)}
-              className="input"
+              className="rounded-[10px] border border-rd-separator bg-rd-surface-2 px-3 py-2 text-[13px] text-rd-label-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rd-label-primary"
             />
           </div>
-          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-            <p className="text-amber-300 text-xs font-medium">⚡ OCR Tips</p>
-            <p className="text-amber-300/70 text-xs mt-1">
-              Higher resolution screenshots work best. Crop to just the study list.
-              OCR runs locally — nothing leaves your device. Already-imported studies are auto-skipped.
+          <div className="rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
+            <p className="text-[12px] font-medium text-rd-label-primary">Capture tips</p>
+            <p className="mt-1 text-[12px] text-rd-label-secondary">
+              Capture the PowerScribe study list with Procedure, Exam Date, and Modified columns visible.
+              The screenshot is cropped, parsed, matched, and checked locally. Already-imported studies are auto-skipped.
             </p>
           </div>
-          {error && <p className="text-red-400 text-sm">{error}</p>}
-          <button
-            onClick={handleOcrProcess}
-            disabled={!ocrFile || processing}
-            className="w-full py-3 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${theme.colors.primary}, ${theme.colors.accent})` }}
-          >
-            {processing ? 'Running OCR…' : 'Extract & Match'}
-          </button>
-        </div>
+          <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
+          {error && <p className="text-[13px] text-rd-negative">{error}</p>}
+        </Card>
       )}
 
       {mode === 'powerscribe' && (
         /* This branch is unreachable while the button is disabled.
            It will be wired up when PowerScribeImportProvider goes live. */
-        <div className="card text-center py-10 space-y-3">
+        <Card className="space-y-3 py-10 text-center">
           <p className="text-2xl">⚡</p>
-          <p className="text-white font-semibold">PowerScribe Live Sync</p>
-          <p className="text-slate-400 text-sm max-w-sm mx-auto">
+          <p className="font-semibold text-rd-label-primary">PowerScribe Live Sync</p>
+          <p className="mx-auto max-w-sm text-[13px] text-rd-label-secondary">
             The import pipeline is architected to accept PowerScribe as a native
             source. Authentication and site configuration coming soon.
           </p>
-        </div>
+        </Card>
       )}
     </div>
+    <ImportToastStack toasts={toasts} />
+    </>
   );
 }

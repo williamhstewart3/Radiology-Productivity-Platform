@@ -1,0 +1,629 @@
+study_name,cpt,wrvu,category,source
+XR Chest 1 View,71045,0.18,CHEST,orbit_cme_seed
+XR Chest 2 Views,71046,0.21,CHEST,orbit_cme_seed
+XR Chest 3 Views,71047,0.26,CHEST,orbit_cme_seed
+XR Chest 4+ Views,71048,0.30,CHEST,orbit_cme_seed
+XR Ribs Unilateral 2 Views,71100,0.21,CHEST,orbit_cme_seed
+XR Ribs Unilateral w/ Chest,71101,0.26,CHEST,orbit_cme_seed
+XR Ribs Bilateral 3 Views,71110,0.28,CHEST,orbit_cme_seed
+XR Abdomen 1 View,74018,0.18,ABDOMEN,orbit_cme_seed
+XR Abdomen 2 Views,74019,0.22,ABDOMEN,orbit_cme_seed
+XR Abdomen 3+ Views,74021,0.26,ABDOMEN,orbit_cme_seed
+XR Abdomen Acute Series (KUB/Upright),74022,0.31,ABDOMEN,orbit_cme_seed
+XR Spine Single View,72020,0.16,SPINE,orbit_cme_seed
+XR C-Spine 2-3 Views,72040,0.21,SPINE,orbit_cme_seed
+XR C-Spine 4-5 Views,72050,0.26,SPINE,orbit_cme_seed
+XR C-Spine 6+ Views,72052,0.29,SPINE,orbit_cme_seed
+XR T-Spine 2 Views,72070,0.20,SPINE,orbit_cme_seed
+XR T-Spine 3 Views,72072,0.22,SPINE,orbit_cme_seed
+XR T-Spine 4+ Views,72074,0.24,SPINE,orbit_cme_seed
+XR L-Spine 2-3 Views,72100,0.21,SPINE,orbit_cme_seed
+XR L-Spine 4+ Views,72110,0.25,SPINE,orbit_cme_seed
+XR L-Spine Bending Views,72114,0.29,SPINE,orbit_cme_seed
+XR Thoracolumbar 2+ Views,72080,0.20,SPINE,orbit_cme_seed
+XR Entire Spine 1 View,72081,0.25,SPINE,orbit_cme_seed
+XR Entire Spine 2-3 Views,72082,0.30,SPINE,orbit_cme_seed
+XR Entire Spine 4-5 Views,72083,0.34,SPINE,orbit_cme_seed
+XR Pelvis 1 View,72170,0.17,PELVIS/HIP,orbit_cme_seed
+XR Pelvis 2+ Views,72190,0.24,PELVIS/HIP,orbit_cme_seed
+XR Hip 1 View,73501,0.18,PELVIS/HIP,orbit_cme_seed
+XR Hip 2-3 Views,73502,0.21,PELVIS/HIP,orbit_cme_seed
+XR Hip 4+ Views,73503,0.26,PELVIS/HIP,orbit_cme_seed
+XR Hips Bilateral 2 Views,73521,0.21,PELVIS/HIP,orbit_cme_seed
+XR Hips Bilateral 3-4 Views,73522,0.28,PELVIS/HIP,orbit_cme_seed
+XR Hips Bilateral 5+ Views,73523,0.30,PELVIS/HIP,orbit_cme_seed
+XR Clavicle,73000,0.16,UPPER EXT,orbit_cme_seed
+XR Scapula,73010,0.17,UPPER EXT,orbit_cme_seed
+XR Shoulder 1 View,73020,0.15,UPPER EXT,orbit_cme_seed
+XR Shoulder 2+ Views,73030,0.18,UPPER EXT,orbit_cme_seed
+XR Acromioclavicular Joints Bilateral,73050,0.18,UPPER EXT,orbit_cme_seed
+XR Humerus,73060,0.16,UPPER EXT,orbit_cme_seed
+XR Elbow 2 Views,73070,0.16,UPPER EXT,orbit_cme_seed
+XR Elbow 3+ Views,73080,0.17,UPPER EXT,orbit_cme_seed
+XR Forearm,73090,0.16,UPPER EXT,orbit_cme_seed
+XR Wrist 2 Views,73100,0.16,UPPER EXT,orbit_cme_seed
+XR Wrist 3+ Views,73110,0.17,UPPER EXT,orbit_cme_seed
+XR Hand 2 Views,73120,0.16,UPPER EXT,orbit_cme_seed
+XR Hand 3+ Views,73130,0.17,UPPER EXT,orbit_cme_seed
+XR Finger(s),73140,0.13,UPPER EXT,orbit_cme_seed
+XR Femur 1 View,73551,0.16,LOWER EXT,orbit_cme_seed
+XR Femur 2+ Views,73552,0.18,LOWER EXT,orbit_cme_seed
+XR Knee 1-2 Views,73560,0.16,LOWER EXT,orbit_cme_seed
+XR Knee 3 Views,73562,0.18,LOWER EXT,orbit_cme_seed
+XR Knee 4+ Views,73564,0.21,LOWER EXT,orbit_cme_seed
+XR Knees Standing Bilateral,73565,0.16,LOWER EXT,orbit_cme_seed
+XR Tibia/Fibula,73590,0.16,LOWER EXT,orbit_cme_seed
+XR Lower Extremity Infant,73592,0.16,LOWER EXT,orbit_cme_seed
+XR Ankle 2 Views,73600,0.16,LOWER EXT,orbit_cme_seed
+XR Ankle 3+ Views,73610,0.17,LOWER EXT,orbit_cme_seed
+XR Foot 2 Views,73620,0.16,LOWER EXT,orbit_cme_seed
+XR Foot 3+ Views,73630,0.17,LOWER EXT,orbit_cme_seed
+XR Calcaneus (Heel),73650,0.16,LOWER EXT,orbit_cme_seed
+XR Toe(s),73660,0.13,LOWER EXT,orbit_cme_seed
+XR Mandible Partial,70100,0.18,HEAD/NECK,orbit_cme_seed
+XR Mandible Complete,70110,0.24,HEAD/NECK,orbit_cme_seed
+XR Facial Bones Limited,70140,0.19,HEAD/NECK,orbit_cme_seed
+XR Facial Bones Complete,70150,0.25,HEAD/NECK,orbit_cme_seed
+XR Nasal Bones,70160,0.17,HEAD/NECK,orbit_cme_seed
+XR Orbits,70200,0.27,HEAD/NECK,orbit_cme_seed
+XR Sinuses Limited,70210,0.17,HEAD/NECK,orbit_cme_seed
+XR Sinuses Complete,70220,0.21,HEAD/NECK,orbit_cme_seed
+XR Skull 1-2 Views,70250,0.18,HEAD/NECK,orbit_cme_seed
+XR Skull 3+ Views,70260,0.27,HEAD/NECK,orbit_cme_seed
+XR TMJ Open & Closed Unilateral,70328,0.18,TMJ,orbit_cme_seed
+XR TMJ Open & Closed Bilateral,70330,0.23,TMJ,orbit_cme_seed
+XR Soft Tissue Neck,70360,0.18,HEAD/NECK,orbit_cme_seed
+CT Head w/o Contrast,70450,0.83,HEAD/NECK,orbit_cme_seed
+CT Head w/ Contrast,70460,1.10,HEAD/NECK,orbit_cme_seed
+CT Head w/o & w/ Contrast,70470,1.24,HEAD/NECK,orbit_cme_seed
+CTA Head & Neck,70471,2.50,HEAD/NECK,orbit_cme_seed
+CT Temporal Bones/Orbits w/o Contrast,70480,1.25,HEAD/NECK,orbit_cme_seed
+CT Temporal Bones/Orbits w/ Contrast,70481,1.10,HEAD/NECK,orbit_cme_seed
+CT Temporal Bones/Orbits w/o & w/ Contrast,70482,1.24,HEAD/NECK,orbit_cme_seed
+CT Maxillofacial/Sinuses w/o Contrast,70486,0.83,HEAD/NECK,orbit_cme_seed
+CT Maxillofacial w/ Contrast,70487,1.10,HEAD/NECK,orbit_cme_seed
+CT Maxillofacial w/o & w/ Contrast,70488,1.24,HEAD/NECK,orbit_cme_seed
+CT Soft Tissue Neck w/o Contrast,70490,1.25,HEAD/NECK,orbit_cme_seed
+CT Soft Tissue Neck w/ Contrast,70491,1.35,HEAD/NECK,orbit_cme_seed
+CT Soft Tissue Neck w/o & w/ Contrast,70492,1.58,HEAD/NECK,orbit_cme_seed
+CTA Head,70496,1.71,CTA,orbit_cme_seed
+CTA Neck,70498,1.71,CTA,orbit_cme_seed
+CTA Chest/PE Study,71275,1.77,CTA,orbit_cme_seed
+CTA Abdomen & Pelvis,74174,2.15,CTA,orbit_cme_seed
+CTA Abdomen,74175,1.77,CTA,orbit_cme_seed
+CTA Pelvis,72191,1.76,CTA,orbit_cme_seed
+CTA Abdominal Aorta (Runoff),75635,2.34,CTA,orbit_cme_seed
+CTA Coronary Arteries,75574,2.34,CTA,orbit_cme_seed
+CTA Upper Extremity,73206,1.76,CTA,orbit_cme_seed
+CTA Lower Extremity,73706,1.85,CTA,orbit_cme_seed
+CT Chest w/o Contrast,71250,1.05,CHEST,orbit_cme_seed
+CT Chest w/ Contrast,71260,1.13,CHEST,orbit_cme_seed
+CT Chest w/o & w/ Contrast,71270,1.22,CHEST,orbit_cme_seed
+CT Chest Low-Dose Lung Screen,71271,1.05,CHEST,orbit_cme_seed
+CT C-Spine w/o Contrast,72125,0.98,SPINE,orbit_cme_seed
+CT C-Spine w/ Contrast,72126,1.19,SPINE,orbit_cme_seed
+CT C-Spine w/o & w/ Contrast,72127,1.24,SPINE,orbit_cme_seed
+CT T-Spine w/o Contrast,72128,0.98,SPINE,orbit_cme_seed
+CT T-Spine w/ Contrast,72129,1.19,SPINE,orbit_cme_seed
+CT T-Spine w/o & w/ Contrast,72130,1.24,SPINE,orbit_cme_seed
+CT L-Spine w/o Contrast,72131,0.98,SPINE,orbit_cme_seed
+CT L-Spine w/ Contrast,72132,1.19,SPINE,orbit_cme_seed
+CT L-Spine w/o & w/ Contrast,72133,1.24,SPINE,orbit_cme_seed
+CT Abdomen w/o Contrast,74150,1.16,ABDOMEN/PELVIS,orbit_cme_seed
+CT Abdomen w/ Contrast,74160,1.24,ABDOMEN/PELVIS,orbit_cme_seed
+CT Abdomen w/o & w/ Contrast,74170,1.37,ABDOMEN/PELVIS,orbit_cme_seed
+CT Abdomen & Pelvis w/o Contrast,74176,1.70,ABDOMEN/PELVIS,orbit_cme_seed
+CT Abdomen & Pelvis w/ Contrast,74177,1.77,ABDOMEN/PELVIS,orbit_cme_seed
+CT Abdomen & Pelvis w/o & w/ Contrast,74178,1.96,ABDOMEN/PELVIS,orbit_cme_seed
+CT Pelvis w/o Contrast,72192,1.06,ABDOMEN/PELVIS,orbit_cme_seed
+CT Pelvis w/ Contrast,72193,1.13,ABDOMEN/PELVIS,orbit_cme_seed
+CT Pelvis w/o & w/ Contrast,72194,1.19,ABDOMEN/PELVIS,orbit_cme_seed
+CT Colonography Diagnostic,74261,2.34,ABDOMEN/PELVIS,orbit_cme_seed
+CT Colonography Screening,74263,2.22,ABDOMEN/PELVIS,orbit_cme_seed
+CT Upper Extremity w/o Contrast,73200,0.98,EXTREMITY,orbit_cme_seed
+CT Upper Extremity w/ Contrast,73201,1.13,EXTREMITY,orbit_cme_seed
+CT Upper Extremity w/o & w/ Contrast,73202,1.19,EXTREMITY,orbit_cme_seed
+CT Lower Extremity w/o Contrast,73700,0.98,EXTREMITY,orbit_cme_seed
+CT Lower Extremity w/ Contrast,73701,1.13,EXTREMITY,orbit_cme_seed
+CT Lower Extremity w/o & w/ Contrast,73702,1.19,EXTREMITY,orbit_cme_seed
+CT Calcium Score,75571,0.57,CARDIAC,orbit_cme_seed
+CT Heart w/ 3D,75572,1.71,CARDIAC,orbit_cme_seed
+CT Heart w/ 3D + Congenital,75573,2.49,CARDIAC,orbit_cme_seed
+MRI Brain w/o Contrast,70551,1.44,BRAIN,orbit_cme_seed
+MRI Brain w/ Contrast,70552,1.74,BRAIN,orbit_cme_seed
+MRI Brain w/o & w/ Contrast,70553,2.23,BRAIN,orbit_cme_seed
+MRI Brain Functional (fMRI),70554,2.06,BRAIN,orbit_cme_seed
+MRI Brain Functional w/ Physician,70555,2.48,BRAIN,orbit_cme_seed
+MRI Brain Epilepsy w/o,70557,2.83,BRAIN,orbit_cme_seed
+MRI Brain Epilepsy w/,70558,3.12,BRAIN,orbit_cme_seed
+MRI Brain Epilepsy w/o & w/,70559,3.12,BRAIN,orbit_cme_seed
+MRI IACs/Orbits/Face/Neck w/o Contrast,70540,1.32,HEAD/NECK,orbit_cme_seed
+MRI IACs/Orbits/Face/Neck w/ Contrast,70542,1.58,HEAD/NECK,orbit_cme_seed
+MRI IACs/Orbits/Face/Neck w/o & w/ Contrast,70543,2.10,HEAD/NECK,orbit_cme_seed
+MRA Head w/o Contrast,70544,1.17,MRA,orbit_cme_seed
+MRA Head w/ Contrast,70545,1.17,MRA,orbit_cme_seed
+MRA Head w/o & w/ Contrast,70546,1.44,MRA,orbit_cme_seed
+MRA Neck w/o Contrast,70547,1.17,MRA,orbit_cme_seed
+MRA Neck w/ Contrast,70548,1.46,MRA,orbit_cme_seed
+MRA Neck w/o & w/ Contrast,70549,1.76,MRA,orbit_cme_seed
+MRA Chest,71555,1.76,MRA,orbit_cme_seed
+MRA Abdomen,74185,1.76,MRA,orbit_cme_seed
+MRA Pelvis,72198,1.76,MRA,orbit_cme_seed
+MRA Upper Extremity,73225,1.69,MRA,orbit_cme_seed
+MRA Lower Extremity,73725,1.77,MRA,orbit_cme_seed
+MRI C-Spine w/o Contrast,72141,1.44,SPINE,orbit_cme_seed
+MRI C-Spine w/ Contrast,72142,1.74,SPINE,orbit_cme_seed
+MRI C-Spine w/o & w/ Contrast,72156,2.23,SPINE,orbit_cme_seed
+MRI T-Spine w/o Contrast,72146,1.44,SPINE,orbit_cme_seed
+MRI T-Spine w/ Contrast,72147,1.74,SPINE,orbit_cme_seed
+MRI T-Spine w/o & w/ Contrast,72157,2.23,SPINE,orbit_cme_seed
+MRI L-Spine w/o Contrast,72148,1.44,SPINE,orbit_cme_seed
+MRI L-Spine w/ Contrast,72149,1.74,SPINE,orbit_cme_seed
+MRI L-Spine w/o & w/ Contrast,72158,2.23,SPINE,orbit_cme_seed
+MRI Chest w/o Contrast,71550,1.42,CHEST,orbit_cme_seed
+MRI Chest w/ Contrast,71551,1.69,CHEST,orbit_cme_seed
+MRI Chest w/o & w/ Contrast,71552,2.20,CHEST,orbit_cme_seed
+MRI Abdomen w/o Contrast,74181,1.42,ABDOMEN/PELVIS,orbit_cme_seed
+MRI Abdomen w/ Contrast,74182,1.69,ABDOMEN/PELVIS,orbit_cme_seed
+MRI Abdomen w/o & w/ Contrast,74183,2.15,ABDOMEN/PELVIS,orbit_cme_seed
+MRI Pelvis w/o Contrast,72195,1.42,ABDOMEN/PELVIS,orbit_cme_seed
+MRI Pelvis w/ Contrast,72196,1.69,ABDOMEN/PELVIS,orbit_cme_seed
+MRI Pelvis w/o & w/ Contrast,72197,2.15,ABDOMEN/PELVIS,orbit_cme_seed
+MRI Fetal Single Gestation,74712,2.93,ABDOMEN/PELVIS,orbit_cme_seed
+MRI Fetal Follow-Up,74713,1.80,ABDOMEN/PELVIS,orbit_cme_seed
+MRI Shoulder w/o Contrast,73221,1.32,MSK,orbit_cme_seed
+MRI Shoulder w/ Contrast,73222,1.58,MSK,orbit_cme_seed
+MRI Shoulder w/o & w/ Contrast,73223,2.10,MSK,orbit_cme_seed
+MRI Upper Extremity w/o Contrast,73218,1.32,MSK,orbit_cme_seed
+MRI Upper Extremity w/ Contrast,73219,1.58,MSK,orbit_cme_seed
+MRI Upper Extremity w/o & w/ Contrast,73220,2.10,MSK,orbit_cme_seed
+MRI Knee w/o Contrast,73721,1.32,MSK,orbit_cme_seed
+MRI Knee w/ Contrast,73722,1.58,MSK,orbit_cme_seed
+MRI Knee w/o & w/ Contrast,73723,2.10,MSK,orbit_cme_seed
+MRI Lower Extremity w/o Contrast,73718,1.32,MSK,orbit_cme_seed
+MRI Lower Extremity w/ Contrast,73719,1.58,MSK,orbit_cme_seed
+MRI Lower Extremity w/o & w/ Contrast,73720,2.10,MSK,orbit_cme_seed
+MRI Breast Unilateral w/o Contrast,77046,1.41,BREAST,orbit_cme_seed
+MRI Breast Bilateral w/o Contrast,77047,1.56,BREAST,orbit_cme_seed
+MRI Breast Unilateral w/o & w/ Contrast,77048,2.05,BREAST,orbit_cme_seed
+MRI Breast Bilateral w/o & w/ Contrast,77049,2.24,BREAST,orbit_cme_seed
+Cardiac MRI Morphology (w/o Contrast),75557,2.29,CARDIAC,orbit_cme_seed
+Cardiac MRI w/ Stress,75559,2.88,CARDIAC,orbit_cme_seed
+Cardiac MRI w/ Contrast (Comprehensive),75561,2.54,CARDIAC,orbit_cme_seed
+Cardiac MRI Stress w/ Contrast,75563,2.93,CARDIAC,orbit_cme_seed
+US Abdomen Complete,76700,0.79,ABDOMEN,orbit_cme_seed
+US Abdomen Limited,76705,0.58,ABDOMEN,orbit_cme_seed
+US AAA Screening,76706,0.54,ABDOMEN,orbit_cme_seed
+US Renal Complete,76770,0.72,ABDOMEN,orbit_cme_seed
+US Renal Limited,76775,0.57,ABDOMEN,orbit_cme_seed
+US Renal Transplant w/ Doppler,76776,0.74,ABDOMEN,orbit_cme_seed
+US Elastography Parenchyma,76981,0.58,ABDOMEN,orbit_cme_seed
+US Elastography Lesion,76982,0.58,ABDOMEN,orbit_cme_seed
+US Pelvis Complete,76856,0.67,PELVIS,orbit_cme_seed
+US Pelvis Limited,76857,0.49,PELVIS,orbit_cme_seed
+US Transvaginal Non-OB,76830,0.67,PELVIS,orbit_cme_seed
+US Sonohysterography,76831,0.70,PELVIS,orbit_cme_seed
+US Scrotum,76870,0.62,PELVIS,orbit_cme_seed
+US Transrectal,76872,0.65,PELVIS,orbit_cme_seed
+US Transrectal Prostate Volume,76873,1.51,PELVIS,orbit_cme_seed
+OB US < 14 Wks Single,76801,0.97,OB,orbit_cme_seed
+OB US < 14 Wks Each Addl,76802,0.81,OB,orbit_cme_seed
+OB US >= 14 Wks Single,76805,0.97,OB,orbit_cme_seed
+OB US >= 14 Wks Each Addl,76810,0.96,OB,orbit_cme_seed
+OB US Detailed (Anatomy Scan),76811,1.85,OB,orbit_cme_seed
+OB US Detailed Each Addl,76812,1.74,OB,orbit_cme_seed
+OB US Nuchal Translucency 1st,76813,1.15,OB,orbit_cme_seed
+OB US Nuchal Translucency Each Addl,76814,0.97,OB,orbit_cme_seed
+OB US Limited,76815,0.63,OB,orbit_cme_seed
+OB US Follow-Up,76816,0.83,OB,orbit_cme_seed
+OB US Transvaginal,76817,0.73,OB,orbit_cme_seed
+Biophysical Profile w/ NST,76818,1.02,OB,orbit_cme_seed
+Biophysical Profile w/o NST,76819,0.75,OB,orbit_cme_seed
+Doppler Velocimetry Umbilical,76820,0.49,OB,orbit_cme_seed
+Doppler Velocimetry Middle Cerebral,76821,0.68,CEREBRAL,orbit_cme_seed
+Fetal Echo Complete,76825,1.63,OB,orbit_cme_seed
+Fetal Echo Follow-Up,76826,0.81,OB,orbit_cme_seed
+Fetal Echo Doppler,76827,0.57,OB,orbit_cme_seed
+Fetal Echo Doppler Follow-Up,76828,0.55,OB,orbit_cme_seed
+US Thyroid/Neck,76536,0.55,THYROID/NECK,orbit_cme_seed
+US Breast Complete,76641,0.71,BREAST,orbit_cme_seed
+US Breast Limited,76642,0.66,BREAST,orbit_cme_seed
+US Chest,76604,0.58,CHEST,orbit_cme_seed
+US MSK Joint Complete,76881,0.88,MSK,orbit_cme_seed
+US MSK Soft Tissue Limited,76882,0.67,MSK,orbit_cme_seed
+US MSK Nerve Comprehensive,76883,1.18,MSK,orbit_cme_seed
+US Head (Echoencephalography),76506,0.61,PEDIATRIC,orbit_cme_seed
+US Spinal Canal,76800,1.10,PEDIATRIC,orbit_cme_seed
+US Infant Hips Dynamic,76885,0.72,PEDIATRIC,orbit_cme_seed
+US Infant Hips Static,76886,0.60,PEDIATRIC,orbit_cme_seed
+US Guidance Biopsy,76942,0.65,GUIDANCE,orbit_cme_seed
+US Guidance Vascular Access,76937,0.29,GUIDANCE,orbit_cme_seed
+US Guidance Tissue Ablation,76940,1.95,GUIDANCE,orbit_cme_seed
+US Guidance Intraoperative,76998,0.89,GUIDANCE,orbit_cme_seed
+Carotid Duplex US Bilateral,93880,0.78,CAROTID,orbit_cme_seed
+Carotid Duplex US Unilateral/Limited,93882,0.49,CAROTID,orbit_cme_seed
+Transcranial Doppler (TCD) Complete,93886,0.88,CAROTID,orbit_cme_seed
+Transcranial Doppler (TCD) Limited,93888,0.71,CAROTID,orbit_cme_seed
+TCD Emboli Detection w/o Injection,93892,1.12,CAROTID,orbit_cme_seed
+TCD w/ Venous-Arterial Shunt,93893,1.12,CAROTID,orbit_cme_seed
+Extremity Arterial 2 Levels,93922,0.24,ARTERIAL,orbit_cme_seed
+Extremity Arterial 3+ Levels,93923,0.44,ARTERIAL,orbit_cme_seed
+Lower Extremity Arterial Bilateral,93924,0.49,ARTERIAL,orbit_cme_seed
+Lower Extremity Arterial Duplex Bilateral,93925,0.78,ARTERIAL,orbit_cme_seed
+Lower Extremity Arterial Duplex Unilateral,93926,0.49,ARTERIAL,orbit_cme_seed
+Upper Extremity Arterial Duplex Bilateral,93930,0.78,ARTERIAL,orbit_cme_seed
+Upper Extremity Arterial Duplex Unilateral,93931,0.49,ARTERIAL,orbit_cme_seed
+Lower Extremity Venous Duplex Bilateral,93970,0.68,VENOUS,orbit_cme_seed
+Lower Extremity Venous Duplex Unilateral,93971,0.44,VENOUS,orbit_cme_seed
+Duplex Abdomen/Pelvis/Retroperitoneal Complete,93975,1.13,VISCERAL,orbit_cme_seed
+Duplex Abdomen/Pelvis/Retroperitoneal Limited,93976,0.78,VISCERAL,orbit_cme_seed
+Duplex Aorta/IVC/Iliac Complete,93978,0.78,VISCERAL,orbit_cme_seed
+Duplex Aorta/IVC/Iliac Unilateral,93979,0.49,VISCERAL,orbit_cme_seed
+Duplex Hemodialysis Access Complete Bilateral,93985,0.78,VISCERAL,orbit_cme_seed
+Duplex Hemodialysis Access Complete Unilateral,93986,0.49,VISCERAL,orbit_cme_seed
+Duplex Dialysis Graft/Fistula,93990,0.49,VISCERAL,orbit_cme_seed
+Penile Vascular Study Complete,93980,1.22,VISCERAL,orbit_cme_seed
+Penile Vascular Study Follow-Up,93981,0.43,VISCERAL,orbit_cme_seed
+Dx Mammogram Unilateral,77065,0.79,DIAGNOSTIC,orbit_cme_seed
+Dx Mammogram Bilateral,77066,0.98,DIAGNOSTIC,orbit_cme_seed
+Screening Mammogram Bilateral,77067,0.74,SCREENING,orbit_cme_seed
+Breast Tomosynthesis (3D) Bi,77063,0.59,SCREENING,orbit_cme_seed
+Mammary Ductogram,77053,0.35,DIAGNOSTIC,orbit_cme_seed
+DXA Bone Density Axial,77080,0.20,DXA,orbit_cme_seed
+DXA Bone Density Appendicular,77081,0.20,DXA,orbit_cme_seed
+DXA w/ VFA,77085,0.29,DXA,orbit_cme_seed
+VFA via DXA,77086,0.17,DXA,orbit_cme_seed
+Bone Age Study,77072,0.19,DXA,orbit_cme_seed
+Bone Scan Limited,78300,0.60,BONE,orbit_cme_seed
+Bone Scan Multiple Areas,78305,0.81,BONE,orbit_cme_seed
+Bone Scan Whole Body,78306,0.84,BONE,orbit_cme_seed
+Bone Scan 3-Phase,78315,0.99,BONE,orbit_cme_seed
+Myocardial Perfusion SPECT Single,78451,1.35,CARDIAC,orbit_cme_seed
+Myocardial Perfusion SPECT Multiple,78452,1.58,CARDIAC,orbit_cme_seed
+Myocardial PET w/ CT Single,78429,1.72,CARDIAC,orbit_cme_seed
+Myocardial PET Rest & Stress w/ CT,78431,1.85,CARDIAC,orbit_cme_seed
+Myocardial PET w/ CT Multiple,78430,1.63,CARDIAC,orbit_cme_seed
+Myocardial PET w/o CT Single,78432,2.02,CARDIAC,orbit_cme_seed
+Myocardial PET w/o CT Multiple,78433,2.20,CARDIAC,orbit_cme_seed
+Myocardial PET R&S w/o CT,78434,0.61,CARDIAC,orbit_cme_seed
+MUGA Single,78472,0.96,CARDIAC,orbit_cme_seed
+MUGA Multiple,78473,1.43,CARDIAC,orbit_cme_seed
+Cardiac Shunt,78466,0.67,CARDIAC,orbit_cme_seed
+Cardiac Flow Imaging,78468,0.78,CARDIAC,orbit_cme_seed
+Cardiac Function Add-On,78469,0.90,CARDIAC,orbit_cme_seed
+V/Q Ventilation Only,78579,0.48,LUNG,orbit_cme_seed
+V/Q Perfusion Only,78580,0.72,LUNG,orbit_cme_seed
+V/Q Scan,78582,1.04,LUNG,orbit_cme_seed
+Lung Perfusion Quantitative,78597,0.73,LUNG,orbit_cme_seed
+Lung Perfusion Quantitative + Ventilation,78598,0.83,LUNG,orbit_cme_seed
+Thyroid Uptake Single,78012,0.19,THYROID,orbit_cme_seed
+Thyroid Scan w/ Flow,78013,0.36,THYROID,orbit_cme_seed
+Thyroid Scan w/ Flow & Uptake,78014,0.49,THYROID,orbit_cme_seed
+Thyroid Metastatic Survey Limited,78015,0.65,THYROID,orbit_cme_seed
+Thyroid Metastatic Survey Additional Studies,78016,0.80,THYROID,orbit_cme_seed
+Thyroid Metastatic Survey Whole Body,78018,0.84,THYROID,orbit_cme_seed
+Parathyroid Planar,78071,1.17,THYROID,orbit_cme_seed
+Parathyroid SPECT/CT,78072,1.56,THYROID,orbit_cme_seed
+Liver Scan Static,78201,0.43,GI,orbit_cme_seed
+Liver Scan w/ Flow,78202,0.50,GI,orbit_cme_seed
+Liver/Spleen Scan Static,78215,0.48,GI,orbit_cme_seed
+Liver/Spleen Scan w/ Flow,78216,0.56,GI,orbit_cme_seed
+Hepatobiliary (HIDA) Scan,78226,0.72,GI,orbit_cme_seed
+Hepatobiliary (HIDA) w/ CCK,78227,0.88,GI,orbit_cme_seed
+Gastric Emptying Study (GES),78264,0.77,GI,orbit_cme_seed
+Gastric Emptying w/ Small Bowel,78265,0.96,GI,orbit_cme_seed
+Gastric Emptying w/ Small + Large Bowel,78266,1.05,GI,orbit_cme_seed
+Meckel Scan/GI Bleed,78278,0.97,GI,orbit_cme_seed
+Tagged RBC Scan (GI Bleed),78290,0.66,GI,orbit_cme_seed
+Renal Scan Static,78700,0.44,RENAL,orbit_cme_seed
+Renal Scan w/ Flow,78707,0.94,RENAL,orbit_cme_seed
+MAG3 Lasix Renogram,78708,1.18,RENAL,orbit_cme_seed
+Renal Scan w/ Drug Addl,78709,1.37,RENAL,orbit_cme_seed
+Renal Function (GFR),78725,0.37,RENAL,orbit_cme_seed
+Renal Transplant Scan,78730,0.15,RENAL,orbit_cme_seed
+Ureteral Reflux Study,78740,0.56,RENAL,orbit_cme_seed
+PET Limited Area,78811,1.50,PET,orbit_cme_seed
+PET Skull to Thigh,78812,1.88,PET,orbit_cme_seed
+PET Whole Body,78813,1.95,PET,orbit_cme_seed
+PET/CT Limited Area,78814,2.15,PET,orbit_cme_seed
+PET/CT Skull to Thigh,78815,2.38,PET,orbit_cme_seed
+PET/CT Whole Body,78816,2.44,PET,orbit_cme_seed
+Brain PET,78608,1.46,BRAIN,orbit_cme_seed
+Brain PET Metabolic,78609,1.46,BRAIN,orbit_cme_seed
+SPECT/CT Single Area,78830,1.45,SPECT,orbit_cme_seed
+SPECT 2+ Areas,78831,1.77,SPECT,orbit_cme_seed
+SPECT/CT 2+ Areas,78832,2.07,SPECT,orbit_cme_seed
+Adrenal Scan,78070,0.78,OTHER NM,orbit_cme_seed
+Adrenal Scan w/ Drug,78075,0.72,OTHER NM,orbit_cme_seed
+Bone Marrow Scan Limited,78104,0.78,BONE MARROW,orbit_cme_seed
+Spleen Scan,78185,0.39,BONE MARROW,orbit_cme_seed
+Lymph Scan,78195,1.17,BONE MARROW,orbit_cme_seed
+Salivary Gland Scan,78230,0.44,BONE MARROW,orbit_cme_seed
+Salivary Gland Scan Serial,78231,0.51,BONE MARROW,orbit_cme_seed
+Salivary Gland Scan w/ Drug,78232,0.46,BONE MARROW,orbit_cme_seed
+Bone Density NM,78350,0.21,BONE MARROW,orbit_cme_seed
+Tumor Localization Limited,78800,0.62,BONE MARROW,orbit_cme_seed
+Tumor Localization Multiple Areas,78801,0.71,BONE MARROW,orbit_cme_seed
+Tumor Localization Whole Body,78802,0.78,BONE MARROW,orbit_cme_seed
+Tumor SPECT,78803,1.06,BONE MARROW,orbit_cme_seed
+Tumor SPECT/CT,78804,0.98,BONE MARROW,orbit_cme_seed
+Brain Scan Static,78601,0.50,BRAIN,orbit_cme_seed
+Brain Scan w/ Flow,78605,0.52,BRAIN,orbit_cme_seed
+Brain Scan w/ Flow Quantitative,78606,0.62,BRAIN,orbit_cme_seed
+Brain Shunt Study,78610,0.29,BRAIN,orbit_cme_seed
+CSF Flow Study,78630,0.66,BRAIN,orbit_cme_seed
+CSF Flow Study (Cisternogram),78635,0.59,BRAIN,orbit_cme_seed
+CSF Shunt Study,78645,0.56,BRAIN,orbit_cme_seed
+CSF Leakage,78650,0.59,BRAIN,orbit_cme_seed
+Fluoroscopy < 1 Hour,76000,0.30,GENERAL,orbit_cme_seed
+Esophagram/Barium Swallow,74220,0.59,GI,orbit_cme_seed
+Modified Barium Swallow (MBS),74230,0.52,GI,orbit_cme_seed
+Upper GI (UGI) Single Contrast,74240,0.78,GI,orbit_cme_seed
+Upper GI (UGI) Double Contrast,74246,0.88,GI,orbit_cme_seed
+UGI w/ SBFT,74248,0.68,GI,orbit_cme_seed
+Small Bowel Follow-Through (SBFT),74250,0.79,GI,orbit_cme_seed
+Barium Enema (BE) Single Contrast,74270,1.01,GI,orbit_cme_seed
+Barium Enema (BE) Double Contrast,74280,1.23,GI,orbit_cme_seed
+Barium Enema w/ Air Contrast,74283,1.97,GI,orbit_cme_seed
+Cholangiogram IOC,74300,0.26,GI,orbit_cme_seed
+Biliary Drain (T-Tube) Injection,74328,0.46,GI,orbit_cme_seed
+Biliary Drain (T-Tube) Follow-Through,74329,0.46,GI,orbit_cme_seed
+Biliary Manometry,74330,0.55,GI,orbit_cme_seed
+Fluoro Guidance GI Tube,74340,0.53,GI,orbit_cme_seed
+Pharynx Swallow Study,70370,0.31,GI,orbit_cme_seed
+Intravenous Pyelogram (IVP),74400,0.48,GU,orbit_cme_seed
+IVP Infusion,74410,0.48,GU,orbit_cme_seed
+Retrograde Pyelogram,74420,0.51,GU,orbit_cme_seed
+Cystogram,74430,0.31,GU,orbit_cme_seed
+VCUG/Urethrogram,74450,0.32,GU,orbit_cme_seed
+VCUG Voiding Phase Only,74455,0.32,GU,orbit_cme_seed
+Hysterosalpingogram (HSG),74742,0.59,GU,orbit_cme_seed
+HSG Radiologic Supervision & Interpretation,74740,0.37,GU,orbit_cme_seed
+Fluoro Guidance Central Line,77001,0.37,GUIDANCE,orbit_cme_seed
+Fluoro Needle Localization,77002,0.53,GUIDANCE,orbit_cme_seed
+Fluoro Guidance Spine Injection,77003,0.59,GUIDANCE,orbit_cme_seed
+CT Guidance Localization,77011,1.18,GUIDANCE,orbit_cme_seed
+CT Guidance Biopsy,77012,1.46,GUIDANCE,orbit_cme_seed
+CT Guidance Ablation,77013,3.89,GUIDANCE,orbit_cme_seed
+MRI Guidance Needle Localization,77021,1.46,GUIDANCE,orbit_cme_seed
+MRI Guidance Tissue Ablation,77022,4.13,GUIDANCE,orbit_cme_seed
+Aortogram Abdominal,75625,1.40,ANGIO,orbit_cme_seed
+Aortogram w/ LE Runoff,75630,1.95,ANGIO,orbit_cme_seed
+Arteriogram Extremity,75710,1.71,ANGIO,orbit_cme_seed
+Arteriogram Bilateral,75716,1.92,ANGIO,orbit_cme_seed
+Visceral Arteriogram,75726,2.00,ANGIO,orbit_cme_seed
+Arteriogram Adrenal,75731,1.11,ANGIO,orbit_cme_seed
+Arteriogram Renal,75733,1.28,ANGIO,orbit_cme_seed
+Arteriogram Pelvic,75736,1.11,ANGIO,orbit_cme_seed
+Arteriogram Pulmonary Unilateral,75741,1.28,ANGIO,orbit_cme_seed
+Arteriogram Pulmonary Bilateral,75743,1.62,ANGIO,orbit_cme_seed
+Arteriogram Pulmonary Follow-Up,75746,1.11,ANGIO,orbit_cme_seed
+Arteriogram Internal Mammary,75756,1.11,ANGIO,orbit_cme_seed
+Arteriogram Addl Vessel,75774,0.98,ANGIO,orbit_cme_seed
+Venogram Extremity,75820,1.02,VENOUS,orbit_cme_seed
+Venogram Bilateral,75822,1.44,VENOUS,orbit_cme_seed
+Venogram Inferior Vena Cava,75825,1.11,VENOUS,orbit_cme_seed
+Venogram Superior Vena Cava,75827,1.11,VENOUS,orbit_cme_seed
+Venogram Renal Unilateral,75831,1.11,VENOUS,orbit_cme_seed
+Venogram Renal Bilateral,75833,1.45,VENOUS,orbit_cme_seed
+Venogram Adrenal Unilateral,75840,1.11,VENOUS,orbit_cme_seed
+Venogram Sagittal Sinus,75860,1.11,VENOUS,orbit_cme_seed
+Venogram Superior Sagittal Sinus,75870,1.11,VENOUS,orbit_cme_seed
+Venogram Epidural,75872,1.11,VENOUS,orbit_cme_seed
+Venogram Orbital,75880,0.68,VENOUS,orbit_cme_seed
+Venogram Hepatic w/ Wedge Pressure,75891,1.11,VENOUS,orbit_cme_seed
+Venogram Hepatic w/ Hemodynamics,75893,0.53,VENOUS,orbit_cme_seed
+Transcatheter Therapy Imaging,75894,2.19,IR,orbit_cme_seed
+Follow-Up Angiography,75898,1.80,IR,orbit_cme_seed
+Mechanical Thrombectomy Imaging 1st,75901,0.48,IR,orbit_cme_seed
+Mechanical Thrombectomy Imaging Addl,75902,0.38,IR,orbit_cme_seed
+Catheter Change Fluoro,75984,0.81,IR,orbit_cme_seed
+Abscess Drainage Fluoro,75989,1.16,IR,orbit_cme_seed
+Balloon Occlusion Head/Neck,61623,9.70,NEURO IR,orbit_cme_seed
+Embolization CNS,61624,19.50,NEURO IR,orbit_cme_seed
+Embolization Non-CNS,61626,14.93,NEURO IR,orbit_cme_seed
+Intracranial Angioplasty,61630,21.52,NEURO IR,orbit_cme_seed
+Intracranial Angioplasty w/ Stent,61635,23.67,NEURO IR,orbit_cme_seed
+IC Vasospasm Treatment Initial,61640,12.32,NEURO IR,orbit_cme_seed
+IC Vasospasm Treatment Addl Same Territory,61641,4.33,NEURO IR,orbit_cme_seed
+IC Vasospasm Treatment Addl Diff Territory,61642,8.66,NEURO IR,orbit_cme_seed
+IC Mechanical Thrombectomy,61645,14.63,NEURO IR,orbit_cme_seed
+IC Prolonged Drug Admin 1st,61650,9.75,NEURO IR,orbit_cme_seed
+IC Prolonged Drug Admin Addl,61651,4.14,NEURO IR,orbit_cme_seed
+Arterial Puncture,36100,2.94,ARTERIAL ACCESS,orbit_cme_seed
+Arterial Puncture Upper/Lower Ext,36140,1.72,ARTERIAL ACCESS,orbit_cme_seed
+Aortic Puncture,36160,2.46,ARTERIAL ACCESS,orbit_cme_seed
+Catheter Placement Aorta,36200,2.70,ARTERIAL ACCESS,orbit_cme_seed
+Selective Catheter 1st Order,36215,4.07,ARTERIAL CATH,orbit_cme_seed
+Selective Catheter 2nd Order,36216,5.14,ARTERIAL CATH,orbit_cme_seed
+Selective Catheter 3rd Order,36217,6.13,ARTERIAL CATH,orbit_cme_seed
+Selective Catheter Each Addl,36218,0.98,ARTERIAL CATH,orbit_cme_seed
+Selective Catheter Abd/LE 1st Order,36245,4.53,ARTERIAL CATH,orbit_cme_seed
+Selective Catheter Abd/LE 2nd Order,36246,4.89,ARTERIAL CATH,orbit_cme_seed
+Selective Catheter Abd/LE 3rd Order,36247,5.89,ARTERIAL CATH,orbit_cme_seed
+Selective Catheter Abd/LE Addl,36248,0.98,ARTERIAL CATH,orbit_cme_seed
+Selective Renal Cath Unilateral,36251,4.97,ARTERIAL CATH,orbit_cme_seed
+Selective Renal Cath Bilateral,36252,6.57,ARTERIAL CATH,orbit_cme_seed
+Selective Renal Cath Super-Selective Uni,36253,7.12,ARTERIAL CATH,orbit_cme_seed
+Selective Renal Cath Super-Selective Bi,36254,7.70,ARTERIAL CATH,orbit_cme_seed
+Venous Catheter 1st Order,36010,2.13,VENOUS ACCESS,orbit_cme_seed
+Venous Catheter 2nd Order,36011,3.06,VENOUS ACCESS,orbit_cme_seed
+Venous Catheter Beyond 2nd Order,36012,3.42,VENOUS ACCESS,orbit_cme_seed
+Non-Tunneled CVC <5yr,36555,1.88,CENTRAL LINES,orbit_cme_seed
+Non-Tunneled CVC 5yr+,36556,1.71,CENTRAL LINES,orbit_cme_seed
+Tunneled CVC <5yr,36557,4.77,CENTRAL LINES,orbit_cme_seed
+Tunneled CVC 5yr+,36558,4.48,CENTRAL LINES,orbit_cme_seed
+PICC <5yr w/o Imaging,36568,2.06,CENTRAL LINES,orbit_cme_seed
+PICC 5yr+ w/o Imaging,36569,1.85,CENTRAL LINES,orbit_cme_seed
+PICC w/ Port <5yr,36570,4.98,CENTRAL LINES,orbit_cme_seed
+PICC w/ Port 5yr+,36571,4.96,CENTRAL LINES,orbit_cme_seed
+Replace CVAD Catheter Only,36580,1.28,CENTRAL LINES,orbit_cme_seed
+Replace Tunneled CVC,36581,3.15,CENTRAL LINES,orbit_cme_seed
+Replace Tunneled CVC w/ Port,36582,4.87,CENTRAL LINES,orbit_cme_seed
+Replace Tunneled CVC w/ Port (Separate Site),36583,4.91,CENTRAL LINES,orbit_cme_seed
+Replace PICC,36584,1.17,CENTRAL LINES,orbit_cme_seed
+Replace PICC w/ Port,36585,4.48,CENTRAL LINES,orbit_cme_seed
+Remove Tunneled CVC,36589,2.22,CENTRAL LINES,orbit_cme_seed
+Remove Tunneled CVC w/ Port,36590,3.02,CENTRAL LINES,orbit_cme_seed
+Mechanical Thrombectomy Arterial 1st,37184,8.20,THROMBECTOMY,orbit_cme_seed
+Mechanical Thrombectomy Arterial Addl,37185,3.20,THROMBECTOMY,orbit_cme_seed
+Secondary Thrombectomy,37186,4.80,THROMBECTOMY,orbit_cme_seed
+Mechanical Thrombectomy Venous,37187,7.59,THROMBECTOMY,orbit_cme_seed
+Mechanical Thrombectomy Venous Addl,37188,5.32,THROMBECTOMY,orbit_cme_seed
+Thrombolysis Arterial Initial,37211,7.56,THROMBOLYSIS,orbit_cme_seed
+Thrombolysis Venous Initial,37212,6.64,THROMBOLYSIS,orbit_cme_seed
+Thrombolysis Art/Ven Subsequent,37213,4.63,THROMBOLYSIS,orbit_cme_seed
+Thrombolysis Cessation/Cath Removal,37214,2.43,THROMBOLYSIS,orbit_cme_seed
+Embolization Venous,37241,8.53,EMBOLIZATION,orbit_cme_seed
+Embolization Arterial,37242,9.56,EMBOLIZATION,orbit_cme_seed
+Embolization Organ,37243,11.45,EMBOLIZATION,orbit_cme_seed
+Embolization Hemorrhage,37244,13.41,EMBOLIZATION,orbit_cme_seed
+Balloon Angioplasty Arterial 1st,37246,6.83,ANGIOPLASTY/STENT,orbit_cme_seed
+Balloon Angioplasty Arterial Addl,37247,3.41,ANGIOPLASTY/STENT,orbit_cme_seed
+Balloon Angioplasty Venous 1st,37248,5.85,ANGIOPLASTY/STENT,orbit_cme_seed
+Balloon Angioplasty Venous Addl,37249,2.90,ANGIOPLASTY/STENT,orbit_cme_seed
+Stent Placement 1st Artery,37236,8.53,ANGIOPLASTY/STENT,orbit_cme_seed
+Stent Placement Addl Artery,37237,4.14,ANGIOPLASTY/STENT,orbit_cme_seed
+Stent Placement 1st Same Vessel,37238,5.89,ANGIOPLASTY/STENT,orbit_cme_seed
+Stent Placement Addl Same Vessel,37239,2.90,ANGIOPLASTY/STENT,orbit_cme_seed
+IVC Filter Insertion,37191,4.35,IVC FILTER,orbit_cme_seed
+IVC Filter Repositioning,37192,6.92,IVC FILTER,orbit_cme_seed
+IVC Filter Retrieval,37193,6.92,IVC FILTER,orbit_cme_seed
+Endovenous RF Ablation 1st Vein,36475,5.17,VEIN ABLATION,orbit_cme_seed
+Endovenous RF Ablation Addl Vein,36476,2.58,VEIN ABLATION,orbit_cme_seed
+Endovenous Laser Ablation 1st Vein,36478,5.17,VEIN ABLATION,orbit_cme_seed
+Endovenous Laser Ablation Addl Vein,36479,2.58,VEIN ABLATION,orbit_cme_seed
+Mechanochemical Ablation 1st Vein,36482,3.41,VEIN ABLATION,orbit_cme_seed
+Mechanochemical Ablation Addl Vein,36483,1.71,VEIN ABLATION,orbit_cme_seed
+Dialysis Circuit Catheterization,36901,3.28,DIALYSIS,orbit_cme_seed
+Dialysis Circuit w/ Angioplasty,36902,4.71,DIALYSIS,orbit_cme_seed
+Dialysis Circuit w/ Stent,36903,6.23,DIALYSIS,orbit_cme_seed
+Dialysis Circuit Thrombectomy,36904,7.31,DIALYSIS,orbit_cme_seed
+Dialysis Circuit Thrombectomy w/ Angioplasty,36905,8.78,DIALYSIS,orbit_cme_seed
+Dialysis Circuit Thrombectomy w/ Stent,36906,10.16,DIALYSIS,orbit_cme_seed
+TIPS Creation,37182,16.55,TIPS,orbit_cme_seed
+TIPS Revision,37183,7.55,TIPS,orbit_cme_seed
+TTE Congenital Complete,93303,1.27,TRANSTHORACIC,orbit_cme_seed
+TTE Congenital Follow-Up,93304,0.73,TRANSTHORACIC,orbit_cme_seed
+TTE w/ Doppler Complete,93306,1.42,TRANSTHORACIC,orbit_cme_seed
+TTE w/o Doppler Complete,93307,0.90,TRANSTHORACIC,orbit_cme_seed
+TTE Follow-Up / Limited,93308,0.52,TRANSTHORACIC,orbit_cme_seed
+TEE Complete,93312,2.24,TRANSESOPHAGEAL,orbit_cme_seed
+TEE w/ Probe,93314,1.80,TRANSESOPHAGEAL,orbit_cme_seed
+TEE Congenital Complete,93315,2.62,TRANSESOPHAGEAL,orbit_cme_seed
+TEE Congenital w/ Probe,93317,1.79,TRANSESOPHAGEAL,orbit_cme_seed
+TEE Intraoperative,93318,2.10,TRANSESOPHAGEAL,orbit_cme_seed
+Doppler Echo Complete,93320,0.37,DOPPLER,orbit_cme_seed
+Doppler Echo Limited,93321,0.15,DOPPLER,orbit_cme_seed
+Color Flow Doppler,93325,0.07,DOPPLER,orbit_cme_seed
+Stress Echo Only,93350,1.42,STRESS,orbit_cme_seed
+Stress Echo Complete,93351,1.71,STRESS,orbit_cme_seed
+XR SI Joints 1-2 Views,72200,0.17,BONE/JOINT,orbit_cme_seed
+XR SI Joints 3+ Views,72202,0.22,BONE/JOINT,orbit_cme_seed
+XR Sacrum & Coccyx,72220,0.17,BONE/JOINT,orbit_cme_seed
+Skeletal Survey Limited,77074,0.43,BONE SURVEY,orbit_cme_seed
+Skeletal Survey Complete,77075,0.54,BONE SURVEY,orbit_cme_seed
+Skeletal Survey Infant,77076,0.68,BONE SURVEY,orbit_cme_seed
+Joint Survey Single View,77077,0.32,BONE SURVEY,orbit_cme_seed
+Bone Length Study,77073,0.25,BONE STUDY,orbit_cme_seed
+MRI Bone Marrow Blood Supply,77084,1.56,BONE STUDY,orbit_cme_seed
+CT Bone Density Axial,77078,0.24,BONE DENSITY,orbit_cme_seed
+Bone Marrow Scan Limited,78102,0.54,BONE MARROW,orbit_cme_seed
+Bone Marrow Scan Multiple Areas,78103,0.73,BONE MARROW,orbit_cme_seed
+Arthrogram Shoulder,73040,0.53,ARTHROGRAPHY,orbit_cme_seed
+Arthrogram Elbow,73085,0.53,ARTHROGRAPHY,orbit_cme_seed
+Arthrogram Wrist,73115,0.53,ARTHROGRAPHY,orbit_cme_seed
+Arthrogram Hip,73525,0.53,ARTHROGRAPHY,orbit_cme_seed
+Arthrogram Knee,73580,0.58,ARTHROGRAPHY,orbit_cme_seed
+Arthrogram Ankle,73615,0.53,ARTHROGRAPHY,orbit_cme_seed
+Arthrogram TMJ,70332,0.53,ARTHROGRAPHY,orbit_cme_seed
+MRI TMJ,70336,1.44,TMJ,orbit_cme_seed
+Arch Aortogram (Thoracic Aorta Cath),36221,3.82,DIAGNOSTIC ANGIOGRAPHY,orbit_cme_seed
+Carotid/Innominate Cath Unilateral,36222,5.15,DIAGNOSTIC ANGIOGRAPHY,orbit_cme_seed
+Carotid/Innominate Cath Selective,36223,5.61,DIAGNOSTIC ANGIOGRAPHY,orbit_cme_seed
+Internal Carotid Cath Selective,36224,6.09,DIAGNOSTIC ANGIOGRAPHY,orbit_cme_seed
+Subclavian Artery Cath,36225,5.61,DIAGNOSTIC ANGIOGRAPHY,orbit_cme_seed
+Vertebral Artery Cath Selective,36226,6.09,DIAGNOSTIC ANGIOGRAPHY,orbit_cme_seed
+External Carotid Cath Addl,36227,2.04,DIAGNOSTIC ANGIOGRAPHY,orbit_cme_seed
+Intracranial Cath Superselective Addl,36228,4.14,DIAGNOSTIC ANGIOGRAPHY,orbit_cme_seed
+Carotid Stent Retrograde,37217,19.87,CAROTID STENTING,orbit_cme_seed
+Carotid Stent Antegrade,37218,14.38,CAROTID STENTING,orbit_cme_seed
+Image-Guided Peritoneal Catheter Insertion,49405,3.78,DRAINAGE/ACCESS,orbit_cme_seed
+Image-Guided Peritoneal Catheter Exchange,49406,2.70,DRAINAGE/ACCESS,orbit_cme_seed
+Image-Guided Peritoneal Catheter Removal via Snare,49407,4.07,DRAINAGE/ACCESS,orbit_cme_seed
+Image-Guided Abdominal Drain Insert (Percutaneous),49418,3.42,DRAINAGE/ACCESS,orbit_cme_seed
+FNA Biopsy w/ US Guidance 1st Lesion,10005,1.80,BIOPSY,orbit_cme_seed
+FNA Biopsy w/ US Guidance Each Addl,10006,1.00,BIOPSY,orbit_cme_seed
+FNA Biopsy w/ Fluoro Guidance 1st Lesion,10007,1.80,BIOPSY,orbit_cme_seed
+FNA Biopsy w/ Fluoro Guidance Each Addl,10008,1.00,BIOPSY,orbit_cme_seed
+FNA Biopsy w/ CT Guidance 1st Lesion,10009,2.05,BIOPSY,orbit_cme_seed
+FNA Biopsy w/ CT Guidance Each Addl,10010,1.22,BIOPSY,orbit_cme_seed
+FNA Biopsy w/ MRI Guidance 1st Lesion,10011,2.44,BIOPSY,orbit_cme_seed
+FNA Biopsy w/ MRI Guidance Each Addl,10012,1.22,BIOPSY,orbit_cme_seed
+FNA Biopsy w/o Imaging 1st Lesion,10021,1.20,BIOPSY,orbit_cme_seed
+FNA Biopsy w/o Imaging Each Addl,10004,0.60,BIOPSY,orbit_cme_seed
+Breast Biopsy w/ Stereotactic 1st,19081,3.18,BREAST INTERVENTION,orbit_cme_seed
+Breast Biopsy w/ Stereotactic Addl,19082,2.67,BREAST INTERVENTION,orbit_cme_seed
+Breast Biopsy w/ US Guidance 1st,19083,2.14,BREAST INTERVENTION,orbit_cme_seed
+Breast Biopsy w/ US Guidance Addl,19084,1.63,BREAST INTERVENTION,orbit_cme_seed
+Breast Biopsy w/ MRI Guidance 1st,19085,4.49,BREAST INTERVENTION,orbit_cme_seed
+Breast Biopsy w/ MRI Guidance Addl,19086,3.98,BREAST INTERVENTION,orbit_cme_seed
+Breast Localization Percutaneous 1st,19281,1.73,BREAST INTERVENTION,orbit_cme_seed
+Breast Localization Percutaneous Addl,19282,1.32,BREAST INTERVENTION,orbit_cme_seed
+Breast Localization w/ Stereotactic 1st,19283,2.19,BREAST INTERVENTION,orbit_cme_seed
+Breast Localization w/ Stereotactic Addl,19284,1.68,BREAST INTERVENTION,orbit_cme_seed
+Breast Localization w/ US Guidance 1st,19285,1.73,BREAST INTERVENTION,orbit_cme_seed
+Breast Localization w/ US Guidance Addl,19286,1.32,BREAST INTERVENTION,orbit_cme_seed
+Breast Localization w/ MRI Guidance 1st,19287,3.64,BREAST INTERVENTION,orbit_cme_seed
+Breast Localization w/ MRI Guidance Addl,19288,3.13,BREAST INTERVENTION,orbit_cme_seed
+Breast Intact Specimen Tomo Image,19296,0.28,BREAST INTERVENTION,orbit_cme_seed
+Breast Intact Specimen Digital Image,19297,0.20,BREAST INTERVENTION,orbit_cme_seed
+Aspiration of Abscess/Cyst Simple,10160,1.22,ASPIRATION/DRAINAGE,orbit_cme_seed
+Image-Guided Fluid Collection Drain,10030,2.78,ASPIRATION/DRAINAGE,orbit_cme_seed
+Percutaneous Transhepatic Biliary Stent,75970,1.51,BILIARY,orbit_cme_seed
+Cholecystostomy Percutaneous,47490,7.06,BILIARY,orbit_cme_seed
+Percutaneous Transhepatic Cholangiogram,47531,2.89,BILIARY,orbit_cme_seed
+Percutaneous Biliary Catheter Placement,47532,7.74,BILIARY,orbit_cme_seed
+Percutaneous Biliary Catheter Placement w/ Internal-External,47533,8.97,BILIARY,orbit_cme_seed
+Percutaneous External Biliary Drain,47534,6.53,BILIARY,orbit_cme_seed
+Percutaneous Biliary Catheter Conversion,47535,5.36,BILIARY,orbit_cme_seed
+Percutaneous Biliary Catheter Exchange,47536,2.89,BILIARY,orbit_cme_seed
+Percutaneous Biliary Stent Removal/Replace,47537,5.73,BILIARY,orbit_cme_seed
+Percutaneous Biliary Balloon Dilation,47538,3.88,BILIARY,orbit_cme_seed
+Percutaneous Biliary Lithotripsy,47539,4.25,BILIARY,orbit_cme_seed
+Percutaneous Biliary Biopsy,47540,3.88,BILIARY,orbit_cme_seed
+Percutaneous Biliary Placement Stent,47541,7.74,BILIARY,orbit_cme_seed
+Percutaneous Biliary Dilation w/ Stent,47542,5.36,BILIARY,orbit_cme_seed
+Percutaneous Biliary Endoscopy,47543,5.36,BILIARY,orbit_cme_seed
+Percutaneous Biliary Removal of Calculus,47544,4.98,BILIARY,orbit_cme_seed
+Nephrostomy Tube Removal w/ Placement,50382,5.81,RENAL/GU,orbit_cme_seed
+Nephrostomy Tube Removal w/ Ureteral Stent,50384,7.12,RENAL/GU,orbit_cme_seed
+Nephrostomy Tube Conversion to Nephroureteral,50385,6.15,RENAL/GU,orbit_cme_seed
+Nephrostomy Tube Conversion w/ Ureteral Stent,50386,7.12,RENAL/GU,orbit_cme_seed
+Nephrostomy Tube Removal w/ Balloon Dilation,50387,6.68,RENAL/GU,orbit_cme_seed
+Nephrostomy Tube Removal Only (Simple),50389,1.22,RENAL/GU,orbit_cme_seed
+Percutaneous Renal Cyst Aspiration,50390,2.55,RENAL/GU,orbit_cme_seed
+Percutaneous Nephrostomy Catheter Insert,50392,5.33,RENAL/GU,orbit_cme_seed
+Percutaneous Nephrostomy w/ Ureteral Catheter,50393,7.21,RENAL/GU,orbit_cme_seed
+Percutaneous Nephrostomy Tube Injection,50394,1.10,RENAL/GU,orbit_cme_seed
+Percutaneous Nephrostomy w/ Balloon Dilation,50395,6.73,RENAL/GU,orbit_cme_seed
+Percutaneous Mantle Catheter,50396,4.98,RENAL/GU,orbit_cme_seed
+Percutaneous Nephrostomy Tube Exchange,50430,2.89,RENAL/GU,orbit_cme_seed
+Percutaneous Nephrostomy Tube Exchange w/ Ureteral Catheter,50431,3.84,RENAL/GU,orbit_cme_seed
+Percutaneous Nephrostomy (New Access),50432,5.50,RENAL/GU,orbit_cme_seed
+Percutaneous Nephropyelostomy (New Access),50433,6.43,RENAL/GU,orbit_cme_seed
+Percutaneous Renal Stent via Nephrostomy,50434,4.31,RENAL/GU,orbit_cme_seed
+Percutaneous Nephrolithotomy Access,50435,8.78,RENAL/GU,orbit_cme_seed
+Percutaneous Nephrolithotomy Dilation,50436,3.50,RENAL/GU,orbit_cme_seed
+Percutaneous Nephrolithotomy Balloon Dilation,50437,4.50,RENAL/GU,orbit_cme_seed
+Percutaneous Renal Endoscopy,50606,3.00,RENAL/GU,orbit_cme_seed
+Percutaneous Ureteral Stent Placement,50693,5.89,RENAL/GU,orbit_cme_seed
+Percutaneous Ureteral Stent Placement w/ Dilation,50694,6.80,RENAL/GU,orbit_cme_seed
+Percutaneous Ureteral Stent Placement Bilateral,50695,8.44,RENAL/GU,orbit_cme_seed
+Sacroiliac Joint Injection w/ Fluoro,27096,1.44,MSK INTERVENTION,orbit_cme_seed
+Lumbar Puncture Diagnostic,62270,1.44,MSK INTERVENTION,orbit_cme_seed
+Lumbar Drain CSF,62272,1.71,MSK INTERVENTION,orbit_cme_seed
+Nerve Block Sciatic w/ Image Guidance,64451,1.27,MSK INTERVENTION,orbit_cme_seed
+Nerve Block Genicular w/ Image Guidance,64454,1.42,MSK INTERVENTION,orbit_cme_seed
+RF Ablation Genicular Nerves,64624,2.73,MSK INTERVENTION,orbit_cme_seed
+RF Ablation Genicular Nerves Additional,64625,1.37,MSK INTERVENTION,orbit_cme_seed

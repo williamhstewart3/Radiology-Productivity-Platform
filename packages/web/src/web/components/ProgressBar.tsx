@@ -1,5 +1,4 @@
 import { theme } from '../lib/theme';
-import { AnimatedProgressBar } from './AnimatedProgress';
 
 interface ProgressBarProps {
   value: number; // 0–100
@@ -45,13 +44,13 @@ export function ProgressBar({
         borderRadius: h / 2,
         overflow: 'hidden',
       }}>
-        <AnimatedProgressBar
-          value={clamped}
-          height={h}
-          fill={fill}
-          radius={h / 2}
-          animated={animated}
-        />
+        <div style={{
+          height: h,
+          width: `${clamped}%`,
+          background: fill,
+          borderRadius: h / 2,
+          transition: animated ? 'width 0.7s cubic-bezier(0.4,0,0.2,1)' : 'none',
+        }} />
       </div>
     </div>
   );
@@ -99,7 +98,6 @@ export function StatusBadge({ status, label, size = 'md' }: StatusBadgeProps) {
     }}>
       <span style={{
         width: 6, height: 6, borderRadius: '50%', background: c.dot,
-        animation: 'pulse 2s ease-in-out infinite',
         display: 'inline-block',
       }} />
       {label ?? c.defaultLabel}

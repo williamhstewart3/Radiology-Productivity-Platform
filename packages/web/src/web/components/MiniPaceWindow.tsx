@@ -1,123 +1,107 @@
 /**
  * MiniPaceWindow.tsx
  *
- * Minimal companion display — Bloomberg Terminal / Apple Watch aesthetic.
- * Baptist Medical Group branding: navy bg, sky blue + status colors.
- * One glance = full picture. Sub-second comprehension.
+ * The flagship instrument of the Density Pass (owner decision, 2026-07-12):
+ * this window sits beside PACS for an entire shift while the radiologist
+ * reads. The full app is the between-cases / end-of-day surface — this is
+ * the one that's actually watched. Every figure reads from the same
+ * selectors as Today (computeDailyPace, currentRatePerHour,
+ * projectedFinishClockTime) — zero new math, reconciles by construction.
  *
- * DATA SOURCE: studyLogs table only.
+ * Always dark (reading-room HUD), independent of the main window's
+ * light/dark setting since this renders in its own popup document — colors
+ * are hardcoded to match the app's dark-mode rd-* tokens rather than reading
+ * CSS custom properties, since nothing sets the rd-dark class in a popup.
+ *
+ * DATA SOURCE: studyLogs + activeReviewSessions + userSettings, all via
+ * Dexie live queries shared with the rest of the app.
  */
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useProfile } from '../hooks/useProfile';
 import {
   computeDailyPace,
+  currentRatePerHour,
   DEFAULT_DAILY_PACE_SETTINGS,
-  type DailyPaceSettings,
+  formatMinutes,
+  projectedFinishClockTime,
   type DailyPaceMetrics,
+  type DailyPaceSettings,
 } from '../utils/dailyPaceCalculations';
 import { todayDateString } from '../utils/calculations';
-import { ConfettiCanvas } from './ConfettiCanvas';
-import { baptistTheme as t } from '../lib/theme';
+import type { StudyLog } from '../types';
 
-// ─── Status → visual tokens ─────────────────────────────────────────────────
+const HUD_BG = '#0A0E1A';
+const HUD_SURFACE = '#111827';
+const HUD_SEPARATOR = '#1E2D45';
+const HUD_LABEL_PRIMARY = '#F0F4FF';
+const HUD_LABEL_SECONDARY = '#8892A4';
+const HUD_POSITIVE = '#4CC38A';
+const HUD_POSITIVE_DARK = '#2A6B4C';
+const HUD_CAUTION = '#E5A13D';
+const HUD_CAUTION_DARK = '#7E5922';
+const HUD_NEUTRAL = HUD_LABEL_SECONDARY;
+const HUD_NEUTRAL_DARK = '#4B505A';
+const HUD_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif';
 
-interface StatusTokens {
-  fill:        string;
-  fillGlow:    string;
-  windowGlow:  string;
-  text:        string;
+function isDeleted(log: StudyLog): boolean {
+  return Boolean((log as StudyLog & { deletedAt?: string }).deletedAt);
 }
 
-function statusTokens(status: DailyPaceMetrics['status']): StatusTokens {
+function title(log: StudyLog): string {
+  return log.examTitleDisplay?.trim() || log.examNameRaw;
+}
+
+/** [fill color, gradient-start color] for the given pace status — same
+ *  four-state semantic vocabulary as the rest of the app (positive/caution/
+ *  neutral); 'after_work' reads neutral, matching getStatusDisplay's
+ *  'Shift Complete' treatment rather than an alarm tone. */
+function paceColors(status: DailyPaceMetrics['status']): [string, string] {
   switch (status) {
     case 'ahead':
     case 'goal_achieved':
-      return {
-        fill:       t.colors.ahead,
-        fillGlow:   `0 0 18px ${t.colors.ahead}bb`,
-        windowGlow: `0 0 60px ${t.colors.ahead}1f, 0 0 120px ${t.colors.ahead}0d`,
-        text:       '#4ade80',
-      };
     case 'on_track':
-      return {
-        fill:       t.colors.onTrack,
-        fillGlow:   `0 0 18px ${t.colors.onTrack}bb`,
-        windowGlow: `0 0 60px ${t.colors.onTrack}1f, 0 0 120px ${t.colors.onTrack}0d`,
-        text:       '#60a5fa',
-      };
+      return [HUD_POSITIVE, HUD_POSITIVE_DARK];
     case 'slightly_behind':
-      return {
-        fill:       t.colors.caution,
-        fillGlow:   `0 0 18px ${t.colors.caution}bb`,
-        windowGlow: `0 0 60px ${t.colors.caution}1f, 0 0 120px ${t.colors.caution}0d`,
-        text:       '#fbbf24',
-      };
     case 'behind':
-      return {
-        fill:       t.colors.behind,
-        fillGlow:   `0 0 18px ${t.colors.behind}bb`,
-        windowGlow: `0 0 60px ${t.colors.behind}1f, 0 0 120px ${t.colors.behind}0d`,
-        text:       '#f87171',
-      };
-    case 'after_work':
-      return {
-        fill:       t.colors.accent,
-        fillGlow:   `0 0 18px ${t.colors.accent}99`,
-        windowGlow: `0 0 60px ${t.colors.accent}19, 0 0 120px ${t.colors.accent}0d`,
-        text:       t.colors.accent,
-      };
-    default: // before_work
-      return {
-        fill:       '#374151',
-        fillGlow:   'none',
-        windowGlow: `0 0 40px rgba(15,24,36,0.5)`,
-        text:       t.colors.textMuted,
-      };
+      return [HUD_CAUTION, HUD_CAUTION_DARK];
+    default:
+      return [HUD_NEUTRAL, HUD_NEUTRAL_DARK];
   }
 }
 
-// ─── Animated counter hook ───────────────────────────────────────────────────
-
-function useCountUp(target: number, duration = 350): number {
-  const [display, setDisplay] = useState(target);
-  const rafRef   = useRef<number | null>(null);
-  const startRef = useRef<{ from: number; to: number; t0: number } | null>(null);
-
-  useEffect(() => {
-    const prev = startRef.current?.to ?? target;
-    if (Math.abs(target - prev) < 0.05) {
-      setDisplay(target);
-      return;
-    }
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    const from = display;
-    startRef.current = { from, to: target, t0: performance.now() };
-
-    const step = (now: number) => {
-      const elapsed = now - startRef.current!.t0;
-      const progress = Math.min(1, elapsed / duration);
-      const ease = 1 - Math.pow(1 - progress, 3);
-      setDisplay(from + (target - from) * ease);
-      if (progress < 1) rafRef.current = requestAnimationFrame(step);
-      else setDisplay(target);
-    };
-    rafRef.current = requestAnimationFrame(step);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [target]);
-
-  return display;
+function deltaText(metrics: DailyPaceMetrics): string {
+  if (metrics.status === 'before_work') return '—';
+  if (metrics.status === 'goal_achieved') return 'Goal hit';
+  const diff = metrics.paceDifference;
+  if (Math.abs(diff) < 0.05) return 'On pace';
+  const arrow = diff > 0 ? '▲' : '▼';
+  return `${diff > 0 ? '+' : ''}${diff.toFixed(1)} ${arrow}`;
 }
 
-// ─── Component ──────────────────────────────────────────────────────────────
+function expectedProjectedText(metrics: DailyPaceMetrics): string {
+  if (metrics.status === 'before_work') return 'now — · proj —';
+  const projected = metrics.status === 'goal_achieved' ? 'goal hit' : metrics.projectedEndOfDay.toFixed(0);
+  const finish = metrics.status === 'goal_achieved' ? null : projectedFinishClockTime(metrics);
+  return `now ${metrics.expectedRvu.toFixed(1)} · proj ${projected}${finish ? ` · ${finish}` : ''}`;
+}
+
+function rateText(metrics: DailyPaceMetrics): string {
+  const rate = currentRatePerHour(metrics);
+  const need = metrics.status === 'goal_achieved' || metrics.status === 'after_work' ? '—' : `${metrics.requiredRvuPerHour.toFixed(1)}/hr`;
+  const at = rate == null ? '—' : `${rate.toFixed(1)}/hr`;
+  return `need ${need} · at ${at}`;
+}
 
 interface MiniPaceWindowProps {
   embedded?: boolean;
+  targetWindow?: Window;
+  onNavigate?: (path: string) => void;
 }
 
-export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
+export function MiniPaceWindow({ embedded = false, targetWindow, onNavigate }: MiniPaceWindowProps) {
   const today = todayDateString();
   const { activeProfile } = useProfile();
   const profileId = activeProfile?.id ?? null;
@@ -126,11 +110,17 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
     async () => {
       if (!profileId) return [];
       const all = await db.studyLogs.where('logDate').equals(today).toArray();
-      return all.filter((l) => l.profileId === profileId || l.profileId == null);
+      return all.filter((l) => !isDeleted(l) && (l.profileId === profileId || l.profileId == null));
     },
     [today, profileId],
     [],
   );
+  const inboxCount = useLiveQuery(async () => {
+    const sessions = await db.activeReviewSessions.where('status').equals('active').toArray();
+    return sessions.filter((session) => session.profileId === profileId || session.profileId == null).reduce((sum, session) => sum + session.needsReviewCount, 0);
+  }, [profileId], 0);
+  const settings = useLiveQuery(() => db.userSettings.get('default'), [], undefined);
+  const watcherArmed = settings?.autoImportClipboardScreenshots === true;
 
   const paceSettings: DailyPaceSettings = useMemo(() => ({
     dailyRvuGoal: activeProfile?.dailyRvuGoal ?? DEFAULT_DAILY_PACE_SETTINGS.dailyRvuGoal,
@@ -145,274 +135,176 @@ export function MiniPaceWindow({ embedded = false }: MiniPaceWindowProps) {
   ]);
 
   const prevAchievedRef = useRef(false);
-  const prevRvuRef      = useRef<number | null>(null);
-  const pulseTimer      = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const [metrics, setMetrics]           = useState<DailyPaceMetrics | null>(null);
-  const [lastUpdated, setLastUpdated]   = useState<Date>(new Date());
-  const [showConfetti, setShowConfetti] = useState(false);
-  const [pulse, setPulse]               = useState(false);
+  const [metrics, setMetrics] = useState<DailyPaceMetrics | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
 
   const recalculate = useCallback(() => {
     if (!todayLogs) return;
     const m = computeDailyPace(todayLogs, paceSettings, prevAchievedRef.current);
     setMetrics(m);
-    setLastUpdated(new Date());
-
-    if (m.goalJustAchieved) {
-      prevAchievedRef.current = true;
-      setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 4500);
-    }
+    setNowTick(Date.now());
+    if (m.goalJustAchieved) prevAchievedRef.current = true;
     if (m.currentRvu < m.dailyGoal) prevAchievedRef.current = false;
-
-    if (prevRvuRef.current !== null && m.currentRvu > prevRvuRef.current + 0.01) {
-      if (pulseTimer.current) clearTimeout(pulseTimer.current);
-      setPulse(true);
-      pulseTimer.current = setTimeout(() => setPulse(false), 450);
-    }
-    prevRvuRef.current = m.currentRvu;
   }, [todayLogs, paceSettings]);
 
   useEffect(() => {
     recalculate();
     const iv = setInterval(recalculate, 60_000);
-    return () => { clearInterval(iv); if (pulseTimer.current) clearTimeout(pulseTimer.current); };
+    return () => clearInterval(iv);
   }, [recalculate]);
 
   useEffect(() => {
-    document.title = metrics
-      ? `${metrics.currentRvu.toFixed(1)} / ${metrics.dailyGoal} wRVU`
-      : 'wRVU Pace';
-  }, [metrics]);
+    const targetDocument = targetWindow?.document ?? document;
+    targetDocument.title = metrics ? `${metrics.currentRvu.toFixed(1)} / ${metrics.dailyGoal} wRVU` : 'wRVU Pace';
+  }, [metrics, targetWindow]);
 
-  const animatedRvu = useCountUp(metrics?.currentRvu ?? 0, 350);
+  const recentStudies = useMemo(
+    () => [...todayLogs]
+      .filter((log) => !log.needsReview)
+      .sort((a, b) => (b.studyDateTime ?? b.createdAt).localeCompare(a.studyDateTime ?? a.createdAt))
+      .slice(0, 3),
+    [todayLogs],
+  );
+  const recentStudiesKey = recentStudies.map((log) => log.id).join(',');
+
+  const lastCaptureAt = useMemo(() => {
+    if (todayLogs.length === 0) return null;
+    return todayLogs.reduce((latest, log) => (log.createdAt > latest ? log.createdAt : latest), todayLogs[0].createdAt);
+  }, [todayLogs]);
+
+  // New-commit fade: mark ids newly present since the last tick, fade them
+  // in once, then forget. Initial mount doesn't animate (nothing is "new").
+  const seenIdsRef = useRef<Set<string> | null>(null);
+  const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
+  const reducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+  useEffect(() => {
+    const currentIds = new Set(recentStudiesKey ? recentStudiesKey.split(',') : []);
+    if (seenIdsRef.current === null) {
+      seenIdsRef.current = currentIds;
+      return;
+    }
+    const newlyAdded = [...currentIds].filter((id) => !seenIdsRef.current!.has(id));
+    seenIdsRef.current = currentIds;
+    if (newlyAdded.length === 0 || reducedMotion) return;
+    setFreshIds(new Set(newlyAdded));
+    const timer = setTimeout(() => setFreshIds(new Set()), 200);
+    return () => clearTimeout(timer);
+  }, [recentStudiesKey, reducedMotion]);
+
+  const goTo = useCallback((path: string) => {
+    if (onNavigate) {
+      onNavigate(path);
+      return;
+    }
+    window.opener?.location.assign(path);
+    window.focus();
+  }, [onNavigate]);
 
   if (!metrics || todayLogs === undefined) {
     return (
-      <div style={{
-        minHeight: embedded ? '320px' : '100vh',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: t.colors.bgDeep,
-      }}>
-        <div style={{
-          width: 28, height: 28, borderRadius: '50%',
-          border: `2px solid ${t.colors.accent}`,
-          borderTopColor: 'transparent',
-          animation: 'spin 0.8s linear infinite',
-        }} />
+      <div style={{ minHeight: embedded ? '200px' : '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: HUD_BG }}>
+        <div style={{ width: 28, height: 28, borderRadius: '50%', border: `2px solid ${HUD_POSITIVE}`, borderTopColor: 'transparent', animation: 'rd-mini-spin 0.8s linear' }} />
+        <style>{'@keyframes rd-mini-spin { to { transform: rotate(360deg); } }'}</style>
       </div>
     );
   }
 
-  const tokens      = statusTokens(metrics.status);
-  const actualPct   = Math.min(100, Math.max(0, metrics.actualPercent));
-  const expectedPct = Math.min(100, Math.max(0, metrics.expectedPercent));
-
-  const diff      = metrics.paceDifference;
-  const diffSign  = diff >= 0 ? '+' : '';
-  const diffLabel = `${diffSign}${diff.toFixed(1)} wRVU`;
-
-  const projLabel =
-    metrics.status === 'before_work'   ? '—' :
-    metrics.status === 'goal_achieved' ? `${metrics.currentRvu.toFixed(1)} wRVU` :
-    metrics.status === 'after_work'    ? `${metrics.currentRvu.toFixed(1)} wRVU` :
-    `${metrics.projectedEndOfDay.toFixed(1)} wRVU`;
-
-  const d = lastUpdated;
-  let h = d.getHours(), mi = d.getMinutes();
-  const ap = h >= 12 ? 'PM' : 'AM';
-  h = h % 12 || 12;
-  const updatedStr = `${h}:${String(mi).padStart(2, '0')} ${ap}`;
-
-  const beforeWork = metrics.status === 'before_work';
+  const [color, colorDark] = paceColors(metrics.status);
+  const goalPercent = Math.max(0, Math.min(100, metrics.actualPercent));
+  const elapsedSinceCapture = lastCaptureAt ? Math.max(0, (nowTick - new Date(lastCaptureAt).getTime()) / 60_000) : null;
 
   return (
-    <div style={{
-      minHeight: embedded ? 'auto' : '100vh',
-      background: t.colors.bgDeep,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: embedded ? '0' : 'clamp(12px, 3vw, 32px)',
-      fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
-    }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+    <div
+      style={{
+        minHeight: embedded ? 'auto' : '100vh',
+        width: embedded ? '100%' : undefined,
+        background: HUD_BG,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        padding: 14,
+        fontFamily: HUD_FONT,
+        boxSizing: 'border-box',
+      }}
+    >
+      <style>{'@keyframes rd-mini-row-fade { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }'}</style>
 
-        .mini-card { width: 100%; max-width: clamp(420px, 80vw, 760px); }
-
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        @keyframes barPulse {
-          0%   { filter: brightness(1); }
-          40%  { filter: brightness(1.5); }
-          100% { filter: brightness(1); }
-        }
-        .bar-pulse { animation: barPulse 0.45s ease-out forwards; }
-      `}</style>
-
-      <ConfettiCanvas active={showConfetti} />
-
-      {/* ── Outer card ───────────────────────────────────────────────── */}
-      <div
-        className="mini-card"
-        style={{
-          borderRadius: 'clamp(10px, 2vw, 18px)',
-          border: `1px solid ${tokens.fill}2a`,
-          background: `linear-gradient(145deg, ${t.colors.bgCard} 0%, ${t.colors.bgDeep} 100%)`,
-          boxShadow: `${tokens.windowGlow}, inset 0 1px 0 rgba(91,184,212,0.05)`,
-          transition: 'box-shadow 1.2s ease, border-color 1.2s ease',
-          padding: 'clamp(16px, 3vw, 30px) clamp(18px, 3.5vw, 34px) clamp(14px, 2.5vw, 24px)',
-          display: 'flex', flexDirection: 'column',
-          gap: 'clamp(14px, 2.5vw, 22px)',
-          position: 'relative',
-        }}
+      {/* Rank #1 — pace block, owns the top half */}
+      <button
+        type="button"
+        onClick={() => goTo('/today')}
+        style={{ border: 0, padding: 0, background: 'transparent', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}
       >
+        <span style={{ fontSize: 34, fontWeight: 700, color: HUD_LABEL_PRIMARY, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+          {metrics.currentRvu.toFixed(1)}
+        </span>
+        <span style={{ fontSize: 15, fontWeight: 600, color, fontVariantNumeric: 'tabular-nums' }}>{deltaText(metrics)}</span>
+      </button>
 
-        {/* ── wRVU number ── */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 'clamp(6px, 1.2vw, 12px)' }}>
-          <span style={{
-            fontSize: 'clamp(48px, 8vw, 80px)',
-            fontWeight: 900,
-            color: tokens.text,
-            lineHeight: 1,
-            fontVariantNumeric: 'tabular-nums',
-            letterSpacing: '-0.04em',
-            textShadow: `0 0 40px ${tokens.fill}55`,
-            transition: 'color 0.8s ease, text-shadow 0.8s ease',
-            minWidth: '3ch',
-          }}>
-            {animatedRvu.toFixed(1)}
-          </span>
-          <span style={{
-            fontSize: 'clamp(14px, 2.2vw, 22px)',
-            color: 'rgba(148,163,184,0.35)',
-            fontWeight: 500,
-            letterSpacing: '-0.01em',
-            paddingBottom: 'clamp(4px, 0.8vw, 8px)',
-          }}>
-            / {metrics.dailyGoal} wRVU
-          </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>of {metrics.dailyGoal}</span>
+        <div style={{ flex: 1, height: 6, borderRadius: 3, background: HUD_SURFACE, overflow: 'hidden' }}>
+          <div style={{ width: `${goalPercent}%`, height: '100%', borderRadius: 3, background: `linear-gradient(to right, ${colorDark}, ${color})` }} />
         </div>
+        <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{goalPercent.toFixed(0)}%</span>
+      </div>
 
-        {/* ── Progress bar ── */}
-        <div>
-          <div style={{
-            position: 'relative',
-            width: '100%',
-            height: 'clamp(22px, 3.5vw, 40px)',
-            borderRadius: 'clamp(4px, 1vw, 8px)',
-            background: 'rgba(91,184,212,0.06)',
-            overflow: 'visible',
-          }}>
-            <div style={{
-              position: 'absolute', inset: 0,
-              borderRadius: 'inherit', overflow: 'hidden',
-            }}>
-              {/* Ghost expected shading */}
-              <div style={{
-                position: 'absolute', inset: 0,
-                width: `${expectedPct}%`,
-                background: 'rgba(91,184,212,0.07)',
-                transition: 'width 0.9s cubic-bezier(0.4,0,0.2,1)',
-              }} />
-              {/* Actual fill */}
-              <div
-                className={pulse ? 'bar-pulse' : ''}
-                style={{
-                  position: 'absolute', inset: 0,
-                  width: `${actualPct}%`,
-                  background: tokens.fill,
-                  boxShadow: tokens.fillGlow,
-                  transition: 'width 0.85s cubic-bezier(0.4,0,0.2,1), background 1s ease, box-shadow 1s ease',
-                }}
-              />
-            </div>
+      <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY, fontVariantNumeric: 'tabular-nums' }}>{expectedProjectedText(metrics)}</span>
+      <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY, fontVariantNumeric: 'tabular-nums' }}>{rateText(metrics)}</span>
 
-            {/* Expected marker */}
-            {expectedPct > 1 && expectedPct < 99 && (
-              <div style={{
-                position: 'absolute',
-                top: -2, bottom: -2,
-                left: `${expectedPct}%`,
-                width: 3,
-                transform: 'translateX(-50%)',
-                background: 'rgba(255,255,255,0.85)',
-                boxShadow: '0 0 6px rgba(255,255,255,0.7), 0 0 12px rgba(255,255,255,0.35)',
-                borderRadius: 2,
-                transition: 'left 0.9s cubic-bezier(0.4,0,0.2,1)',
-                zIndex: 2,
-              }} />
-            )}
-          </div>
-        </div>
+      <div style={{ height: 1, background: HUD_SEPARATOR }} />
 
-        {/* ── Metrics row ── */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 'clamp(12px, 3vw, 28px)',
-        }}>
-          {/* Left: Expected + Difference */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'clamp(2px, 0.5vw, 5px)' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'clamp(4px, 0.8vw, 8px)' }}>
-              <span style={{
-                fontSize: 'clamp(10px, 1.4vw, 13px)', color: 'rgba(148,163,184,0.5)',
-                fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase',
-              }}>Expected</span>
-              <span style={{
-                fontSize: 'clamp(13px, 2vw, 18px)', fontWeight: 700,
-                color: 'rgba(224,234,244,0.9)', fontVariantNumeric: 'tabular-nums',
-                letterSpacing: '-0.02em',
-              }}>
-                {beforeWork ? '—' : `${metrics.expectedRvu.toFixed(1)} wRVU`}
+      {/* Rank #2 — last 3 studies, confirms captures are landing in real time */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {recentStudies.length === 0 ? (
+          <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY }}>No studies yet today</span>
+        ) : (
+          recentStudies.map((log) => (
+            <button
+              key={log.id}
+              type="button"
+              onClick={() => goTo(`/history?date=${log.logDate}`)}
+              style={{
+                border: 0,
+                padding: 0,
+                background: 'transparent',
+                cursor: 'pointer',
+                display: 'grid',
+                gridTemplateColumns: '44px 1fr auto',
+                alignItems: 'center',
+                gap: 6,
+                width: '100%',
+                animation: freshIds.has(log.id) ? 'rd-mini-row-fade 150ms ease-out' : undefined,
+              }}
+            >
+              <span style={{ fontSize: 11, color: HUD_LABEL_SECONDARY, textAlign: 'left', fontVariantNumeric: 'tabular-nums' }}>
+                {log.studyDateTime ? new Date(log.studyDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}
               </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'clamp(4px, 0.8vw, 8px)' }}>
-              <span style={{
-                fontSize: 'clamp(10px, 1.4vw, 13px)', color: 'rgba(148,163,184,0.5)',
-                fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase',
-              }}>Difference</span>
-              <span style={{
-                fontSize: 'clamp(13px, 2vw, 18px)', fontWeight: 700,
-                color: tokens.text, fontVariantNumeric: 'tabular-nums',
-                letterSpacing: '-0.02em', transition: 'color 0.6s ease',
-              }}>
-                {beforeWork ? '—' : diffLabel}
+              <span style={{ fontSize: 12, color: HUD_LABEL_PRIMARY, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {title(log)}
               </span>
-            </div>
-          </div>
+              <span style={{ fontSize: 12, color: HUD_LABEL_PRIMARY, fontVariantNumeric: 'tabular-nums' }}>{log.workRvu?.toFixed(2) ?? '—'}</span>
+            </button>
+          ))
+        )}
+      </div>
 
-          {/* Right: Projected Finish */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 'clamp(2px, 0.5vw, 5px)' }}>
-            <span style={{
-              fontSize: 'clamp(10px, 1.4vw, 13px)', color: 'rgba(148,163,184,0.5)',
-              fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase',
-            }}>Projected Finish</span>
-            <span style={{
-              fontSize: 'clamp(16px, 2.8vw, 26px)', fontWeight: 800,
-              color: metrics.projectedEndOfDay >= metrics.dailyGoal || metrics.status === 'goal_achieved'
-                ? t.colors.ahead : 'rgba(224,234,244,0.9)',
-              fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.03em',
-              transition: 'color 0.6s ease',
-            }}>
-              {projLabel}
-            </span>
-          </div>
-        </div>
+      <div style={{ height: 1, background: HUD_SEPARATOR }} />
 
-        {/* ── Updated timestamp ── */}
-        <div style={{
-          position: 'absolute',
-          bottom: 'clamp(8px, 1.2vw, 14px)',
-          right: 'clamp(14px, 2vw, 22px)',
-          fontSize: 'clamp(9px, 1.1vw, 11px)',
-          color: 'rgba(91,184,212,0.3)',
-          fontWeight: 400, letterSpacing: '0.02em', fontVariantNumeric: 'tabular-nums',
-        }}>
-          Updated {updatedStr}
-        </div>
-
+      {/* Rank #4 — quietest line, never absent */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <button
+          type="button"
+          onClick={() => goTo('/inbox')}
+          style={{ border: 0, padding: 0, background: 'transparent', cursor: 'pointer', fontSize: 12, color: inboxCount > 0 ? HUD_CAUTION : HUD_LABEL_SECONDARY }}
+        >
+          {inboxCount > 0 ? `◔ ${inboxCount} inbox` : 'All counted'}
+        </button>
+        <span style={{ fontSize: 12, color: HUD_LABEL_SECONDARY }}>
+          {watcherArmed ? '● watching' : '○ not watching'}
+          {watcherArmed && elapsedSinceCapture != null ? ` ${formatMinutes(elapsedSinceCapture)} ago` : ''}
+        </span>
       </div>
     </div>
   );

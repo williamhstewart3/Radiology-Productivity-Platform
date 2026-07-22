@@ -427,7 +427,7 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
         siteId: null,
         sessionId: null,
         logDate,
-      });
+      }, { cropAlreadyApplied: Boolean(previewUrl) });
       setReviewRows(processed.result.reviewRows);
       setSkippedRows(processed.result.skippedRows);
 
@@ -722,6 +722,11 @@ export function CameraUploadPage({ onImported }: CameraUploadPageProps) {
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/25 text-sky-400 font-medium">OCR date</span>
                       ) : (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/25 text-amber-400/80 font-medium" title="Date was not extracted from OCR — using log date">⚠ inferred</span>
+                      )}
+                      {row.source.ocrConfidence != null && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300 font-medium">
+                          OCR text {Math.round(row.source.ocrConfidence * 100)}%
+                        </span>
                       )}
                     </div>
                   </div>

@@ -81,6 +81,7 @@ create table if not exists public.productivity_exam_rows (
   modifier_26_wrvu numeric not null default 0,
   match_method text,
   match_confidence numeric,
+  ocr_confidence numeric,
   not_productivity_relevant boolean not null default false,
   notes text,
   deleted_at timestamptz,
@@ -94,7 +95,8 @@ create table if not exists public.productivity_exam_rows (
 alter table public.productivity_exam_rows
   add column if not exists exam_title_normalized text,
   add column if not exists exam_title_display text,
-  add column if not exists cms_description text;
+  add column if not exists cms_description text,
+  add column if not exists ocr_confidence numeric;
 
 create index if not exists productivity_exam_rows_date_idx
   on public.productivity_exam_rows (log_date, profile_id, deleted_at);

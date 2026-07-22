@@ -326,6 +326,38 @@ export function getStatusDisplay(status: PaceStatus): StatusDisplay {
   }
 }
 
+/**
+ * Current rolling wRVU/hour rate from elapsed work time so far today.
+ * Returns null when there's no elapsed time to compute a rate from
+ * (before the shift starts, or the instant it begins).
+ */
+export function currentRatePerHour(metrics: DailyPaceMetrics): number | null {
+  if (metrics.elapsedWorkMinutes <= 0) return null;
+  return (metrics.currentRvu / metrics.elapsedWorkMinutes) * 60;
+}
+
+/**
+ * Clock time ("5:32p") at which the goal is projected to be reached, given
+ * the current rolling rate — not a linear projection to the scheduled
+ * workday end (that's projectedEndOfDay), but "if I keep going like this,
+ * when do I hit the number." Returns a status label instead of a time for
+ * the states where a projection isn't meaningful.
+ */
+export function projectedFinishClockTime(
+  metrics: DailyPaceMetrics,
+  now: Date = new Date(),
+): string | null {
+  if (metrics.status === 'before_work') return null;
+  if (metrics.status === 'goal_achieved') return 'Goal hit';
+  if (metrics.status === 'after_work') return null;
+  const rate = currentRatePerHour(metrics);
+  if (rate == null || rate <= 0) return null;
+  const minutesToGoal = (metrics.remainingToGoal / rate) * 60;
+  const finish = new Date(now.getTime() + minutesToGoal * 60_000);
+  return finish.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    .replace(' AM', 'a').replace(' PM', 'p');
+}
+
 export function formatMinutes(minutes: number): string {
   if (minutes <= 0) return '0m';
   const h = Math.floor(minutes / 60);

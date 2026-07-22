@@ -2,7 +2,8 @@ import { app, BrowserWindow, ipcMain, dialog, Notification } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs/promises";
-import fsSync from "node:fs";
+import { spawn } from "node:child_process";
+import { windowsPowerScribeOcrScript } from "./windowsPowerScribeOcrScript";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const isDev = process.env.NODE_ENV !== "production";
@@ -10,6 +11,18 @@ const WEB_DEV_URL = process.env.WEBSITE_URL ?? "http://localhost:3000";
 const WEB_DIST = path.join(__dirname, "../web-dist");
 
 let win: BrowserWindow | null;
+
+interface PowerScribeStructuredOcrRow {
+  procedureName: string;
+  examDateTime: string | null;
+  modifiedDateTime: string | null;
+  rawProcedureText: string;
+  rawExamDateText: string;
+  rawModifiedText: string;
+  confidence: number;
+  needsReview: boolean;
+  reviewReason: string | null;
+}
 
 function createWindow() {
   win = new BrowserWindow({
@@ -51,56 +64,99 @@ ipcMain.handle("fs:write", async (_, filePath: string, data: string) => {
   await fs.writeFile(filePath, data, "utf-8");
 });
 
-// Read binary file — returns base64 string (images for Tesseract OCR)
-ipcMain.handle("fs:readBuffer", async (_, filePath: string) => {
-  const buf = await fs.readFile(filePath);
-  return buf.toString("base64");
-});
-
-// Move a file (processed / failed routing)
-ipcMain.handle("fs:move", async (_, src: string, dest: string) => {
-  await fs.mkdir(path.dirname(dest), { recursive: true });
-  let finalDest = dest;
-  const parsed = path.parse(dest);
-  for (let i = 1; fsSync.existsSync(finalDest); i++) {
-    finalDest = path.join(parsed.dir, `${parsed.name}_${i}${parsed.ext}`);
-  }
-  await fs.rename(src, finalDest);
-  return { ok: true, path: finalDest };
-});
-
-// Delete a file
-ipcMain.handle("fs:delete", async (_, filePath: string) => {
-  await fs.unlink(filePath);
-  return { ok: true };
-});
-
-// Ensure directory exists (mkdir -p)
-ipcMain.handle("fs:ensureDir", async (_, dirPath: string) => {
-  await fs.mkdir(dirPath, { recursive: true });
-  return { ok: true };
-});
-
-// List image files in a directory (PNG + JPG only)
-ipcMain.handle("fs:listImages", async (_, dirPath: string) => {
-  try {
-    const entries = await fs.readdir(dirPath, { withFileTypes: true });
-    return entries
-      .filter((e) => e.isFile() && /\.(png|jpg|jpeg)$/i.test(e.name))
-      .map((e) => path.join(dirPath, e.name));
-  } catch {
-    return [];
-  }
-});
-
-// Get the default watch folder path
-ipcMain.handle("fs:defaultWatchPath", () => {
-  return path.join(app.getPath("documents"), "PowerScribe Screenshots");
-});
-
 // Notifications
 ipcMain.handle("notification:show", (_, title: string, body: string) => {
-  new Notification({ title, body }).show();
+  const notification = new Notification({ title, body });
+  notification.on("click", () => {
+    win?.show();
+    win?.focus();
+    win?.webContents.send("deep-link", "wrvu://inbox");
+  });
+  notification.show();
+});
+
+async function ensureWindowsOcrHelperScript(): Promise<string> {
+  const helperDir = path.join(app.getPath("userData"), "helpers");
+  await fs.mkdir(helperDir, { recursive: true });
+  const scriptPath = path.join(helperDir, "powerscribe-structured-ocr.ps1");
+  await fs.writeFile(scriptPath, windowsPowerScribeOcrScript, "utf-8");
+  return scriptPath;
+}
+
+function normalizeHelperRows(value: unknown): PowerScribeStructuredOcrRow[] {
+  const rawRows = Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
+  return rawRows
+    .map((row) => {
+      const record = row as Record<string, unknown>;
+      const procedureName = typeof record.procedureName === "string" ? record.procedureName.trim() : "";
+      const rawProcedureText = typeof record.rawProcedureText === "string" ? record.rawProcedureText : procedureName;
+      const rawExamDateText = typeof record.rawExamDateText === "string" ? record.rawExamDateText : "";
+      const rawModifiedText = typeof record.rawModifiedText === "string" ? record.rawModifiedText : "";
+      const confidence = typeof record.confidence === "number" && Number.isFinite(record.confidence)
+        ? Math.max(0, Math.min(1, record.confidence))
+        : 0;
+      return {
+        procedureName: procedureName || "UNCLEAR POWERSCRIBE ROW",
+        examDateTime: typeof record.examDateTime === "string" ? record.examDateTime : null,
+        modifiedDateTime: typeof record.modifiedDateTime === "string" ? record.modifiedDateTime : null,
+        rawProcedureText,
+        rawExamDateText,
+        rawModifiedText,
+        confidence,
+        needsReview: Boolean(record.needsReview),
+        reviewReason: typeof record.reviewReason === "string" ? record.reviewReason : null,
+      };
+    })
+    .filter((row) => row.procedureName || row.rawExamDateText || row.rawModifiedText);
+}
+
+async function runWindowsPowerScribeOcrHelper(): Promise<PowerScribeStructuredOcrRow[]> {
+  if (process.platform !== "win32") {
+    throw new Error("Windows PowerScribe OCR helper is only available on Windows.");
+  }
+
+  const scriptPath = await ensureWindowsOcrHelperScript();
+  return await new Promise((resolve, reject) => {
+    const child = spawn("powershell.exe", [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-STA",
+      "-File",
+      scriptPath,
+    ], {
+      windowsHide: true,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf-8");
+    child.stderr.setEncoding("utf-8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `Windows OCR helper exited with code ${code ?? "unknown"}`));
+        return;
+      }
+      const output = stdout.trim();
+      if (!output) {
+        resolve([]);
+        return;
+      }
+      try {
+        resolve(normalizeHelperRows(JSON.parse(output)));
+      } catch (error) {
+        reject(new Error(`Windows OCR helper returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`));
+      }
+    });
+  });
+}
+
+// Windows PowerScribe structured OCR
+ipcMain.handle("powerscribe:extract-clipboard-rows", async () => {
+  return await runWindowsPowerScribeOcrHelper();
 });
 
 // Window controls
@@ -114,74 +170,10 @@ ipcMain.handle("window:maximize", () => {
 });
 ipcMain.handle("window:close", () => win?.close());
 
-// ─── Folder Watcher ──────────────────────────────────────────────────────────
-//
-// Uses Node.js fs.watch to monitor a folder for new PNG/JPG files.
-// When a new image appears, emits "watcher:new-file" to the renderer with
-// the full file path. The renderer runs Tesseract OCR on it, then calls
-// fs:move to route it to /processed or /failed.
-//
-// Security: all file I/O is local. Nothing is transmitted externally.
-// The renderer must call fs:stopWatcher before closing / changing folders.
-
-let activeWatcher: fsSync.FSWatcher | null = null;
-const WATCHER_DEBOUNCE_MS = 800; // avoid double-fire on file copy
-const pendingFiles = new Map<string, ReturnType<typeof setTimeout>>();
-
-ipcMain.handle("fs:watchFolder", async (_, folderPath: string) => {
-  // Stop any existing watcher first
-  if (activeWatcher) {
-    activeWatcher.close();
-    activeWatcher = null;
-  }
-
-  // Ensure the watched folder exists
-  await fs.mkdir(folderPath, { recursive: true });
-
-  activeWatcher = fsSync.watch(folderPath, { persistent: true }, (event, filename) => {
-    if (!filename || !/\.(png|jpg|jpeg)$/i.test(filename)) return;
-    const fullPath = path.join(folderPath, filename);
-
-    // Debounce: wait until file has been stable for DEBOUNCE_MS ms
-    const existing = pendingFiles.get(fullPath);
-    if (existing) clearTimeout(existing);
-
-    const timer = setTimeout(async () => {
-      pendingFiles.delete(fullPath);
-      // Verify file exists and is readable before notifying renderer
-      try {
-        await fs.access(fullPath, fsSync.constants.R_OK);
-        win?.webContents.send("watcher:new-file", fullPath);
-      } catch {
-        // File gone before we could read it — ignore
-      }
-    }, WATCHER_DEBOUNCE_MS);
-
-    pendingFiles.set(fullPath, timer);
-  });
-
-  activeWatcher.on("error", (err) => {
-    win?.webContents.send("watcher:error", err.message);
-  });
-
-  return { ok: true };
-});
-
-ipcMain.handle("fs:stopWatcher", () => {
-  if (activeWatcher) {
-    activeWatcher.close();
-    activeWatcher = null;
-  }
-  for (const t of pendingFiles.values()) clearTimeout(t);
-  pendingFiles.clear();
-  return { ok: true };
-});
-
 // --- App lifecycle ---
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    if (activeWatcher) activeWatcher.close();
     app.quit();
     win = null;
   }

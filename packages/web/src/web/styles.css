@@ -3,6 +3,135 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ── Redesign token system (Apple-grade UI modernization) ────────────── */
+/* Single source of truth for the new component library in                */
+/* components/ui/ and the Today/Trends/Log/Codes/Settings screens.         */
+/* Namespaced "rd-*" to avoid colliding with the legacy Baptist theme      */
+/* (--theme-*) and shadcn tokens (--color-*) used by not-yet-migrated      */
+/* screens during the phased rollout.                                     */
+@theme {
+  --color-rd-bg:             var(--rd-bg);
+  --color-rd-surface:        var(--rd-surface);
+  --color-rd-surface-2:      var(--rd-surface-2);
+  --color-rd-label-primary:   var(--rd-label-primary);
+  --color-rd-label-secondary: var(--rd-label-secondary);
+  --color-rd-accent:         var(--rd-accent);
+  --color-rd-positive:       var(--rd-positive);
+  --color-rd-caution:        var(--rd-caution);
+  --color-rd-negative:       var(--rd-negative);
+  --color-rd-reached:        var(--rd-reached);
+  --color-rd-separator:      var(--rd-separator);
+  --font-rd-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+}
+
+/* Density Pass palette (2026-07-12 owner decision): monochrome discipline
+   on warm neutrals. Dark = reading-room navy, light = cream paper. Status
+   colors keep their semantics; light-mode variants below are darkened from
+   the original hues to clear 4.5:1 against the new cream surfaces (the
+   original values only cleared ~3.1-3.3:1, a pre-existing gap this pass
+   also fixes). Dark-mode status colors already clear 4.5:1 unchanged. */
+:root {
+  --rd-bg:             #F6F2E9;
+  --rd-surface:        #FFFDF7;
+  --rd-surface-2:      #F3EEE3;
+  --rd-label-primary:   #1D1B16;
+  --rd-label-secondary: #6E685C;
+  --rd-accent:         #1D1B16;
+  --rd-positive:       #187B4C;
+  --rd-caution:        #946112;
+  --rd-negative:       #C83338;
+  --rd-reached:        #826918;
+  --rd-separator:      #E6DFD0;
+  --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.06);
+  --rd-radius-card:    16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --rd-bg:             #0A0E1A;
+    --rd-surface:        #111827;
+    --rd-surface-2:      #1A2234;
+    --rd-label-primary:   #F0F4FF;
+    --rd-label-secondary: #8892A4;
+    --rd-accent:         #F0F4FF;
+    --rd-positive:       #4CC38A;
+    --rd-caution:        #E5A13D;
+    --rd-negative:       #F44D52;
+    --rd-reached:        #D4B54E;
+    --rd-separator:      #1E2D45;
+    --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.4);
+  }
+}
+
+/* Explicit overrides win over prefers-color-scheme so Settings > Appearance
+   can force light/dark independent of the OS setting; "auto" = no class. */
+:root.rd-light {
+  --rd-bg:             #F6F2E9;
+  --rd-surface:        #FFFDF7;
+  --rd-surface-2:      #F3EEE3;
+  --rd-label-primary:   #1D1B16;
+  --rd-label-secondary: #6E685C;
+  --rd-accent:         #1D1B16;
+  --rd-positive:       #187B4C;
+  --rd-caution:        #946112;
+  --rd-negative:       #C83338;
+  --rd-reached:        #826918;
+  --rd-separator:      #E6DFD0;
+  --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.06);
+}
+:root.rd-dark {
+  --rd-bg:             #0A0E1A;
+  --rd-surface:        #111827;
+  --rd-surface-2:      #1A2234;
+  --rd-label-primary:   #F0F4FF;
+  --rd-label-secondary: #8892A4;
+  --rd-accent:         #F0F4FF;
+  --rd-positive:       #4CC38A;
+  --rd-caution:        #E5A13D;
+  --rd-negative:       #F44D52;
+  --rd-reached:        #D4B54E;
+  --rd-separator:      #1E2D45;
+  --rd-shadow-card:    0 1px 3px rgba(0,0,0,0.4);
+}
+
+/* Density Pass row-density control (2026-07-13 owner decision): default
+   compact — the primary persona reads 100+ studies/day. A single
+   data-density attribute on <html> (set in app.tsx from Settings >
+   Appearance, persisted in Dexie) drives these two tokens; components
+   read var(--rd-row-height)/var(--rd-row-gap) instead of forking JSX
+   per density. :root's values are the compact defaults so there's no
+   flash of the wrong spacing before the attribute is set on mount. */
+:root {
+  --rd-row-height: 36px;
+  --rd-row-gap: 4px;
+}
+[data-density="comfortable"] {
+  --rd-row-height: 44px;
+  --rd-row-gap: 8px;
+}
+/* Today's Recent list renders all 8 rows unconditionally (component logic
+   is density-agnostic); Comfortable hides the last two via this rule so
+   the toggle stays a pure display-layer effect. */
+[data-density="comfortable"] .rd-density-extra {
+  display: none;
+}
+/* Shared row-height token for list rows outside the GroupedList/Row
+   primitive (History day rows, Inbox's Next queue) — same mechanism as
+   Row's `dense` prop, applied directly since those screens build rows
+   from plain markup. */
+.rd-row {
+  min-height: var(--rd-row-height);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -71,10 +200,6 @@
   --desk-border:          rgba(129, 211, 235, 0.14);
   --desk-border-strong:   rgba(129, 211, 235, 0.28);
   --desk-shadow:          0 18px 50px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.035);
-}
-
-html {
-  background: #0A0E1A;
 }
 
 /* ── Tailwind base theme ─────────────────────────────────────────────── */
@@ -154,12 +279,9 @@ html {
   }
   body {
     background:
-      radial-gradient(90% 75% at 8% 18%, rgba(59, 130, 246, 0.14) 0%, rgba(59, 130, 246, 0.05) 35%, transparent 65%),
-      radial-gradient(80% 65% at 92% 12%, rgba(136, 146, 164, 0.08) 0%, transparent 60%),
-      radial-gradient(90% 75% at 12% 92%, rgba(168, 85, 247, 0.10) 0%, transparent 65%),
-      radial-gradient(75% 65% at 92% 88%, rgba(59, 130, 246, 0.07) 0%, transparent 65%),
-      radial-gradient(60% 50% at 50% 48%, rgba(10, 14, 26, 0.72) 0%, rgba(10, 14, 26, 0.45) 38%, transparent 72%),
-      linear-gradient(180deg, #0A0E1A 0%, #0A0E1A 100%);
+      radial-gradient(circle at 22% -10%, rgba(59, 130, 204, 0.16), transparent 34rem),
+      radial-gradient(circle at 78% 0%, rgba(91, 184, 212, 0.10), transparent 30rem),
+      linear-gradient(180deg, #0b1421 0%, var(--theme-bg-base) 38%, #08111d 100%);
     color: var(--theme-text-primary);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     font-feature-settings: 'cv11', 'ss01';
@@ -174,57 +296,9 @@ html {
     min-height: 100vh;
     color: var(--theme-text-primary);
     background:
-      radial-gradient(90% 75% at 8% 18%, rgba(59, 130, 246, 0.08) 0%, rgba(59, 130, 246, 0.03) 35%, transparent 65%),
-      radial-gradient(90% 75% at 12% 92%, rgba(168, 85, 247, 0.055) 0%, transparent 65%),
-      linear-gradient(180deg, rgba(10, 14, 26, 0.92), rgba(10, 14, 26, 0.98));
-    transition: background-color 0.18s ease, color 0.18s ease;
-  }
-
-  .loading-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    background:
-      radial-gradient(90% 75% at 8% 18%, rgba(59, 130, 246, 0.14) 0%, rgba(59, 130, 246, 0.05) 35%, transparent 65%),
-      radial-gradient(80% 65% at 92% 12%, rgba(136, 146, 164, 0.08) 0%, transparent 60%),
-      radial-gradient(90% 75% at 12% 92%, rgba(168, 85, 247, 0.10) 0%, transparent 65%),
-      radial-gradient(75% 65% at 92% 88%, rgba(59, 130, 246, 0.07) 0%, transparent 65%),
-      radial-gradient(55% 48% at 50% 50%, rgba(10, 14, 26, 0.82) 0%, rgba(10, 14, 26, 0.54) 44%, transparent 74%),
-      linear-gradient(180deg, #0A0E1A 0%, #0A0E1A 100%);
-  }
-
-  .loading-overlay__logo {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 1rem;
-    will-change: transform, opacity;
-  }
-
-  .loading-overlay__text {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.25rem;
-  }
-
-  .loading-overlay__text p {
-    color: #f0f4ff;
-    font-size: 1.125rem;
-    font-weight: 700;
-    letter-spacing: 0;
-  }
-
-  .loading-overlay__text span {
-    color: #3B82F6;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+      linear-gradient(135deg, rgba(37, 99, 168, 0.09), transparent 34%),
+      linear-gradient(180deg, rgba(255,255,255,0.025), transparent 24%),
+      var(--theme-bg-base);
   }
 
   .desktop-sidebar {
@@ -242,7 +316,6 @@ html {
   }
 
   .nav-rail-item {
-    position: relative;
     display: flex;
     align-items: center;
     gap: 0.75rem;
@@ -255,8 +328,6 @@ html {
     font-weight: 500;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     border: 1px solid transparent;
-    overflow: hidden;
-    isolation: isolate;
   }
 
   .nav-rail-item:hover {
@@ -266,19 +337,10 @@ html {
   }
 
   .nav-rail-item-active {
-    background: transparent;
+    background: linear-gradient(135deg, rgba(37, 99, 168, 0.34), rgba(91, 184, 212, 0.11));
     border-color: rgba(129, 211, 235, 0.24);
     color: var(--theme-text-primary);
-    box-shadow: 0 10px 26px rgba(37, 99, 168, 0.12);
-  }
-
-  .nav-rail-active-indicator {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    border-radius: inherit;
-    background: linear-gradient(135deg, rgba(37, 99, 168, 0.34), rgba(91, 184, 212, 0.11));
-    box-shadow: inset 3px 0 0 var(--theme-accent);
+    box-shadow: inset 3px 0 0 var(--theme-accent), 0 10px 26px rgba(37, 99, 168, 0.16);
   }
 
   .desk-card {
@@ -292,15 +354,238 @@ html {
   }
 
   .desk-card-interactive {
-    transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
   }
 
   .desk-card-interactive:hover {
-    transform: translateY(-2px);
     border-color: var(--desk-border-strong);
     background:
       linear-gradient(145deg, rgba(255,255,255,0.07), rgba(255,255,255,0.025)),
       var(--desk-surface-strong);
+  }
+
+  .premium-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    animation: fade-in 0.22s ease-out;
+  }
+
+  .premium-page-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.25rem 0 0.5rem;
+  }
+
+  .premium-page-header h1 {
+    font-size: clamp(1.75rem, 3vw, 2.65rem);
+    line-height: 1;
+    font-weight: 720;
+    letter-spacing: 0;
+    color: var(--theme-text-primary);
+  }
+
+  .premium-page-header p:last-child {
+    max-width: 44rem;
+    font-size: 0.875rem;
+    color: var(--theme-text-muted);
+  }
+
+  .premium-eyebrow,
+  .premium-label {
+    font-size: 0.6875rem;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--theme-text-muted);
+  }
+
+  .premium-eyebrow {
+    color: var(--theme-accent);
+  }
+
+  .premium-card {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.75rem;
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)),
+      rgba(12, 22, 36, 0.78);
+    box-shadow: 0 18px 55px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    backdrop-filter: blur(18px);
+  }
+
+  .premium-card-hover {
+    transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .premium-card-hover:hover {
+    transform: translateY(-1px);
+    border-color: rgba(129, 211, 235, 0.24);
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025)),
+      rgba(16, 28, 45, 0.86);
+    box-shadow: 0 24px 65px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .premium-metric-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+  @media (min-width: 768px) {
+    .premium-metric-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .premium-metric-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  .metric-tile {
+    position: relative;
+    min-height: 9.5rem;
+    overflow: hidden;
+    padding: 1.25rem;
+  }
+
+  .metric-tile::after {
+    content: '';
+    position: absolute;
+    inset: auto -20% -55% 30%;
+    height: 7rem;
+    border-radius: 999px;
+    background: rgba(91, 184, 212, 0.08);
+    filter: blur(20px);
+    pointer-events: none;
+  }
+
+  .metric-tile-icon {
+    display: inline-flex;
+    width: 2rem;
+    height: 2rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.625rem;
+    border: 1px solid rgba(129, 211, 235, 0.16);
+    color: var(--theme-accent);
+    background: rgba(91, 184, 212, 0.09);
+    margin-bottom: 1rem;
+  }
+
+  .metric-tile-success .metric-tile-icon {
+    color: #34d399;
+    border-color: rgba(52, 211, 153, 0.18);
+    background: rgba(52, 211, 153, 0.08);
+  }
+
+  .metric-tile-warning .metric-tile-icon {
+    color: #fbbf24;
+    border-color: rgba(251, 191, 36, 0.18);
+    background: rgba(251, 191, 36, 0.08);
+  }
+
+  .metric-tile-danger .metric-tile-icon {
+    color: #fb7185;
+    border-color: rgba(251, 113, 133, 0.18);
+    background: rgba(251, 113, 133, 0.08);
+  }
+
+  .premium-value {
+    margin-top: 0.7rem;
+    font-size: clamp(1.85rem, 4vw, 2.6rem);
+    line-height: 1;
+    font-weight: 720;
+    letter-spacing: 0;
+    color: var(--theme-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .premium-detail {
+    margin-top: 0.55rem;
+    font-size: 0.75rem;
+    color: var(--theme-text-muted);
+  }
+
+  .premium-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .premium-timeline-row,
+  .premium-list-row,
+  .premium-mix-row {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    min-height: 4rem;
+    border-radius: 0.625rem;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.025);
+    padding: 0.75rem 0.875rem;
+    transition: border-color 0.16s ease, background 0.16s ease;
+  }
+
+  .premium-timeline-row:hover,
+  .premium-list-row:hover,
+  .premium-mix-row:hover {
+    border-color: rgba(129, 211, 235, 0.18);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .premium-timeline-dot {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 999px;
+    background: var(--theme-accent);
+    box-shadow: 0 0 0 4px rgba(91, 184, 212, 0.10);
+  }
+
+  .premium-timeline-dot-success {
+    background: #34d399;
+    box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.10);
+  }
+
+  .premium-timeline-dot-warning {
+    background: #fbbf24;
+    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.10);
+  }
+
+  .premium-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.5rem;
+    border-radius: 999px;
+    padding: 0 0.55rem;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    font-size: 0.6875rem;
+    font-weight: 650;
+  }
+
+  .premium-pill-success {
+    color: #34d399;
+    border-color: rgba(52, 211, 153, 0.18);
+    background: rgba(52, 211, 153, 0.08);
+  }
+
+  .premium-pill-warning {
+    color: #fbbf24;
+    border-color: rgba(251, 191, 36, 0.18);
+    background: rgba(251, 191, 36, 0.08);
+  }
+
+  .premium-empty {
+    border-radius: 0.75rem;
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+    padding: 2rem;
+    text-align: center;
+    color: var(--theme-text-muted);
+    font-size: 0.875rem;
   }
 
   .desk-icon,
@@ -559,16 +844,6 @@ html {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-  }
-}
-
 /* ── Baptist logo mark SVG ───────────────────────────────────────────── */
 /* The arch/chapel icon used in header */
 .bmg-logo-mark {
@@ -600,11 +875,6 @@ html {
 @keyframes shimmer {
   0%   { background-position: -200% 0; }
   100% { background-position:  200% 0; }
-}
-
-@keyframes pulse-glow {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.6; }
 }
 
 @keyframes float-up {
