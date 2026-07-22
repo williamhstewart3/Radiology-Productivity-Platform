@@ -31,7 +31,7 @@ import type { Modality } from './index';
 
 // ─── Canonical study model returned by every provider ──────────────────────
 
-export type ImportSource = 'manual' | 'ocr' | 'csv' | 'powerscribe';
+export type ImportSource = 'manual' | 'ocr' | 'csv' | 'powerscribe' | 'openai_vision';
 
 /**
  * One study as emitted by any ImportProvider.
@@ -110,6 +110,21 @@ export interface ImportedStudy {
    * null = provider didn't set this (defaults to 'import_default' in pipeline).
    */
   dateTimeSource: import('./index').DateTimeSource | null;
+
+  /** Vision-only: preserved PowerScribe procedure name. */
+  procedureName?: string;
+
+  /** Vision-only: raw Exam Date cell value from the visible worklist. */
+  examDateTime?: string;
+
+  /** Vision-only: raw Modified cell value used for productivity attribution. */
+  modifiedDateTime?: string;
+
+  /** Vision-only: row number returned by the model for accounting. */
+  visionRowNumber?: number;
+
+  /** Vision-only: extraction confidence returned by the model. */
+  visionConfidence?: number;
 }
 
 // ─── Provider interface ────────────────────────────────────────────────────
