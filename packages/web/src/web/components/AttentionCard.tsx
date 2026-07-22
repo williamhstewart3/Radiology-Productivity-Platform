@@ -10,6 +10,7 @@ const SOURCE_LABELS: Record<ImportSource, string> = {
   csv: 'CSV',
   manual: 'Manual',
   powerscribe: 'PowerScribe',
+  openai_vision: 'OpenAI Vision',
 };
 
 function shortTime(iso: string | null | undefined): string | null {

@@ -157,6 +157,44 @@ export async function inspectPowerScribeCapture(
   };
 }
 
+/** Dimension-only preview for Vision. This deliberately never initializes or calls an OCR engine. */
+export async function inspectPowerScribeCaptureForVision(source: Blob): Promise<PowerScribeCapturePrecheck> {
+  const dimensions = await imageDimensions(source);
+  return {
+    detected: false,
+    method: 'none',
+    width: dimensions.width,
+    height: dimensions.height,
+    tableRect: null,
+    suggestedManualGuides: null,
+  };
+}
+
+export async function savePowerScribeManualGuides(
+  source: Blob,
+  profileId: string | null,
+  guides: PowerScribeManualColumnGuides,
+): Promise<void> {
+  const [settings, dimensions] = await Promise.all([ensureUserSettings(), imageDimensions(source)]);
+  const cropKey = profileId ?? 'default';
+  await db.userSettings.put({
+    ...settings,
+    savedPowerScribeCropRegions: {
+      ...settings.savedPowerScribeCropRegions,
+      [cropKey]: {
+        x: guides.left,
+        y: guides.top,
+        width: guides.right - guides.left,
+        height: guides.bottom - guides.top,
+        imageWidth: dimensions.width,
+        imageHeight: dimensions.height,
+        manualColumnGuides: { ...guides },
+      },
+    },
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 async function processProvider(
   provider: ImportProvider,
   context: WorkflowContext,

@@ -25,7 +25,9 @@ import {
   persistActiveReviewSession,
   type TimelineEvent,
 } from '../services/reviewSessionService';
-import { getSavedPowerScribeManualGuides, inspectPowerScribeCapture, processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { getSavedPowerScribeManualGuides, inspectPowerScribeCapture, inspectPowerScribeCaptureForVision, processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, savePowerScribeManualGuides, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
+import { processOpenAiVisionImport } from '../services/openaiVisionWorkflowService';
+import type { OpenAiVisionDiagnostics } from '../services/openaiVisionImport';
 import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
 import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
@@ -55,6 +57,9 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
   if (!debug) return null;
   const debugStats = [
     ['Build commit', __BUILD_COMMIT_SHA__.slice(0, 12)],
+    ['Selected engine', 'advanced_ocr'],
+    ['Actual engine', debug.accounting?.engine ?? debug.ocrProvider],
+    ['OCR used', 'Yes'],
     ['Provider', debug.ocrProvider],
     ['Engine', debug.accounting?.engine ?? debug.ocrProvider],
     ['Crop tier', debug.accounting?.cropMethod ?? debug.crop?.method ?? 'none'],
@@ -318,6 +323,7 @@ interface ImportProps {
 }
 
 type Mode = 'paste' | 'ocr' | 'powerscribe';
+type ProcessingEngine = 'advanced_ocr' | 'openai_vision';
 type Step = 'input' | 'review';
 type ImportToastTone = 'info' | 'success' | 'warning' | 'danger';
 
@@ -814,6 +820,9 @@ export function Import({ onReviewReady }: ImportProps) {
   const [manualRowBands, setManualRowBands] = useState<PowerScribeRowBand[] | null>(null);
   const [savedManualCropLoaded, setSavedManualCropLoaded] = useState(false);
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
+  const [processingEngine, setProcessingEngine] = useState<ProcessingEngine>('advanced_ocr');
+  const [visionDiagnostics, setVisionDiagnostics] = useState<OpenAiVisionDiagnostics | null>(null);
+  const [visionHealth, setVisionHealth] = useState('Checking OpenAI Vision readiness...');
   // Eagerly generated (not lazily inside the persist effect below) so that
   // effect only ever runs once per actual state change instead of twice per
   // batch — the second, self-triggered run used to just overwrite the same
@@ -872,6 +881,13 @@ export function Import({ onReviewReady }: ImportProps) {
   useEffect(() => {
     processingRef.current = processing;
   }, [processing]);
+
+  useEffect(() => {
+    fetch('/api/openai-vision/health')
+      .then(async (response) => ({ response, payload: await response.json() }))
+      .then(({ response, payload }) => setVisionHealth(response.ok ? `${payload.status} · ${payload.model}` : payload.status))
+      .catch(() => setVisionHealth('OpenAI Vision readiness unavailable'));
+  }, []);
 
   useEffect(() => {
     if (!clipboardFile || processing) return;
@@ -1085,12 +1101,34 @@ export function Import({ onReviewReady }: ImportProps) {
     setError(null);
     setOcrFile(file);
     setClipboardFile(null);
+    const selectedTableRect = manualGuidesToSave
+      ? {
+          x: manualGuidesToSave.left,
+          y: manualGuidesToSave.top,
+          width: manualGuidesToSave.right - manualGuidesToSave.left,
+          height: manualGuidesToSave.bottom - manualGuidesToSave.top,
+        }
+      : capturePreview?.tableRect ?? null;
     setCapturePreview(null);
     setManualCropGuides(null);
     setManualRowBands(null);
     setSavedManualCropLoaded(false);
     pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
     try {
+      if (processingEngine === 'openai_vision') {
+        if (!selectedTableRect) throw new Error('Adjust and confirm the final table crop before running OpenAI Vision.');
+        if (manualGuidesToSave) await savePowerScribeManualGuides(file, activeProfile?.id ?? null, manualGuidesToSave);
+        const processed = await processOpenAiVisionImport(file, {
+          profileId: activeProfile?.id ?? null,
+          siteId: activePractice?.id ?? null,
+          sessionId,
+          logDate,
+        }, selectedTableRect);
+        setVisionDiagnostics(processed.diagnostics);
+        setOcrDebug(null);
+        appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
+        return;
+      }
       const usedStructuredHelper = manualColumnCrops
         ? false
         : await processWindowsClipboardCapture(file, timelineSource);
@@ -1107,7 +1145,9 @@ export function Import({ onReviewReady }: ImportProps) {
     if (hash === lastClipboardImageHashRef.current) return;
     lastClipboardImageHashRef.current = hash;
     pushToast('info', 'Screenshot captured', `PowerScribe image received from ${timelineSource}.`);
-    const preview = await inspectPowerScribeCapture(file);
+    const preview = processingEngine === 'openai_vision'
+      ? await inspectPowerScribeCaptureForVision(file)
+      : await inspectPowerScribeCapture(file);
     const settings = await db.userSettings.get('default');
     const cropKey = activeProfile?.id ?? 'default';
     const savedManualGuides = getSavedPowerScribeManualGuides(
@@ -1115,7 +1155,7 @@ export function Import({ onReviewReady }: ImportProps) {
       preview.width,
       preview.height,
     );
-    if (shouldAutoProcessRecognizedCapture(preview.detected, settings)) {
+    if (processingEngine === 'advanced_ocr' && shouldAutoProcessRecognizedCapture(preview.detected, settings)) {
       pushToast(
         'success',
         'PowerScribe table detected — processing automatically',
@@ -1267,6 +1307,21 @@ export function Import({ onReviewReady }: ImportProps) {
 
       {mode === 'ocr' && (
         <Card className="space-y-4">
+          <div className="space-y-2 rounded-[10px] border border-rd-separator bg-rd-surface-2 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[12px] font-medium uppercase tracking-[0.06em] text-rd-label-secondary">Extraction engine</p>
+              <span className="text-[11px] text-rd-label-secondary">OCR used: {processingEngine === 'advanced_ocr' ? 'Yes' : 'No'}</span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button type="button" onClick={() => setProcessingEngine('advanced_ocr')} className={cn('min-h-11 rounded-[10px] border px-3 text-left text-[13px]', processingEngine === 'advanced_ocr' ? 'border-rd-label-primary bg-rd-surface text-rd-label-primary' : 'border-rd-separator text-rd-label-secondary')}>
+                Advanced OCR
+              </button>
+              <button type="button" onClick={() => setProcessingEngine('openai_vision')} className={cn('min-h-11 rounded-[10px] border px-3 text-left text-[13px]', processingEngine === 'openai_vision' ? 'border-rd-label-primary bg-rd-surface text-rd-label-primary' : 'border-rd-separator text-rd-label-secondary')}>
+                OpenAI Vision — Experimental
+              </button>
+            </div>
+            <p className="text-[11px] text-rd-label-secondary">{visionHealth}</p>
+          </div>
           {clipboardFile && !processing && (
             <div className="space-y-3 rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
               <p className="text-[13px] font-semibold text-rd-label-primary">Review capture before processing</p>
@@ -1381,6 +1436,19 @@ export function Import({ onReviewReady }: ImportProps) {
             </p>
           </div>
           <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
+          {visionDiagnostics && (
+            <details className="rounded-[10px] border border-rd-separator bg-rd-surface-2 p-3 text-[12px]">
+              <summary className="cursor-pointer font-semibold text-rd-label-primary">OpenAI Vision diagnostics · {visionDiagnostics.extractedRows} extracted</summary>
+              <div className="mt-2 grid gap-1 font-mono text-[11px] text-rd-label-secondary sm:grid-cols-2">
+                <span>Build: {visionDiagnostics.buildCommit.slice(0, 12)}</span><span>Selected: {visionDiagnostics.selectedEngine}</span>
+                <span>Actual: {visionDiagnostics.actualEngine}</span><span>OCR used: {visionDiagnostics.ocrUsed}</span>
+                <span>Model: {visionDiagnostics.model}</span><span>Duration: {visionDiagnostics.extractionDurationSeconds.toFixed(2)}s</span>
+                <span>Valid: {visionDiagnostics.validRows}</span><span>Unresolved: {visionDiagnostics.unresolvedRows}</span>
+                <span>Accounted: {visionDiagnostics.downstreamAccountedRows}</span>
+                <span>Crop: {JSON.stringify(visionDiagnostics.cropCoordinates)}</span>
+              </div>
+            </details>
+          )}
           {error && <p className="text-[13px] text-rd-negative">{error}</p>}
         </Card>
       )}
