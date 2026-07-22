@@ -131,7 +131,7 @@ describe('OpenAI Vision implementation boundaries', () => {
   });
 
   test('API key remains server-side', () => {
-    const apiSource = readFileSync('src/api/index.ts', 'utf8');
+    const apiSource = readFileSync('src/api/openaiVisionExtraction.ts', 'utf8');
     const importPageSource = readFileSync('src/web/pages/Import.tsx', 'utf8');
 
     expect(apiSource).toContain('process.env.OPENAI_API_KEY');
@@ -143,11 +143,10 @@ describe('OpenAI Vision implementation boundaries', () => {
   test('experimental Vision mode has no silent OCR fallback in the UI branch', () => {
     const importPageSource = readFileSync('src/web/pages/Import.tsx', 'utf8');
     const visionBranchStart = importPageSource.indexOf("processingEngine === 'openai_vision'");
-    const ocrCall = importPageSource.indexOf('processOcrImport', visionBranchStart);
     const ocrBranch = importPageSource.indexOf(": await processOcrImport", visionBranchStart);
 
     expect(visionBranchStart).toBeGreaterThan(0);
-    expect(ocrCall).toBe(ocrBranch);
+    expect(importPageSource.slice(visionBranchStart, ocrBranch)).not.toContain('processOcrImport');
   });
 
   test('institution dictionary/CPT matching runs before duplicate detection in the pipeline', () => {
