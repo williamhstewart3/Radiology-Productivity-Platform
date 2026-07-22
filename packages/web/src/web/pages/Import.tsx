@@ -330,6 +330,33 @@ interface RuntimeExtractionDiagnostics {
   modelReturned: string | null; cropCoordinates: unknown; rowsReturnedDirectlyByVision: number;
   rowsEnteringSharedPipeline: number; fallbackUsed: boolean; fallbackReason: string | null; buildCommit: string;
 }
+
+function RuntimeDiagnosticsCard({ diagnostics }: { diagnostics: RuntimeExtractionDiagnostics | null }) {
+  if (!diagnostics) return null;
+  return (
+    <details open className="rounded-[10px] border border-rd-separator bg-rd-surface-2 p-3 text-[12px]">
+      <summary className="cursor-pointer font-semibold text-rd-label-primary">Extraction execution diagnostics</summary>
+      <div className="mt-2 grid gap-1 font-mono text-[11px] text-rd-label-secondary sm:grid-cols-2">
+        <span>Selected engine: {diagnostics.selectedEngine}</span>
+        <span>Actual engine invoked: {diagnostics.actualEngine}</span>
+        <span>Extractor provider class: {diagnostics.extractorProviderClass}</span>
+        <span>OpenAI endpoint called: {diagnostics.openAiEndpointCalled ? 'Yes' : 'No'}</span>
+        <span>OpenAI response received: {diagnostics.openAiResponseReceived ? 'Yes' : 'No'}</span>
+        <span>OCR provider called: {diagnostics.ocrProviderCalled ? 'Yes' : 'No'}</span>
+        <span>Tesseract called: {diagnostics.tesseractCalled ? 'Yes' : 'No'}</span>
+        <span>OCR reconstruction called: {diagnostics.ocrReconstructionCalled ? 'Yes' : 'No'}</span>
+        <span>Model requested: {diagnostics.modelRequested ?? 'n/a'}</span>
+        <span>Model returned: {diagnostics.modelReturned ?? 'n/a'}</span>
+        <span>Crop sent to Vision: {JSON.stringify(diagnostics.cropCoordinates)}</span>
+        <span>Rows returned directly by Vision: {diagnostics.rowsReturnedDirectlyByVision}</span>
+        <span>Rows entering shared pipeline: {diagnostics.rowsEnteringSharedPipeline}</span>
+        <span>Fallback used: {diagnostics.fallbackUsed ? 'Yes' : 'No'}</span>
+        <span>Fallback reason: {diagnostics.fallbackReason ?? 'None'}</span>
+        <span>Build commit SHA: {diagnostics.buildCommit.slice(0, 12)}</span>
+      </div>
+    </details>
+  );
+}
 type Step = 'input' | 'review';
 type ImportToastTone = 'info' | 'success' | 'warning' | 'danger';
 
@@ -1240,7 +1267,7 @@ export function Import({ onReviewReady }: ImportProps) {
   }
 
   if (step === 'review') {
-    return <CaptureProcessingState />;
+    return <div className="mx-auto max-w-2xl space-y-4"><CaptureProcessingState /><RuntimeDiagnosticsCard diagnostics={extractionDiagnostics} /></div>;
   }
 
   // ── Input screen ──────────────────────────────────────────────────────────
@@ -1472,29 +1499,7 @@ export function Import({ onReviewReady }: ImportProps) {
             </p>
           </div>
           <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
-          {extractionDiagnostics && (
-            <details className="rounded-[10px] border border-rd-separator bg-rd-surface-2 p-3 text-[12px]">
-              <summary className="cursor-pointer font-semibold text-rd-label-primary">Extraction execution diagnostics</summary>
-              <div className="mt-2 grid gap-1 font-mono text-[11px] text-rd-label-secondary sm:grid-cols-2">
-                <span>Selected engine: {extractionDiagnostics.selectedEngine}</span>
-                <span>Actual engine invoked: {extractionDiagnostics.actualEngine}</span>
-                <span>Extractor provider class: {extractionDiagnostics.extractorProviderClass}</span>
-                <span>OpenAI endpoint called: {extractionDiagnostics.openAiEndpointCalled ? 'Yes' : 'No'}</span>
-                <span>OpenAI response received: {extractionDiagnostics.openAiResponseReceived ? 'Yes' : 'No'}</span>
-                <span>OCR provider called: {extractionDiagnostics.ocrProviderCalled ? 'Yes' : 'No'}</span>
-                <span>Tesseract called: {extractionDiagnostics.tesseractCalled ? 'Yes' : 'No'}</span>
-                <span>OCR reconstruction called: {extractionDiagnostics.ocrReconstructionCalled ? 'Yes' : 'No'}</span>
-                <span>Model requested: {extractionDiagnostics.modelRequested ?? 'n/a'}</span>
-                <span>Model returned: {extractionDiagnostics.modelReturned ?? 'n/a'}</span>
-                <span>Crop sent to Vision: {JSON.stringify(extractionDiagnostics.cropCoordinates)}</span>
-                <span>Rows returned directly by Vision: {extractionDiagnostics.rowsReturnedDirectlyByVision}</span>
-                <span>Rows entering shared pipeline: {extractionDiagnostics.rowsEnteringSharedPipeline}</span>
-                <span>Fallback used: {extractionDiagnostics.fallbackUsed ? 'Yes' : 'No'}</span>
-                <span>Fallback reason: {extractionDiagnostics.fallbackReason ?? 'None'}</span>
-                <span>Build commit SHA: {extractionDiagnostics.buildCommit.slice(0, 12)}</span>
-              </div>
-            </details>
-          )}
+          <RuntimeDiagnosticsCard diagnostics={extractionDiagnostics} />
           {error && <p className="text-[13px] text-rd-negative">{error}</p>}
         </Card>
       )}
