@@ -54,6 +54,7 @@ function OcrDebugPanel({ debug, imageFile }: { debug: ProcessedImportResult['ocr
 
   if (!debug) return null;
   const debugStats = [
+    ['Build commit', __BUILD_COMMIT_SHA__.slice(0, 12)],
     ['Provider', debug.ocrProvider],
     ['Engine', debug.accounting?.engine ?? debug.ocrProvider],
     ['Crop tier', debug.accounting?.cropMethod ?? debug.crop?.method ?? 'none'],

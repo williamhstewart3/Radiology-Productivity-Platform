@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 
+declare const __BUILD_COMMIT_SHA__: string;
+
 interface ImportMetaEnv {
   readonly VITE_ENABLE_SUPABASE_SYNC?: string;
   readonly VITE_SUPABASE_URL?: string;
