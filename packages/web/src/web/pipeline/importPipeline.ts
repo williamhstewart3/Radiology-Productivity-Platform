@@ -55,7 +55,15 @@ function productivityRelevant(candidate: MatchCandidate): boolean {
   return candidate.modifier === '26' && (candidate.workRvu ?? 0) > 0;
 }
 
-function reviewReasonFor(top: MatchCandidate | undefined, candidates: MatchCandidate[], duplicateStatus: DuplicateStatus): string | null {
+function reviewReasonFor(
+  study: ImportedStudy,
+  top: MatchCandidate | undefined,
+  candidates: MatchCandidate[],
+  duplicateStatus: DuplicateStatus,
+): string | null {
+  if (study.source === 'openai_vision' && (study.visionConfidence ?? study.dateTimeConfidence ?? 1) < 0.75) {
+    return 'Low-confidence Vision extraction';
+  }
   if (!top) return 'New or unknown exam';
   if (!productivityRelevant(top)) return 'Not modifier 26 productivity RVU';
   if (duplicateStatus === 'possible') return 'Possible duplicate';
@@ -115,7 +123,7 @@ export async function runImportPipeline(
         ? null
         : (dupeResult?.match?.existingLog.id ?? null);
 
-    const reviewReason = reviewReasonFor(top, candidates, dupStatus);
+    const reviewReason = reviewReasonFor(study, top, candidates, dupStatus);
     const autoApprovalLevel =
       top?.method === 'alias_match' && top.confidence >= 0.99 && dupStatus === null
         ? 'silent'
