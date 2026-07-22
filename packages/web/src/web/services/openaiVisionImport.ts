@@ -92,7 +92,7 @@ export function visionRowsToImportedStudies(
       source: 'openai_vision',
       importedAt: now,
       dateTimeConfidence: row.confidence,
-      dateTimeSource: 'openai_vision',
+      dateTimeSource: 'api_future',
       procedureName: row.procedure,
       examDateTime: row.examDateTime,
       modifiedDateTime: row.modifiedDateTime,
