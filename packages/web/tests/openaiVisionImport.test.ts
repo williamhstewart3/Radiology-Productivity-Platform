@@ -81,10 +81,12 @@ describe('OpenAI Vision extractor boundary', () => {
     const page = readFileSync('src/web/pages/Import.tsx', 'utf8');
     const visionBranch = page.slice(page.indexOf("processingEngine === 'openai_vision'"), page.indexOf('const usedStructuredHelper'));
     expect(server).toContain('process.env.OPENAI_API_KEY');
-    expect(page).not.toContain('OPENAI_API_KEY');
+    expect(page).not.toContain('process.env.OPENAI_API_KEY');
     expect(page).not.toContain('VITE_OPENAI');
     expect(visionBranch).not.toContain('processOcrImport');
     expect(page).toContain('OpenAI Vision did not run. No OCR fallback was used.');
+    expect(page).toContain("disabled={visionReadiness.kind !== 'ready'}");
+    expect(page).toContain("if (visionReadiness.kind !== 'ready')");
   });
 
   test('Vision API failure is represented as fail-closed with no OCR fallback', () => {

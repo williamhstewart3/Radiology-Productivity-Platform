@@ -27,7 +27,13 @@ const schema = {
 
 export function openAiVisionHealth() {
   const ready = Boolean(process.env.OPENAI_API_KEY);
-  return { ready, status: ready ? 'OpenAI Vision ready' : 'OPENAI_API_KEY is not configured', model: DEFAULT_OPENAI_VISION_MODEL };
+  return {
+    ready,
+    status: ready ? 'OpenAI Vision ready' : 'OpenAI API key not configured',
+    reason: ready ? null : 'OPENAI_API_KEY is missing from this deployment environment',
+    environment: process.env.VERCEL_ENV ?? 'unknown',
+    model: DEFAULT_OPENAI_VISION_MODEL,
+  };
 }
 
 export async function extractPowerScribeRowsFromImage(payload: unknown) {

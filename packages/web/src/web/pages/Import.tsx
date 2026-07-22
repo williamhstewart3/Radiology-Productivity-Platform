@@ -27,6 +27,7 @@ import {
 } from '../services/reviewSessionService';
 import { getSavedPowerScribeManualGuides, inspectPowerScribeCapture, inspectPowerScribeCaptureForVision, processOcrImport, processStructuredPowerScribeOcrImport, processTextImport, savePowerScribeManualGuides, type PowerScribeCapturePrecheck, type ProcessedImportResult } from '../services/ocrWorkflowService';
 import { processOpenAiVisionImport, VisionExecutionError } from '../services/openaiVisionWorkflowService';
+import { failedVisionDiagnostics } from '../services/openaiVisionImport';
 import { clearGlobalCapture, subscribeGlobalCapture } from '../services/globalCaptureQueue';
 import { watcherReceiptBody } from '../services/notificationReceipts';
 import type { PipelineReviewRow } from '../pipeline/importPipeline';
@@ -323,6 +324,8 @@ interface ImportProps {
 
 type Mode = 'paste' | 'ocr' | 'powerscribe';
 type ProcessingEngine = 'advanced_ocr' | 'openai_vision';
+type VisionReadinessKind = 'checking' | 'ready' | 'key_missing' | 'not_found' | 'backend_error' | 'failed';
+interface VisionReadiness { kind: VisionReadinessKind; message: string; reason: string | null }
 interface RuntimeExtractionDiagnostics {
   selectedEngine: string; actualEngine: string; extractorProviderClass: string;
   openAiEndpointCalled: boolean; openAiResponseReceived: boolean; ocrProviderCalled: boolean;
@@ -855,7 +858,9 @@ export function Import({ onReviewReady }: ImportProps) {
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   const [processingEngine, setProcessingEngine] = useState<ProcessingEngine>('advanced_ocr');
   const [extractionDiagnostics, setExtractionDiagnostics] = useState<RuntimeExtractionDiagnostics | null>(null);
-  const [visionHealth, setVisionHealth] = useState('Checking OpenAI Vision readiness...');
+  const [visionReadiness, setVisionReadiness] = useState<VisionReadiness>({
+    kind: 'checking', message: 'Checking OpenAI Vision readiness...', reason: null,
+  });
   // Eagerly generated (not lazily inside the persist effect below) so that
   // effect only ever runs once per actual state change instead of twice per
   // batch — the second, self-triggered run used to just overwrite the same
@@ -916,10 +921,42 @@ export function Import({ onReviewReady }: ImportProps) {
   }, [processing]);
 
   useEffect(() => {
-    fetch('/api/openai-vision/health')
-      .then(async (response) => ({ response, payload: await response.json() }))
-      .then(({ response, payload }) => setVisionHealth(response.ok ? `${payload.status} · ${payload.model}` : payload.status))
-      .catch(() => setVisionHealth('OpenAI Vision readiness unavailable'));
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch('/api/openai-vision/health', {
+          headers: { Accept: 'application/json' }, cache: 'no-store',
+        });
+        const contentType = response.headers.get('content-type') ?? '';
+        const text = await response.text();
+        let payload: { ready?: boolean; status?: string; reason?: string | null; environment?: string; model?: string; error?: string } | null = null;
+        if (contentType.includes('application/json')) {
+          try { payload = JSON.parse(text); } catch { payload = null; }
+        }
+        let next: VisionReadiness;
+        if (response.status === 404) {
+          next = { kind: 'not_found', message: 'Vision health endpoint not found', reason: 'GET /api/openai-vision/health returned HTTP 404' };
+        } else if (response.redirected || response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
+          next = { kind: 'failed', message: 'Vision readiness check failed: redirected by deployment authentication', reason: `HTTP ${response.status}; final URL ${response.url}` };
+        } else if (!payload) {
+          next = { kind: 'backend_error', message: 'Vision backend error', reason: `Health endpoint returned HTTP ${response.status} with non-JSON content` };
+        } else if (payload.ready === true && response.ok) {
+          next = { kind: 'ready', message: `OpenAI Vision ready · ${payload.model ?? 'model unknown'} · ${payload.environment ?? 'environment unknown'}`, reason: null };
+        } else if (response.status === 503 && /key|OPENAI_API_KEY/i.test(`${payload.status ?? ''} ${payload.reason ?? ''}`)) {
+          next = { kind: 'key_missing', message: 'OpenAI API key not configured', reason: `${payload.reason ?? payload.status ?? 'OPENAI_API_KEY is missing'} · ${payload.environment ?? 'environment unknown'}` };
+        } else {
+          next = { kind: 'backend_error', message: 'Vision backend error', reason: `${payload.error ?? payload.reason ?? payload.status ?? `HTTP ${response.status}`}` };
+        }
+        if (!cancelled) setVisionReadiness(next);
+      } catch (healthError) {
+        if (!cancelled) setVisionReadiness({
+          kind: 'failed',
+          message: `Vision readiness check failed: ${healthError instanceof Error ? healthError.message : 'unknown network error'}`,
+          reason: healthError instanceof Error ? healthError.message : 'unknown network error',
+        });
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -1170,6 +1207,11 @@ export function Import({ onReviewReady }: ImportProps) {
     pushToast('info', 'Processing PowerScribe capture...', 'Extracting studies and preparing the review list.');
     try {
       if (processingEngine === 'openai_vision') {
+        if (visionReadiness.kind !== 'ready') {
+          throw new VisionExecutionError('OpenAI Vision did not run. No OCR fallback was used.', failedVisionDiagnostics(selectedTableRect ?? { x: 0, y: 0, width: 1, height: 1 }, {
+            fallbackReason: null,
+          }));
+        }
         if (!selectedTableRect) throw new Error('Adjust and confirm the final table crop before running OpenAI Vision.');
         if (manualGuidesToSave) await savePowerScribeManualGuides(file, activeProfile?.id ?? null, manualGuidesToSave);
         const processed = await processOpenAiVisionImport(file, {
@@ -1379,11 +1421,13 @@ export function Import({ onReviewReady }: ImportProps) {
               <button type="button" onClick={() => setProcessingEngine('advanced_ocr')} className={cn('min-h-11 rounded-[10px] border px-3 text-left text-[13px]', processingEngine === 'advanced_ocr' ? 'border-rd-label-primary bg-rd-surface text-rd-label-primary' : 'border-rd-separator text-rd-label-secondary')}>
                 Advanced OCR
               </button>
-              <button type="button" onClick={() => setProcessingEngine('openai_vision')} className={cn('min-h-11 rounded-[10px] border px-3 text-left text-[13px]', processingEngine === 'openai_vision' ? 'border-rd-label-primary bg-rd-surface text-rd-label-primary' : 'border-rd-separator text-rd-label-secondary')}>
+              <button type="button" disabled={visionReadiness.kind !== 'ready'} onClick={() => setProcessingEngine('openai_vision')} className={cn('min-h-11 rounded-[10px] border px-3 text-left text-[13px] disabled:cursor-not-allowed disabled:opacity-50', processingEngine === 'openai_vision' ? 'border-rd-label-primary bg-rd-surface text-rd-label-primary' : 'border-rd-separator text-rd-label-secondary')}>
                 OpenAI Vision — Experimental
               </button>
             </div>
-            <p className="text-[11px] text-rd-label-secondary">{visionHealth}</p>
+            <p className={cn('text-[11px]', visionReadiness.kind === 'ready' ? 'text-rd-positive' : visionReadiness.kind === 'checking' ? 'text-rd-label-secondary' : 'text-rd-negative')}>
+              {visionReadiness.message}{visionReadiness.reason ? ` — ${visionReadiness.reason}` : ''}
+            </p>
           </div>
           {clipboardFile && !processing && (
             <div className="space-y-3 rounded-[10px] border border-rd-caution bg-rd-surface-2 p-3">
