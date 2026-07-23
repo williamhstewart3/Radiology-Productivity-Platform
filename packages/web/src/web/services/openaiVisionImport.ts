@@ -40,6 +40,34 @@ export interface OpenAiVisionDiagnostics {
   rowsEnteringSharedPipeline: number;
   fallbackUsed: false;
   fallbackReason: null;
+  failureCode: string | null;
+  failureMessage: string | null;
+  originalImageWidth: number | null;
+  originalImageHeight: number | null;
+  croppedImageWidth: number | null;
+  croppedImageHeight: number | null;
+  finalImageWidth: number | null;
+  finalImageHeight: number | null;
+  imageMimeType: string | null;
+  encodedImageBytes: number;
+  server: {
+    requestSucceeded: boolean;
+    actualModel: string | null;
+    responseStatus: number | null;
+    outputItems: number;
+    outputTextLength: number;
+    hasOutputText: boolean;
+    hasStructuredPayload: boolean;
+    parsedRowsPresent: boolean;
+    rowsBeforeValidation: number;
+    rowsAfterValidation: number;
+    schemaValid: boolean;
+    schemaValidationErrors: string[];
+    imageMimeType: string | null;
+    encodedImageBytes: number;
+    dataUrlConstructed: boolean;
+    imageAttachedToRequest: boolean;
+  } | null;
 }
 
 export function validateVisionExtractionPayload(payload: unknown): OpenAiVisionExtraction {
@@ -131,7 +159,10 @@ export function failedVisionDiagnostics(
     openAiEndpointCalled: false, openAiResponseReceived: false, ocrProviderCalled: false, tesseractCalled: false,
     ocrReconstructionCalled: false, modelRequested: DEFAULT_OPENAI_VISION_MODEL, modelReturned: null,
     cropSentToVision: false, rowsReturnedDirectlyByVision: 0, rowsEnteringSharedPipeline: 0,
-    fallbackUsed: false, fallbackReason: null, ...overrides,
+    fallbackUsed: false, fallbackReason: null, failureCode: null, failureMessage: null,
+    originalImageWidth: null, originalImageHeight: null, croppedImageWidth: null, croppedImageHeight: null,
+    finalImageWidth: null, finalImageHeight: null, imageMimeType: null, encodedImageBytes: 0,
+    server: null, ...overrides,
   };
 }
 

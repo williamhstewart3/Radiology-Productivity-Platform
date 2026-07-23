@@ -342,6 +342,19 @@ interface RuntimeExtractionDiagnostics {
   tesseractCalled: boolean; ocrReconstructionCalled: boolean; modelRequested: string | null;
   modelReturned: string | null; cropCoordinates: unknown; rowsReturnedDirectlyByVision: number;
   rowsEnteringSharedPipeline: number; fallbackUsed: boolean; fallbackReason: string | null; buildCommit: string;
+  failureCode?: string | null; failureMessage?: string | null;
+  originalImageWidth?: number | null; originalImageHeight?: number | null;
+  croppedImageWidth?: number | null; croppedImageHeight?: number | null;
+  finalImageWidth?: number | null; finalImageHeight?: number | null;
+  imageMimeType?: string | null; encodedImageBytes?: number;
+  server?: {
+    requestSucceeded: boolean; actualModel: string | null; responseStatus: number | null;
+    outputItems: number; outputTextLength: number; hasOutputText: boolean;
+    hasStructuredPayload: boolean; parsedRowsPresent: boolean;
+    rowsBeforeValidation: number; rowsAfterValidation: number; schemaValid: boolean;
+    schemaValidationErrors: string[]; imageMimeType: string | null; encodedImageBytes: number;
+    dataUrlConstructed: boolean; imageAttachedToRequest: boolean;
+  } | null;
 }
 
 function RuntimeDiagnosticsCard({ diagnostics }: { diagnostics: RuntimeExtractionDiagnostics | null }) {
@@ -365,8 +378,44 @@ function RuntimeDiagnosticsCard({ diagnostics }: { diagnostics: RuntimeExtractio
         <span>Rows entering shared pipeline: {diagnostics.rowsEnteringSharedPipeline}</span>
         <span>Fallback used: {diagnostics.fallbackUsed ? 'Yes' : 'No'}</span>
         <span>Fallback reason: {diagnostics.fallbackReason ?? 'None'}</span>
+        <span>Failure state: {diagnostics.failureCode ?? 'None'}</span>
+        <span>Failure detail: {diagnostics.failureMessage ?? 'None'}</span>
+        <span>Original image: {diagnostics.originalImageWidth ?? 'n/a'} × {diagnostics.originalImageHeight ?? 'n/a'}</span>
+        <span>Cropped image: {diagnostics.croppedImageWidth ?? 'n/a'} × {diagnostics.croppedImageHeight ?? 'n/a'}</span>
+        <span>Final image sent: {diagnostics.finalImageWidth ?? 'n/a'} × {diagnostics.finalImageHeight ?? 'n/a'}</span>
+        <span>Final image payload: {diagnostics.imageMimeType ?? 'n/a'} · {diagnostics.encodedImageBytes ?? 0} bytes</span>
+        <span>OpenAI request succeeded: {diagnostics.server?.requestSucceeded ? 'Yes' : 'No'}</span>
+        <span>OpenAI HTTP status: {diagnostics.server?.responseStatus ?? 'n/a'}</span>
+        <span>OpenAI output items: {diagnostics.server?.outputItems ?? 0}</span>
+        <span>OpenAI output text length: {diagnostics.server?.outputTextLength ?? 0}</span>
+        <span>Structured payload present: {diagnostics.server?.hasStructuredPayload ? 'Yes' : 'No'}</span>
+        <span>Rows before validation: {diagnostics.server?.rowsBeforeValidation ?? 0}</span>
+        <span>Rows after validation: {diagnostics.server?.rowsAfterValidation ?? 0}</span>
+        <span>Schema valid: {diagnostics.server?.schemaValid ? 'Yes' : 'No'}</span>
+        <span>Image bytes attached: {diagnostics.server?.imageAttachedToRequest ? 'Yes' : 'No'}</span>
+        {Boolean(diagnostics.server?.schemaValidationErrors.length) && (
+          <span className="sm:col-span-2">Schema errors: {diagnostics.server?.schemaValidationErrors.join(' | ')}</span>
+        )}
         <span>Build commit SHA: {diagnostics.buildCommit.slice(0, 12)}</span>
       </div>
+    </details>
+  );
+}
+
+interface VisionCropPreview {
+  imageDataUrl: string; originalWidth: number; originalHeight: number;
+  croppedWidth: number; croppedHeight: number; mimeType: string; encodedBytes: number;
+}
+
+function VisionFinalCropPreview({ crop }: { crop: VisionCropPreview | null }) {
+  if (!crop) return null;
+  return (
+    <details open className="rounded-[10px] border border-rd-separator bg-rd-surface-2 p-3 text-[12px]">
+      <summary className="cursor-pointer font-semibold text-rd-label-primary">Exact final crop sent to OpenAI</summary>
+      <p className="mt-2 font-mono text-[11px] text-rd-label-secondary">
+        Original {crop.originalWidth} × {crop.originalHeight} · Final {crop.croppedWidth} × {crop.croppedHeight} · {crop.mimeType} · {crop.encodedBytes} bytes
+      </p>
+      <img src={crop.imageDataUrl} alt="Exact final crop sent to OpenAI Vision" className="mt-2 block max-h-[420px] w-full rounded-[8px] border border-rd-separator object-contain" />
     </details>
   );
 }
@@ -868,6 +917,7 @@ export function Import({ onReviewReady }: ImportProps) {
   const [ocrDebug, setOcrDebug] = useState<ProcessedImportResult['ocrDebug']>(null);
   const [processingEngine, setProcessingEngine] = useState<ProcessingEngine>('advanced_ocr');
   const [extractionDiagnostics, setExtractionDiagnostics] = useState<RuntimeExtractionDiagnostics | null>(null);
+  const [visionCropPreview, setVisionCropPreview] = useState<VisionCropPreview | null>(null);
   const [visionReadiness, setVisionReadiness] = useState<VisionReadiness>({
     kind: 'checking', message: 'Checking OpenAI Vision readiness...', reason: null,
   });
@@ -1229,7 +1279,7 @@ export function Import({ onReviewReady }: ImportProps) {
           siteId: activePractice?.id ?? null,
           sessionId,
           logDate,
-        }, selectedTableRect);
+        }, selectedTableRect, setVisionCropPreview);
         setExtractionDiagnostics(processed.diagnostics);
         setOcrDebug(null);
         appendPipelineRows(processed.result.reviewRows, processed.result.skippedRows, `${processed.timelineLabel} from ${timelineSource}`);
@@ -1244,7 +1294,9 @@ export function Import({ onReviewReady }: ImportProps) {
     } catch (error) {
       if (processingEngine === 'openai_vision') {
         if (error instanceof VisionExecutionError) setExtractionDiagnostics(error.diagnostics);
-        const message = 'OpenAI Vision did not run. No OCR fallback was used.';
+        const message = error instanceof VisionExecutionError
+          ? `${error.message} No OCR fallback was used.`
+          : `OpenAI Vision failed: ${error instanceof Error ? error.message : 'unknown error'}. No OCR fallback was used.`;
         setError(message);
         pushToast('danger', 'OpenAI Vision failed', message);
         return;
@@ -1319,7 +1371,7 @@ export function Import({ onReviewReady }: ImportProps) {
   }
 
   if (step === 'review') {
-    return <div className="mx-auto max-w-2xl space-y-4"><CaptureProcessingState /><RuntimeDiagnosticsCard diagnostics={extractionDiagnostics} /></div>;
+    return <div className="mx-auto max-w-2xl space-y-4"><CaptureProcessingState /><VisionFinalCropPreview crop={visionCropPreview} /><RuntimeDiagnosticsCard diagnostics={extractionDiagnostics} /></div>;
   }
 
   // ── Input screen ──────────────────────────────────────────────────────────
@@ -1553,6 +1605,7 @@ export function Import({ onReviewReady }: ImportProps) {
             </p>
           </div>
           <OcrDebugPanel debug={ocrDebug} imageFile={ocrFile} />
+          <VisionFinalCropPreview crop={visionCropPreview} />
           <RuntimeDiagnosticsCard diagnostics={extractionDiagnostics} />
           {error && <p className="text-[13px] text-rd-negative">{error}</p>}
         </Card>

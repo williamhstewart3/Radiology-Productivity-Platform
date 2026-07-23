@@ -1,4 +1,4 @@
-import { extractPowerScribeRowsFromImage } from '../src/api/openaiVisionExtraction';
+import { extractPowerScribeRowsFromImage, OpenAiVisionServerError } from '../src/api/openaiVisionExtraction';
 
 type VercelRequest = { method?: string; body?: unknown };
 type VercelResponse = {
@@ -22,10 +22,18 @@ export default async function handler(request: VercelRequest, response: VercelRe
     });
     response.status(500).json({
       error: error instanceof Error ? error.message : 'OpenAI Vision extraction failed',
+      errorCode: error instanceof OpenAiVisionServerError ? error.code : 'backend_error',
+      serverDiagnostics: error instanceof OpenAiVisionServerError ? error.diagnostics : null,
       diagnostics: {
         selectedEngine: 'openai_vision',
         actualEngine: 'openai_vision',
         ocrUsed: 'No',
+        modelRequested: 'gpt-5.6-terra',
+        modelReturned: error instanceof OpenAiVisionServerError ? error.diagnostics.actualModel : null,
+        rowsReturnedDirectlyByVision: error instanceof OpenAiVisionServerError ? error.diagnostics.rowsAfterValidation : 0,
+        rowsEnteringSharedPipeline: 0,
+        openAiEndpointCalled: true,
+        openAiResponseReceived: error instanceof OpenAiVisionServerError ? error.diagnostics.requestSucceeded : false,
       },
     });
   }
