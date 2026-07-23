@@ -1,27 +1,32 @@
 import { extractPowerScribeRowsFromImage } from '../src/api/openaiVisionExtraction';
 
-export default async function handler(request: Request): Promise<Response> {
+type VercelRequest = { method?: string; body?: unknown };
+type VercelResponse = {
+  status: (statusCode: number) => VercelResponse;
+  json: (body: unknown) => void;
+};
+
+export default async function handler(request: VercelRequest, response: VercelResponse): Promise<void> {
   if (request.method !== 'POST') {
-    return Response.json({ error: 'Method not allowed' }, { status: 405 });
+    response.status(405).json({ error: 'Method not allowed' });
+    return;
   }
 
   console.info('[openai-vision] /api/extract-powerscribe request received');
   try {
-    return Response.json(await extractPowerScribeRowsFromImage(await request.json()));
+    const payload = typeof request.body === 'string' ? JSON.parse(request.body) : request.body;
+    response.status(200).json(await extractPowerScribeRowsFromImage(payload));
   } catch (error) {
     console.error('[openai-vision] /api/extract-powerscribe failed', {
       error: error instanceof Error ? error.message : 'unknown error',
     });
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : 'OpenAI Vision extraction failed',
-        diagnostics: {
-          selectedEngine: 'openai_vision',
-          actualEngine: 'openai_vision',
-          ocrUsed: 'No',
-        },
+    response.status(500).json({
+      error: error instanceof Error ? error.message : 'OpenAI Vision extraction failed',
+      diagnostics: {
+        selectedEngine: 'openai_vision',
+        actualEngine: 'openai_vision',
+        ocrUsed: 'No',
       },
-      { status: 500 },
-    );
+    });
   }
 }

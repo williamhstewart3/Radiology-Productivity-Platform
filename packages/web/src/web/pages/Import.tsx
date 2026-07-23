@@ -326,6 +326,16 @@ type Mode = 'paste' | 'ocr' | 'powerscribe';
 type ProcessingEngine = 'advanced_ocr' | 'openai_vision';
 type VisionReadinessKind = 'checking' | 'ready' | 'key_missing' | 'not_found' | 'backend_error' | 'failed';
 interface VisionReadiness { kind: VisionReadinessKind; message: string; reason: string | null }
+
+function formatHealthDetail(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
 interface RuntimeExtractionDiagnostics {
   selectedEngine: string; actualEngine: string; extractorProviderClass: string;
   openAiEndpointCalled: boolean; openAiResponseReceived: boolean; ocrProviderCalled: boolean;
@@ -929,7 +939,7 @@ export function Import({ onReviewReady }: ImportProps) {
         });
         const contentType = response.headers.get('content-type') ?? '';
         const text = await response.text();
-        let payload: { ready?: boolean; status?: string; reason?: string | null; environment?: string; model?: string; error?: string } | null = null;
+        let payload: { ready?: boolean; status?: unknown; reason?: unknown; environment?: string; model?: string; error?: unknown } | null = null;
         if (contentType.includes('application/json')) {
           try { payload = JSON.parse(text); } catch { payload = null; }
         }
@@ -942,10 +952,10 @@ export function Import({ onReviewReady }: ImportProps) {
           next = { kind: 'backend_error', message: 'Vision backend error', reason: `Health endpoint returned HTTP ${response.status} with non-JSON content` };
         } else if (payload.ready === true && response.ok) {
           next = { kind: 'ready', message: `OpenAI Vision ready · ${payload.model ?? 'model unknown'} · ${payload.environment ?? 'environment unknown'}`, reason: null };
-        } else if (response.status === 503 && /key|OPENAI_API_KEY/i.test(`${payload.status ?? ''} ${payload.reason ?? ''}`)) {
-          next = { kind: 'key_missing', message: 'OpenAI API key not configured', reason: `${payload.reason ?? payload.status ?? 'OPENAI_API_KEY is missing'} · ${payload.environment ?? 'environment unknown'}` };
+        } else if (response.status === 503 && /key|OPENAI_API_KEY/i.test(`${formatHealthDetail(payload.status)} ${formatHealthDetail(payload.reason)}`)) {
+          next = { kind: 'key_missing', message: 'OpenAI API key not configured', reason: `${formatHealthDetail(payload.reason ?? payload.status ?? 'OPENAI_API_KEY is missing')} · ${payload.environment ?? 'environment unknown'}` };
         } else {
-          next = { kind: 'backend_error', message: 'Vision backend error', reason: `${payload.error ?? payload.reason ?? payload.status ?? `HTTP ${response.status}`}` };
+          next = { kind: 'backend_error', message: 'Vision backend error', reason: formatHealthDetail(payload.error ?? payload.reason ?? payload.status ?? `HTTP ${response.status}`) };
         }
         if (!cancelled) setVisionReadiness(next);
       } catch (healthError) {
