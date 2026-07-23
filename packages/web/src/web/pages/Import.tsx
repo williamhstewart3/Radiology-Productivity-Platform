@@ -355,6 +355,10 @@ interface RuntimeExtractionDiagnostics {
     schemaValidationErrors: string[]; imageMimeType: string | null; encodedImageBytes: number;
     dataUrlConstructed: boolean; imageAttachedToRequest: boolean;
   } | null;
+  transport?: {
+    requestReceived: boolean; incomingContentType: string;
+    incomingBodyBytes: number; imageFieldPresent: boolean;
+  } | null;
 }
 
 function RuntimeDiagnosticsCard({ diagnostics }: { diagnostics: RuntimeExtractionDiagnostics | null }) {
@@ -393,6 +397,10 @@ function RuntimeDiagnosticsCard({ diagnostics }: { diagnostics: RuntimeExtractio
         <span>Rows after validation: {diagnostics.server?.rowsAfterValidation ?? 0}</span>
         <span>Schema valid: {diagnostics.server?.schemaValid ? 'Yes' : 'No'}</span>
         <span>Image bytes attached: {diagnostics.server?.imageAttachedToRequest ? 'Yes' : 'No'}</span>
+        <span>API request received: {diagnostics.transport?.requestReceived ? 'Yes' : 'No'}</span>
+        <span>Incoming Content-Type: {diagnostics.transport?.incomingContentType ?? 'n/a'}</span>
+        <span>Incoming body bytes: {diagnostics.transport?.incomingBodyBytes ?? 0}</span>
+        <span>Image field present: {diagnostics.transport?.imageFieldPresent ? 'Yes' : 'No'}</span>
         {Boolean(diagnostics.server?.schemaValidationErrors.length) && (
           <span className="sm:col-span-2">Schema errors: {diagnostics.server?.schemaValidationErrors.join(' | ')}</span>
         )}

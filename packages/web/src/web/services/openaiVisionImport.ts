@@ -68,6 +68,12 @@ export interface OpenAiVisionDiagnostics {
     dataUrlConstructed: boolean;
     imageAttachedToRequest: boolean;
   } | null;
+  transport: {
+    requestReceived: boolean;
+    incomingContentType: string;
+    incomingBodyBytes: number;
+    imageFieldPresent: boolean;
+  } | null;
 }
 
 export function validateVisionExtractionPayload(payload: unknown): OpenAiVisionExtraction {
@@ -162,7 +168,7 @@ export function failedVisionDiagnostics(
     fallbackUsed: false, fallbackReason: null, failureCode: null, failureMessage: null,
     originalImageWidth: null, originalImageHeight: null, croppedImageWidth: null, croppedImageHeight: null,
     finalImageWidth: null, finalImageHeight: null, imageMimeType: null, encodedImageBytes: 0,
-    server: null, ...overrides,
+    server: null, transport: null, ...overrides,
   };
 }
 

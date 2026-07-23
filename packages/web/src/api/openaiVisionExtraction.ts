@@ -34,6 +34,7 @@ export class OpenAiVisionServerError extends Error {
     readonly code: 'request_failed' | 'no_structured_output' | 'empty_rows' | 'schema_validation_failed' | 'image_payload_rejected',
     message: string,
     readonly diagnostics: OpenAiServerDiagnostics,
+    readonly upstream: { status: number | null; code: string | null; type: string | null; requestId: string | null } | null = null,
   ) {
     super(message);
     this.name = 'OpenAiVisionServerError';
@@ -101,7 +102,7 @@ export async function extractPowerScribeRowsFromImage(payload: unknown) {
     dataUrlConstructed: true, imageAttachedToRequest: true,
   });
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not configured on the server');
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 45_000, maxRetries: 0 });
   console.info('[openai-vision] OpenAI request started', { modelRequested: DEFAULT_OPENAI_VISION_MODEL });
   let response;
   let responseStatus: number | null = null;
@@ -120,8 +121,11 @@ export async function extractPowerScribeRowsFromImage(payload: unknown) {
   } catch (error) {
     const diagnostics = { ...imageDiagnostics, responseStatus };
     const message = error instanceof Error ? error.message : 'Unknown OpenAI request error';
-    console.error('[openai-vision] OpenAI request failed', { ...diagnostics, modelRequested: DEFAULT_OPENAI_VISION_MODEL, error: message });
-    throw new OpenAiVisionServerError('request_failed', `OpenAI request failed: ${message}`, diagnostics);
+    const upstream = sanitizeOpenAiError(error);
+    console.error('[openai-vision] OpenAI request failed', {
+      ...diagnostics, modelRequested: DEFAULT_OPENAI_VISION_MODEL, error: message, ...upstream,
+    });
+    throw new OpenAiVisionServerError('request_failed', `OpenAI request failed: ${message}`, diagnostics, upstream);
   }
   const responseDiagnostics = {
     ...imageDiagnostics,
@@ -186,4 +190,18 @@ export async function extractPowerScribeRowsFromImage(payload: unknown) {
     rowsEnteringSharedPipeline: extraction.rows.length, fallbackUsed: false as const, fallbackReason: null,
     server: finalDiagnostics,
   } };
+}
+
+function sanitizeOpenAiError(error: unknown) {
+  const candidate = error as {
+    status?: unknown; code?: unknown; type?: unknown; request_id?: unknown; requestID?: unknown;
+  };
+  return {
+    status: typeof candidate?.status === 'number' ? candidate.status : null,
+    code: typeof candidate?.code === 'string' ? candidate.code : null,
+    type: typeof candidate?.type === 'string' ? candidate.type : error instanceof Error ? error.name : null,
+    requestId: typeof candidate?.request_id === 'string'
+      ? candidate.request_id
+      : typeof candidate?.requestID === 'string' ? candidate.requestID : null,
+  };
 }

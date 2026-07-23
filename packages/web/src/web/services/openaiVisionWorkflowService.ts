@@ -56,7 +56,17 @@ export async function processOpenAiVisionImport(
       ...(payload?.diagnostics ?? {}),
       server: payload?.serverDiagnostics ?? payload?.diagnostics?.server ?? null,
       failureCode: payload?.errorCode ?? null,
-      failureMessage: payload?.error ? formatPayloadError(payload.error) : null,
+      failureMessage: payload?.error
+        ? [
+            formatPayloadError(payload.error),
+            payload?.errorType ? `type=${payload.errorType}` : null,
+            payload?.openAiStatus ? `upstream_status=${payload.openAiStatus}` : null,
+            payload?.openAiCode ? `upstream_code=${payload.openAiCode}` : null,
+            payload?.openAiRequestId ? `request_id=${payload.openAiRequestId}` : null,
+            payload?.failureStage ? `stage=${payload.failureStage}` : null,
+          ].filter(Boolean).join(' · ')
+        : null,
+      transport: payload?.transportDiagnostics ?? payload?.diagnostics?.transport ?? null,
     });
     if (!response.ok) throw new Error(payload?.error ? formatPayloadError(payload.error) : `OpenAI Vision extraction failed (${response.status})`);
     const extraction = validateVisionExtractionPayload({ rows: payload?.rows });
